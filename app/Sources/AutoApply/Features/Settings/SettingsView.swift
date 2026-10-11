@@ -151,6 +151,43 @@ private struct GeneralSettingsTab: View {
             Toggle("Play sounds", isOn: $sounds)
             Toggle("Trackpad haptics", isOn: $haptics)
         }
+        UpdatesSettingsRow()
+    }
+}
+
+/// Settings → General → Updates (GitHub Releases).
+private struct UpdatesSettingsRow: View {
+    @AppStorage(Updater.autoCheckKey) private var autoCheck = true
+    @AppStorage(Updater.autoInstallKey) private var autoInstall = true
+    private var updater: Updater { Updater.shared }
+
+    var body: some View {
+        SettingsRow("Updates", help: "Updates come from the project's GitHub Releases. Free; nothing but the version check leaves your Mac.") {
+            Toggle("Check for updates automatically", isOn: $autoCheck)
+            Toggle("Download updates and install them when I quit", isOn: $autoInstall).disabled(!autoCheck)
+            HStack(spacing: Space.s) {
+                Text("Version \(Updater.currentVersion)").font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                Text(status).font(Typography.callout).foregroundStyle(Palette.textTertiary)
+                Spacer()
+                if let v = updater.readyVersion {
+                    Button("Restart to Update to \(v)") { updater.installAndRelaunch() }.buttonStyle(.glass)
+                } else {
+                    Button("Check Now") { Task { await updater.check(userInitiated: true) } }
+                        .disabled(updater.phase == .checking)
+                }
+            }
+        }
+    }
+
+    private var status: String {
+        switch updater.phase {
+        case .idle: ""
+        case .checking: "Checking…"
+        case .upToDate: "· Up to date"
+        case .downloading(let v): "· Downloading \(v)…"
+        case .ready(let v): "· \(v) ready"
+        case .failed(let m): "· \(m)"
+        }
     }
 }
 

@@ -7,6 +7,12 @@ struct AppCommands: Commands {
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            let updater = Updater.shared
+            Button(updater.readyVersion.map { "Restart to Update to \($0)…" } ?? "Check for Updates…") {
+                Task { await updater.check(userInitiated: true) }
+            }
+        }
         CommandGroup(after: .sidebar) {
             Button(AppShortcut.toggleInspector.title) { store.router.toggleInspector() }.keyboardShortcut(.toggleInspector)
             Button(AppShortcut.toggleSidebar.title) { store.router.toggleSidebar() }.keyboardShortcut(.toggleSidebar)

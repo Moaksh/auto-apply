@@ -13,6 +13,7 @@ struct AutoApplyApp: App {
         ScreenRegistry.shared.discoverFeatures()
         store.start()
         AppNotifier.shared.start(store: store)
+        Updater.shared.start(store: store)
         // A shared build updated to a new version re-installs its engine copy in the background.
         if DaemonControl.runtimeOutdated && FileManager.default.fileExists(
             atPath: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/com.autoapply.daemon.plist").path) {
@@ -102,4 +103,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated { Updater.shared.installOnQuitIfReady() }
+    }
 }

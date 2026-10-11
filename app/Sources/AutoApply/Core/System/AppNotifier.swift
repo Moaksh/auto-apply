@@ -50,6 +50,12 @@ final class AppNotifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
+    /// Update available / ready (from Updater); clicking restarts into it or opens the prompt.
+    func postUpdate(title: String, body: String) {
+        guard started else { return }
+        post(id: "update-\(title)", title: title, body: body, route: ["route": "update"])
+    }
+
     private func jobLabel(_ jobID: Int, _ store: AppStore) -> String? {
         store.jobs.job(id: jobID).map { "\($0.company) · \($0.title)" }
     }
@@ -90,6 +96,8 @@ final class AppNotifier: NSObject, UNUserNotificationCenterDelegate {
             if let cluster = info["cluster"] { InboxModel.shared(for: store).select(cluster) }
         case "review":
             store.router.go(.review)
+        case "update":
+            Updater.shared.restartPrompt()
         case "job":
             if let id = info["job"].flatMap(Int.init) { store.router.openJob(id: id) }
         default:
