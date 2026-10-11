@@ -13,6 +13,11 @@ struct AutoApplyApp: App {
         ScreenRegistry.shared.discoverFeatures()
         store.start()
         AppNotifier.shared.start(store: store)
+        // A shared build updated to a new version re-installs its engine copy in the background.
+        if DaemonControl.runtimeOutdated && FileManager.default.fileExists(
+            atPath: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/com.autoapply.daemon.plist").path) {
+            Task { await DaemonControl.ensureRunning(timeout: .seconds(60)) }
+        }
         _store = State(initialValue: store)
     }
 

@@ -14,6 +14,15 @@ cp "$BIN/AutoApply" "$OUT/Contents/MacOS/AutoApply"
 # SwiftPM resource bundles (if any) live next to the binary.
 for b in "$BIN"/*.bundle; do [ -e "$b" ] && cp -R "$b" "$OUT/Contents/Resources/"; done
 
+# Self-contained: ship the Python engine + the DB contract inside the app. On a tester's Mac the app
+# copies them to ~/Library/Application Support/AutoApply/runtime and installs them (uv fetches Python).
+REPO="$(cd "$APP_DIR/.." && pwd)"
+rsync -a --delete --exclude ".venv" --exclude "__pycache__" --exclude ".pytest_cache" --exclude "tests" \
+  "$REPO/engine/autoapply" "$REPO/engine/pyproject.toml" "$REPO/engine/uv.lock" "$REPO/engine/.python-version" \
+  "$REPO/engine/README.md" "$OUT/Contents/Resources/engine/"
+mkdir -p "$OUT/Contents/Resources/contract" && cp "$REPO/contract/schema.sql" "$OUT/Contents/Resources/contract/"
+BUILD_STAMP="$(date +%Y%m%d%H%M%S)"
+
 # Icon (best effort)
 ICON_KEY=""
 TMP="$(mktemp -d)"
@@ -40,7 +49,7 @@ cat > "$OUT/Contents/Info.plist" <<PLIST
   <key>CFBundleExecutable</key><string>AutoApply</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleVersion</key><string>${BUILD_STAMP}</string>
   <key>LSMinimumSystemVersion</key><string>${MIN:-26}.0</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>
   <key>NSHighResolutionCapable</key><true/>

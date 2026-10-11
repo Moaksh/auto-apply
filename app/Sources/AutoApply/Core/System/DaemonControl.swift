@@ -4,26 +4,73 @@ import Foundation
 
 enum DaemonControl {
     static let launchAgentLabel = "com.autoapply.daemon"
-    /// A working one-shot install: writes the plist and bootstraps it via the engine's own installer.
+    /// One-shot setup that works on a fresh Mac: installs uv if missing (it fetches Python itself),
+    /// puts the engine in place (the copy shipped inside the app, or this repo checkout in development),
+    /// installs its dependencies + the Playwright browser, then installs and starts the LaunchAgent.
     static var installHint: String {
-        "cd \(shellQuote(engineDirectory().path)) && uv run python -m autoapply.launchd_install install"
+        let pathLine = "export PATH=\"$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH\""
+        var lines = ["set -e", pathLine,
+                     "command -v uv >/dev/null 2>&1 || { echo 'Installing uv…'; curl -LsSf https://astral.sh/uv/install.sh | sh; }",
+                     pathLine]
+        if let bundled = bundledEngine, devCheckout == nil {
+            let rt = runtimeDirectory.path
+            lines += [
+                "mkdir -p \(shellQuote(rt))",
+                "rsync -a --delete --exclude .venv \(shellQuote(bundled.path + "/")) \(shellQuote(rt + "/engine/"))",
+                "rsync -a --delete \(shellQuote(bundled.deletingLastPathComponent().appendingPathComponent("contract").path + "/")) \(shellQuote(rt + "/contract/"))",
+                "cd \(shellQuote(rt + "/engine"))",
+            ]
+        } else {
+            lines.append("cd \(shellQuote(engineDirectory().path))")
+        }
+        lines += [
+            "echo 'Installing the agent (first time takes a few minutes)…'",
+            "uv sync --frozen --quiet",
+            "uv run playwright install chromium",
+            "uv run python -m autoapply.launchd_install install",
+            "echo \(shellQuote(bundleStamp)) > \(shellQuote(runtimeDirectory.appendingPathComponent(".bundle-version").path)) 2>/dev/null || true",
+        ]
+        return lines.joined(separator: "\n")
     }
 
-    /// The `engine/` folder of this checkout: `$AUTOAPPLY_ENGINE_DIR`, else found by walking up from the
-    /// app bundle / executable (app/build/AutoApply.app -> repo root), else `~/github/auto_apply/engine`.
-    static func engineDirectory() -> URL {
+    /// Engine shipped inside AutoApply.app (Contents/Resources/engine), when this is a distributable build.
+    static var bundledEngine: URL? {
+        guard let res = Bundle.main.resourceURL?.appendingPathComponent("engine"),
+              FileManager.default.fileExists(atPath: res.appendingPathComponent("pyproject.toml").path) else { return nil }
+        return res
+    }
+
+    /// Where a shared build installs the engine: ~/Library/Application Support/AutoApply/runtime.
+    static var runtimeDirectory: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/AutoApply/runtime")
+    }
+
+    static var bundleStamp: String { Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "dev" }
+
+    /// A shared build whose engine copy is older than the app (or not installed yet) needs a (re)install.
+    static var runtimeOutdated: Bool {
+        guard bundledEngine != nil, devCheckout == nil else { return false }
+        let stamp = try? String(contentsOf: runtimeDirectory.appendingPathComponent(".bundle-version"), encoding: .utf8)
+        return stamp?.trimmingCharacters(in: .whitespacesAndNewlines) != bundleStamp
+    }
+
+    /// A source checkout next to the app (development): app/build/AutoApply.app -> repo/engine.
+    static var devCheckout: URL? {
         let fm = FileManager.default
-        var candidates: [URL] = []
-        if let env = ProcessInfo.processInfo.environment["AUTOAPPLY_ENGINE_DIR"] { candidates.append(URL(fileURLWithPath: env)) }
-        for start in [Bundle.main.bundleURL, Bundle.main.executableURL].compactMap({ $0 }) {
-            var dir = start
-            for _ in 0..<8 {
-                dir = dir.deletingLastPathComponent()
-                candidates.append(dir.appendingPathComponent("engine"))
-            }
+        if let env = ProcessInfo.processInfo.environment["AUTOAPPLY_ENGINE_DIR"] { return URL(fileURLWithPath: env) }
+        var dir = Bundle.main.bundleURL
+        for _ in 0..<4 {
+            dir = dir.deletingLastPathComponent()
+            let e = dir.appendingPathComponent("engine")
+            if fm.fileExists(atPath: e.appendingPathComponent("pyproject.toml").path),
+               fm.fileExists(atPath: dir.appendingPathComponent("contract/schema.sql").path) { return e }
         }
-        candidates.append(fm.homeDirectoryForCurrentUser.appendingPathComponent("github/auto_apply/engine"))
-        return candidates.first { fm.fileExists(atPath: $0.appendingPathComponent("pyproject.toml").path) } ?? candidates.last!
+        return nil
+    }
+
+    /// The engine folder in use: the dev checkout, else the installed runtime copy.
+    static func engineDirectory() -> URL {
+        devCheckout ?? runtimeDirectory.appendingPathComponent("engine")
     }
 
     private static func shellQuote(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
@@ -45,12 +92,13 @@ enum DaemonControl {
         let plist = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents/\(launchAgentLabel).plist").path
         var started = false
-        if FileManager.default.fileExists(atPath: plist) {
+        if FileManager.default.fileExists(atPath: plist) && !runtimeOutdated {
             // Not -k: a healthy daemon is left alone.
             started = await ProcessRunner.run("/bin/launchctl", ["kickstart", target], timeout: .seconds(10)).status == 0
         }
         if !started {
-            let r = await ProcessRunner.run("/bin/zsh", ["-lc", installHint], timeout: .seconds(120))
+            // First install on a fresh Mac downloads Python, packages and a browser: allow several minutes.
+            let r = await ProcessRunner.run("/bin/zsh", ["-lc", installHint], timeout: .seconds(900))
             started = r.status == 0
         }
         guard started else { return false }

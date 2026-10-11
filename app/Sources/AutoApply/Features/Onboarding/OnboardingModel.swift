@@ -321,7 +321,7 @@ final class OnboardingModel {
     /// browser login, so it opens Terminal instead.
     func runFix(for name: SystemCheckItem.Name) async {
         guard let i = checks.firstIndex(where: { $0.name == name }), let command = checks[i].item?.fixCommand else { return }
-        if command.contains("login") {
+        if command.contains("login") || command.contains("claude.ai/install") {  // interactive: needs Terminal
             await DaemonControl.openInTerminal(command)
             checks[i].fixOutput = "$ \(command)\n(opened in Terminal)"
             return

@@ -95,9 +95,9 @@ enum ProcessRunner {
 
 struct LocalSystemChecker: SystemChecking {
     func checkLocalTools() async -> [SystemCheckItem] {
-        async let claude = check(.claudeCli, tool: "claude", fix: "npm install -g @anthropic-ai/claude-code")
-        async let uv = check(.uv, tool: "uv", fix: "brew install uv")
-        async let node = check(.node, tool: "node", fix: "brew install node", minimumMajor: 20)
+        async let claude = check(.claudeCli, tool: "claude", fix: "curl -fsSL https://claude.ai/install.sh | bash && claude")
+        async let uv = check(.uv, tool: "uv", fix: "curl -LsSf https://astral.sh/uv/install.sh | sh")
+        async let node = check(.node, tool: "node", fix: "if command -v brew >/dev/null; then brew install node; else open https://nodejs.org/en/download; fi", minimumMajor: 20)
         return await [claude, uv, node]
     }
 
@@ -159,7 +159,7 @@ enum SystemCheckMerger {
         if byName[.chrome] == nil {
             let chrome = FileManager.default.fileExists(atPath: "/Applications/Google Chrome.app")
             byName[.chrome] = SystemCheckItem(name: .chrome, ok: chrome, required: false, version: nil,
-                                              detail: chrome ? "Google Chrome" : "waiting", fixCommand: chrome ? nil : "brew install --cask google-chrome")
+                                              detail: chrome ? "Google Chrome" : "waiting", fixCommand: chrome ? nil : "if command -v brew >/dev/null; then brew install --cask google-chrome; else open https://www.google.com/chrome/; fi")
         }
         return order.compactMap { byName[$0] }
     }

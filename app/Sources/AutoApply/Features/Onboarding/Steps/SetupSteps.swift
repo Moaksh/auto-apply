@@ -90,6 +90,10 @@ private struct SystemCheckRowView: View {
 
     private func fixTitle(_ item: SystemCheckItem) -> String {
         guard let cmd = item.fixCommand else { return "Fix" }
+        if cmd.contains("claude.ai/install") { return "Install & log in…" }
+        if cmd.contains("astral.sh/uv") { return "Install uv" }
+        if cmd.contains("nodejs") { return "Install Node" }
+        if cmd.contains("chrome") { return "Install Chrome" }
         if cmd.hasPrefix("brew") { return "Install with brew" }
         if cmd.contains("login") { return "Log in…" }
         if cmd.hasPrefix("npm") { return "Install with npm" }
