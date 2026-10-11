@@ -1192,7 +1192,7 @@ class Pipeline:
                 q, _created = db.add_question(
                     self.conn, canonical_question=u.question.label, job_id=job.id, field_type=u.question.field_type,
                     options=u.question.options, never_guess_key=u.never_guess_key, reason=reason,
-                    suggested_answer=u.suggested_answer, suggested_confidence=u.confidence,
+                    suggested_answer=u.suggested_answer, suggested_confidence=u.confidence, suggested_note=u.note,
                 )
                 touched.append(q.cluster_id)
         try:

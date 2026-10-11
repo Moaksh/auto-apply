@@ -419,6 +419,7 @@ class Question(RowModel):
     answer_text: str | None = None
     suggested_answer: str | None = None
     suggested_confidence: float | None = None
+    suggested_note: str | None = None
     created_at: Timestamp
     resolved_at: Timestamp | None = None
 
@@ -563,6 +564,7 @@ class QuestionCluster(_P):
     created_at: Timestamp
     suggested_answer: str | None = Field(default=None, description="The agent's low-confidence draft, to accept or edit.")
     suggested_confidence: float | None = None
+    suggested_note: str | None = Field(default=None, description="What the draft could not cover from the user's facts (shown beside it, never inside it).")
 
 
 class RunInfo(_P):

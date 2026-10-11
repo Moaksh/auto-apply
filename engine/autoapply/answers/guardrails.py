@@ -56,6 +56,7 @@ class NeedsUser(Exception):
         suggested_answer: str | None = None,
         confidence: float | None = None,
         detail: str | None = None,
+        note: str | None = None,
     ) -> None:
         self.question = question
         self.reason = QuestionReason(reason)
@@ -63,6 +64,7 @@ class NeedsUser(Exception):
         self.suggested_answer = suggested_answer
         self.confidence = confidence
         self.detail = detail
+        self.note = note
         super().__init__(f"needs user ({self.reason.value}): {question.label}" + (f" — {detail}" if detail else ""))
 
     def to_unresolved(self):  # -> apply.base.UnresolvedField (import lazily: no cycle)
@@ -70,7 +72,7 @@ class NeedsUser(Exception):
 
         return UnresolvedField(
             question=self.question, reason=self.reason.value, never_guess_key=self.never_guess_key,
-            suggested_answer=self.suggested_answer, confidence=self.confidence,
+            suggested_answer=self.suggested_answer, confidence=self.confidence, note=self.note,
         )
 
 

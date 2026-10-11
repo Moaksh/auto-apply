@@ -108,6 +108,20 @@ async def test_ungrounded_generation_is_capped(conn, setup):
     assert ei.value.confidence == 0.5
 
 
+async def test_draft_gaps_become_a_separate_note(conn, setup):
+    """What the facts don't cover goes to the user as a note, never into the recruiter-facing draft."""
+    job, _ = setup
+    resp = {**gen("I keep work moving with written specs and async reviews.", 0.4, grounded=False),
+            "gaps": "Say whether your past roles were remote or hybrid."}
+    llm = FakeLLMProvider(rules=[("GENERATE ANSWER", resp)])
+    with pytest.raises(NeedsUser) as ei:
+        await resolver(conn, job, llm).resolve("Tell us about working in a remote environment")
+    uf = ei.value.to_unresolved()
+    assert uf.suggested_answer.startswith("I keep work moving")
+    assert uf.note == "Say whether your past roles were remote or hybrid."
+    assert "never mention the facts" in llm.calls[0].system or "must never" in llm.calls[0].system
+
+
 async def test_generated_select_must_be_an_option(conn, setup):
     job, _ = setup
     llm = FakeLLMProvider(rules=[("GENERATE ANSWER", gen("Purple", 0.95))])

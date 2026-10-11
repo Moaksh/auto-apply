@@ -3151,6 +3151,19 @@
           ],
           "default": null,
           "title": "Suggested Confidence"
+        },
+        "suggested_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What the draft could not cover from the user's facts (shown beside it, never inside it).",
+          "title": "Suggested Note"
         }
       },
       "required": [

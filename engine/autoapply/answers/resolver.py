@@ -261,6 +261,7 @@ _GEN_SCHEMA = {
         "confidence": {"type": "number", "minimum": 0, "maximum": 1},
         "grounded": {"type": "boolean"},
         "story_ids": {"type": "array", "items": {"type": "integer"}},
+        "gaps": {"type": "string"},
     },
     "required": ["answer", "confidence", "grounded"],
     "additionalProperties": False,
@@ -277,7 +278,9 @@ GEN_SYSTEM = (
     "You fill in job applications on behalf of the candidate. Use ONLY the facts provided about the candidate "
     "(profile, stories) and the job description. Never invent employers, titles, numbers, skills, dates, or "
     "credentials. If the facts are insufficient to answer truthfully, say so via low confidence and grounded=false. "
-    "Write in the first person, concise, plain, no clichés."
+    "Write in the first person, concise, plain, no clichés. The answer is read by the recruiter: it must never "
+    "mention the facts, what they do or don't say, or that something is unknown. Put anything the facts don't "
+    "cover in `gaps` (a short note to the candidate), not in the answer."
 )
 
 
@@ -540,7 +543,8 @@ class AnswerResolver:
             + (("Constraints: " + " ".join(constraints) + "\n") if constraints else "")
             + f"\nCandidate facts:\n{facts}\n\nCandidate stories:\n{stories}\n\n{job_part}\n"
             "Return: answer; confidence (0-1) that the answer is truthful given ONLY these facts and appropriate; "
-            "grounded (true only if every claim about the candidate comes from the facts/stories); story_ids used."
+            "grounded (true only if every claim about the candidate comes from the facts/stories); story_ids used; "
+            "gaps: one short sentence to the candidate naming what they should add (empty if nothing is missing)."
         )
         try:
             res = await self.llm.complete(prompt, system=GEN_SYSTEM, schema=_GEN_SCHEMA, max_tokens=700)
@@ -550,12 +554,13 @@ class AnswerResolver:
         data = res.data
         answer = str(data["answer"]).strip()
         conf = float(data["confidence"])
+        note = str(data.get("gaps") or "").strip() or None
         if not data.get("grounded", False):
             conf = min(conf, 0.5)
         if q.options:
             opt = match_option(answer, q.options)
             if opt is None:
-                raise NeedsUser(q, QuestionReason.LOW_CONFIDENCE, suggested_answer=answer, confidence=conf,
+                raise NeedsUser(q, QuestionReason.LOW_CONFIDENCE, suggested_answer=answer, confidence=conf, note=note,
                                 detail="generated answer is not one of the options")
             answer = opt
         if q.max_length and len(answer) > q.max_length:
@@ -565,7 +570,7 @@ class AnswerResolver:
         valid_story_ids = {s.id for s in self.stories}
         story_ids = [int(i) for i in data.get("story_ids") or [] if int(i) in valid_story_ids]
         if not passes_confidence(conf, self.preferences):
-            raise NeedsUser(q, QuestionReason.LOW_CONFIDENCE, suggested_answer=answer, confidence=conf,
+            raise NeedsUser(q, QuestionReason.LOW_CONFIDENCE, suggested_answer=answer, confidence=conf, note=note,
                             detail=f"confidence {conf:.2f} < {self.preferences.confidence_threshold:.2f}")
         origin = AnswerOrigin.STORY if story_ids else AnswerOrigin.GENERATED
         ref = f"stories:{story_ids[0]}" if story_ids else None

@@ -181,7 +181,7 @@ def park_unresolved(
             conn, canonical_question=label, job_id=job_id, cluster_id=cluster_id, field_type=uf.question.field_type,
             options=uf.question.options, never_guess_key=uf.never_guess_key, reason=QuestionReason(uf.reason),
             embedding=vec, embedding_model=memory.embedder.model_name,
-            suggested_answer=uf.suggested_answer, suggested_confidence=uf.confidence,
+            suggested_answer=uf.suggested_answer, suggested_confidence=uf.confidence, suggested_note=uf.note,
         )
         if was_created:
             created.append(q.id)

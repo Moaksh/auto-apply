@@ -91,7 +91,7 @@ from autoapply.models import (
 )
 
 #: Must equal MAX(version) seeded by contract/schema.sql.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 #: Forward migrations: version -> SQL to go from (version-1) to version. Append-only.
 #: Version 1 is the baseline created by contract/schema.sql itself.
@@ -103,6 +103,9 @@ ALTER TABLE preferences ADD COLUMN jobs_per_session INTEGER NOT NULL DEFAULT 30 
     3: """
 ALTER TABLE questions ADD COLUMN suggested_answer TEXT;
 ALTER TABLE questions ADD COLUMN suggested_confidence REAL;
+""",
+    4: """
+ALTER TABLE questions ADD COLUMN suggested_note TEXT;
 """,
 }
 
@@ -1443,6 +1446,7 @@ def add_question(
     embedding_model: str | None = None,
     suggested_answer: str | None = None,
     suggested_confidence: float | None = None,
+    suggested_note: str | None = None,
 ) -> tuple[Question, bool]:
     """Park ``job_id`` on a question. If an OPEN question with the same text exists, the job
     is added to it (options unioned) and ``created`` is False. Otherwise a new row is created
@@ -1457,15 +1461,15 @@ def add_question(
             merged = list(dict.fromkeys([*json.loads(row["options"]), *opts]))
             conn.execute("UPDATE questions SET job_ids = ?, options = ? WHERE id = ?", (_j(jobs), _j(merged), row["id"]))
             if suggested_answer and not row["suggested_answer"]:
-                conn.execute("UPDATE questions SET suggested_answer = ?, suggested_confidence = ? WHERE id = ?",
-                             (suggested_answer, suggested_confidence, row["id"]))
+                conn.execute("UPDATE questions SET suggested_answer = ?, suggested_confidence = ?, suggested_note = ? WHERE id = ?",
+                             (suggested_answer, suggested_confidence, suggested_note or None, row["id"]))
             return get_question(conn, int(row["id"])), False
         cur = conn.execute(
             "INSERT INTO questions(canonical_question, cluster_id, job_ids, field_type, options, never_guess_key, reason, embedding, embedding_model, "
-            "suggested_answer, suggested_confidence, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "suggested_answer, suggested_confidence, suggested_note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (canonical_question, cluster_id or new_id(), _j([job_id]), FieldType(field_type).value, _j(opts), never_guess_key,
              QuestionReason(reason).value, pack_embedding(embedding) if embedding is not None else None, embedding_model,
-             suggested_answer or None, suggested_confidence, now_ts()),
+             suggested_answer or None, suggested_confidence, suggested_note or None, now_ts()),
         )
     return get_question(conn, int(cur.lastrowid)), True
 
@@ -1529,6 +1533,7 @@ def _cluster_from_rows(conn: sqlite3.Connection, rows: list[Question]) -> Questi
         job_count=len(job_ids), companies=companies, created_at=first.created_at,
         suggested_answer=next((q.suggested_answer for q in rows if q.suggested_answer), None),
         suggested_confidence=next((q.suggested_confidence for q in rows if q.suggested_answer), None),
+        suggested_note=next((q.suggested_note for q in rows if q.suggested_answer), None),
     )
 
 

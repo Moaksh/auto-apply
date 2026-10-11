@@ -1442,6 +1442,7 @@ struct QuestionCluster: Codable, Sendable, Hashable {
     var createdAt: Date
     var suggestedAnswer: String? = nil
     var suggestedConfidence: Double? = nil
+    var suggestedNote: String? = nil
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case clusterId = "cluster_id"
@@ -1458,6 +1459,7 @@ struct QuestionCluster: Codable, Sendable, Hashable {
         case createdAt = "created_at"
         case suggestedAnswer = "suggested_answer"
         case suggestedConfidence = "suggested_confidence"
+        case suggestedNote = "suggested_note"
     }
 }
 
@@ -1478,6 +1480,7 @@ extension QuestionCluster {
         createdAt = try c.decode(Date.self, forKey: .createdAt)
         suggestedAnswer = try c.decodeIfPresent(String.self, forKey: .suggestedAnswer)
         suggestedConfidence = try c.decodeIfPresent(Double.self, forKey: .suggestedConfidence)
+        suggestedNote = try c.decodeIfPresent(String.self, forKey: .suggestedNote)
     }
 }
 

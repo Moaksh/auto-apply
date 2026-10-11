@@ -59,14 +59,15 @@ def test_newer_db_version_is_rejected(conn):
 
 
 def test_registered_migration_applies(conn, monkeypatch):
-    monkeypatch.setattr(db, "SCHEMA_VERSION", 4)
-    monkeypatch.setitem(db.MIGRATIONS, 4, "CREATE TABLE extra_test (id INTEGER PRIMARY KEY);")
-    assert db.migrate(conn) == 4
+    nxt = db.SCHEMA_VERSION + 1
+    monkeypatch.setattr(db, "SCHEMA_VERSION", nxt)
+    monkeypatch.setitem(db.MIGRATIONS, nxt, "CREATE TABLE extra_test (id INTEGER PRIMARY KEY);")
+    assert db.migrate(conn) == nxt
     assert "extra_test" in tables(conn)
 
 
 def test_missing_migration_errors(conn, monkeypatch):
-    monkeypatch.setattr(db, "SCHEMA_VERSION", 5)
+    monkeypatch.setattr(db, "SCHEMA_VERSION", db.SCHEMA_VERSION + 1)
     with pytest.raises(db.DBError, match="no migration"):
         db.migrate(conn)
 
@@ -126,7 +127,7 @@ def test_v1_database_upgrades_to_v2(tmp_path):
     v1 = "\n".join(
         line for line in sql.splitlines()
         if "searches_per_session" not in line and "jobs_per_session" not in line
-        and "suggested_" not in line and "VALUES (2)" not in line and "VALUES (3)" not in line
+        and "suggested_" not in line and not any(f"VALUES ({v})" in line for v in range(2, db.SCHEMA_VERSION + 1))
     )
     c = sqlite3.connect(tmp_path / "v1.db")
     c.row_factory = sqlite3.Row
@@ -137,3 +138,14 @@ def test_v1_database_upgrades_to_v2(tmp_path):
     row = c.execute("SELECT daily_cap, searches_per_session, jobs_per_session FROM preferences").fetchone()
     assert (row[0], row[1], row[2]) == (7, 3, 30)
     c.close()
+
+
+def test_suggested_note_reaches_cluster(conn):
+    co = db.upsert_company(conn, "Acme")
+    job, _ = db.insert_job(conn, company_id=co.id, source="greenhouse", title="Eng")
+    q, _ = db.add_question(conn, canonical_question="Remote experience?", job_id=job.id,
+                           suggested_answer="I ship async.", suggested_confidence=0.4,
+                           suggested_note="Add whether your roles were remote.")
+    cluster = db.get_cluster(conn, q.cluster_id)
+    assert cluster.suggested_answer == "I ship async."
+    assert cluster.suggested_note == "Add whether your roles were remote."

@@ -1,6 +1,6 @@
 -- =====================================================================================
 -- AutoApply SQLite schema — SINGLE SOURCE OF TRUTH for the database.
--- Contract version: schema_version = 3   (keep in sync with autoapply.db.SCHEMA_VERSION)
+-- Contract version: schema_version = 4   (keep in sync with autoapply.db.SCHEMA_VERSION)
 --
 -- Location: ~/Library/Application Support/AutoApply/autoapply.db (AUTOAPPLY_HOME overrides)
 --
@@ -325,6 +325,7 @@ CREATE TABLE IF NOT EXISTS questions (
     answer_text         TEXT,                               -- the answer given (also when not saved to memory)
     suggested_answer    TEXT,                               -- v3: the agent's low-confidence draft, shown in the inbox
     suggested_confidence REAL,                              -- v3
+    suggested_note      TEXT,                               -- v4: what the draft could not cover (shown beside it)
     created_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     resolved_at         TEXT,
     CHECK (status = 'open' OR resolved_at IS NOT NULL)
@@ -416,3 +417,4 @@ INSERT OR IGNORE INTO profile (id) VALUES (1);
 INSERT OR IGNORE INTO schema_version (version) VALUES (1);
 INSERT OR IGNORE INTO schema_version (version) VALUES (2);
 INSERT OR IGNORE INTO schema_version (version) VALUES (3);
+INSERT OR IGNORE INTO schema_version (version) VALUES (4);

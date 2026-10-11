@@ -123,6 +123,7 @@ class UnresolvedField:
     never_guess_key: str | None = None
     suggested_answer: str | None = None
     confidence: float | None = None
+    note: str | None = None  # what the draft could not cover; shown beside it in the inbox
 
 
 @dataclass(slots=True)
@@ -1606,7 +1607,7 @@ def _park_unresolved(ctx: ApplyContext, unresolved: list[UnresolvedField]) -> No
             reason = QuestionReason.UNKNOWN
         db.add_question(ctx.conn, canonical_question=u.question.label, job_id=ctx.job.id, field_type=u.question.field_type,
                         options=u.question.options, never_guess_key=u.never_guess_key, reason=reason,
-                        suggested_answer=u.suggested_answer, suggested_confidence=u.confidence)
+                        suggested_answer=u.suggested_answer, suggested_confidence=u.confidence, suggested_note=u.note)
 
 
 async def run_application(

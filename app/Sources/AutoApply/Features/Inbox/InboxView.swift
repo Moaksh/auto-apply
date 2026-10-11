@@ -328,7 +328,14 @@ struct AnswerComposer: View {
                     }
                 }
             }
+            jobContext
             if let suggestion = cluster.suggestedAnswer, !suggestion.isEmpty {
+                if let note = cluster.suggestedNote, !note.isEmpty {
+                    Label(note, systemImage: "lightbulb")
+                        .font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .help("What the agent couldn't find in your profile. Add it to your answer, or to your profile so future drafts include it.")
+                }
                 // The agent's own draft: shown so the user can accept it in one click or edit it.
                 VStack(alignment: .leading, spacing: Space.xs) {
                     HStack(spacing: Space.s) {
@@ -352,6 +359,49 @@ struct AnswerComposer: View {
             } else if cluster.reason == .lowConfidence {
                 Text("The agent drafted something but wasn't confident enough to submit it.")
                     .font(Typography.callout).foregroundStyle(Palette.textTertiary)
+            }
+        }
+    }
+
+    // Which job(s) the question is for, with location: "this country" / sponsorship answers depend on it.
+
+    private var contextJobs: [JobItem] { cluster.jobIds.compactMap { store.jobs.job(id: $0) } }
+
+    private var asksAboutCountry: Bool {
+        let q = ([cluster.canonicalQuestion] + cluster.variants).joined(separator: " ").lowercased()
+        return ["this country", "country", "sponsor", "visa", "authoriz", "authoris", "right to work", "relocat", "located", "location", "reside"]
+            .contains { q.contains($0) }
+    }
+
+    @ViewBuilder
+    private var jobContext: some View {
+        let jobs = contextJobs
+        if !jobs.isEmpty {
+            VStack(alignment: .leading, spacing: Space.xs) {
+                if asksAboutCountry {
+                    let places = Array(Set(jobs.map { InboxJobContext.country(of: $0) })).sorted()
+                    let named = places.filter { $0 != InboxJobContext.unknown }
+                    Label(named.isEmpty
+                          ? "Job location not listed — check the posting before answering."
+                          : "Answering for: \(named.joined(separator: ", "))\(places.count > 1 ? " (jobs differ — consider answering per job)" : "")",
+                          systemImage: "mappin.and.ellipse")
+                        .font(Typography.body.weight(.semibold))
+                        .foregroundStyle(named.isEmpty ? Palette.textSecondary : Palette.textPrimary)
+                }
+                ForEach(jobs.prefix(4)) { job in
+                    Button { store.router.openJob(id: job.id) } label: {
+                        HStack(spacing: Space.xs) {
+                            Text(job.displayName).lineLimit(1)
+                            Text("· \(InboxJobContext.where_(job))").foregroundStyle(Palette.textTertiary).lineLimit(1)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                    .help("Open this job")
+                }
+                if jobs.count > 4 {
+                    Text("+\(jobs.count - 4) more").font(Typography.callout).foregroundStyle(Palette.textTertiary)
+                }
             }
         }
     }
@@ -615,4 +665,30 @@ private struct InboxZeroView: View {
         .environment(store)
         .environment(store.router)
         .frame(width: 1100, height: 720)
+}
+
+/// Location helpers for the Needs-You job context line.
+enum InboxJobContext {
+    static let unknown = "location not listed"
+
+    static func where_(_ job: JobItem) -> String {
+        let loc = job.location?.trimmingCharacters(in: .whitespaces) ?? ""
+        let remote = job.remote == .remote ? "Remote" : nil
+        if loc.isEmpty { return remote ?? unknown }
+        if let remote, !loc.lowercased().contains("remote") { return "\(loc) · \(remote)" }
+        return loc
+    }
+
+    /// The country part of a job location ("Bengaluru, Karnataka, India" -> "India").
+    static func country(of job: JobItem) -> String {
+        guard let loc = job.location?.trimmingCharacters(in: .whitespaces), !loc.isEmpty else { return unknown }
+        let parts = loc.split(whereSeparator: { $0 == "," || $0 == "·" || $0 == "|" })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && $0.lowercased() != "remote" && $0.lowercased() != "hybrid" && $0.lowercased() != "on-site" }
+        let last = parts.last ?? loc
+        let usStates: Set<String> = ["CA", "NY", "WA", "TX", "MA", "IL", "CO", "GA", "FL", "OR", "NJ", "PA", "VA", "NC", "UT", "AZ", "MN", "MI", "OH", "DC"]
+        if usStates.contains(last) || last == "USA" || last == "US" { return "United States" }
+        if last == "UK" { return "United Kingdom" }
+        return last
+    }
 }
