@@ -115,6 +115,7 @@ An `error` without `reply_to` is an unsolicited daemon problem (login expired, C
 | `onboarding_parse_resume` | `file_path`, `label?` | `ParseResumeResult` `{resume_variant_id, profile, uncertain_fields}` | adds the variant and pre-fills the profile |
 | `set_mail_account` | `email`, `app_password` | `{email, connected, error}` | logs in over IMAP to check; password → macOS Keychain only; used to read emailed security codes |
 | `get_mail_account` | `test` (bool) | `{email, connected, error}` | `test` re-checks the login |
+| `suggest_preferences` | — | `SuggestedPreferences` `{roles, seniority, locations, years_experience}` | from the stored profile; nothing is saved |
 | `clear_mail_account` | — | `{email: null, connected: false}` | removes the Keychain item |
 | `reset_source_cap` | `source`: `linkedin`\|`glassdoor` | `{used: 0, limit}` | Settings: zero today's browsing-session counter; emits `cap_reached` (used 0) so the UI updates |
 | `check_source_login` | `source`: `linkedin`\|`glassdoor` | `{connected: bool}` | "Check now": looks at the saved agent-Chrome login in a headless window (no login prompt); updates `source_status` |

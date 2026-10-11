@@ -8,9 +8,44 @@ import SwiftUI
 struct PreferencesSettingsTab: View {
     @Bindable var model: SettingsModel
     @Environment(AppStore.self) private var store
+    @State private var suggestion: SuggestedPreferences?
+    @State private var years: Double?
+    @State private var saveYears: Task<Void, Never>?
 
     var body: some View {
+        Group {
+        if let s = suggestion, !resumeDiff(s).isEmpty {
+            HStack(alignment: .top, spacing: Space.s) {
+                Image(systemName: "doc.text.magnifyingglass").foregroundStyle(Palette.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Your resume suggests").font(Typography.body.weight(.semibold))
+                    Text(resumeDiff(s).joined(separator: "  ·  ")).font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                }
+                Spacer()
+                Button("Fill from resume") { fill(from: s) }
+                    .buttonStyle(.glass)
+                    .help("Adds the suggested roles and locations and sets seniority. Review, then Save.")
+            }
+            .padding(Space.m)
+            .sunkenWell()
+        }
         SettingsRow("Roles") { ChipField(values: $model.preferencesDraft.roles, placeholder: "+ add role") }
+        SettingsRow("Experience", help: "Used to match seniority and score jobs. Saved to your profile right away.") {
+            YearsField(years: Binding(get: { years }, set: { new in
+                let old = years.map(OnboardingModel.seniority(forYears:)) ?? []
+                if let new, model.preferencesDraft.seniority.isEmpty || model.preferencesDraft.seniority == old {
+                    model.preferencesDraft.seniority = OnboardingModel.seniority(forYears: new)
+                }
+                years = new
+                saveYears?.cancel()
+                guard let new else { return }
+                saveYears = Task {
+                    try? await Task.sleep(for: .milliseconds(600))
+                    guard !Task.isCancelled else { return }
+                    await store.setYearsExperience(new)
+                }
+            }))
+        }
         SettingsRow("Seniority") {
             ToggleChips(options: Seniority.allCases, selection: setBinding(\.seniority), label: { $0.rawValue.capitalized })
         }
@@ -46,6 +81,31 @@ struct PreferencesSettingsTab: View {
         SettingsRow("Match threshold", help: "Jobs scoring below this are skipped (you can still see them in Pipeline).") {
             ThresholdSlider(value: $model.preferencesDraft.matchThreshold, bins: histogram, weeklyEstimate: weeklyEstimate)
         }
+        }
+        .task {
+            years = store.library.profile.yearsExperience
+            suggestion = await store.suggestPreferences()
+        }
+    }
+
+    /// What the resume would add that isn't already set.
+    private func resumeDiff(_ s: SuggestedPreferences) -> [String] {
+        let d = model.preferencesDraft
+        let roles = s.roles.filter { r in !d.roles.contains { $0.caseInsensitiveCompare(r) == .orderedSame } }
+        let locs = s.locations.filter { l in !d.locations.contains { $0.caseInsensitiveCompare(l) == .orderedSame } }
+        var out: [String] = []
+        if !roles.isEmpty { out.append(roles.joined(separator: ", ")) }
+        if !s.seniority.isEmpty, Set(s.seniority) != Set(d.seniority) { out.append(s.seniority.map { $0.rawValue.capitalized }.joined(separator: "/")) }
+        if !locs.isEmpty { out.append(locs.joined(separator: ", ")) }
+        return out
+    }
+
+    private func fill(from s: SuggestedPreferences) {
+        let d = model.preferencesDraft
+        model.preferencesDraft.roles = d.roles + s.roles.filter { r in !d.roles.contains { $0.caseInsensitiveCompare(r) == .orderedSame } }
+        if !s.seniority.isEmpty { model.preferencesDraft.seniority = s.seniority }
+        model.preferencesDraft.locations = d.locations + s.locations.filter { l in !d.locations.contains { $0.caseInsensitiveCompare(l) == .orderedSame } }
+        if years == nil, let y = s.yearsExperience { years = y; Task { await store.setYearsExperience(y) } }
     }
 
     private var histogram: [Int] {

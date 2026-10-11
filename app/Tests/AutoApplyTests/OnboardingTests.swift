@@ -30,6 +30,29 @@ struct OnboardingTests {
         return (model, store, daemon)
     }
 
+    @Test func resumeSuggestionPrefillsButKeepsEdits() async {
+        let (model, _, daemon) = await makeModel()
+        model.preferencesDraft.roles = []
+        model.preferencesDraft.seniority = []
+        model.preferencesDraft.locations = ["Remote"]
+        model.profileDraft.yearsExperience = nil
+        let first = SuggestedPreferences(roles: ["AI Engineer"], seniority: [.junior, .mid], locations: ["India"], yearsExperience: 2.3)
+        model.applySuggestion(first)
+        #expect(model.preferencesDraft.roles == ["AI Engineer"])
+        #expect(model.preferencesDraft.seniority == [.junior, .mid])
+        #expect(model.preferencesDraft.locations == ["Remote"])  // user's own value kept
+        #expect(model.profileDraft.yearsExperience == 2.3)
+        // A new resume refreshes untouched fields but not ones the user edited.
+        model.preferencesDraft.roles = ["ML Engineer"]
+        model.applySuggestion(SuggestedPreferences(roles: ["Data Scientist"], seniority: [.mid, .senior], locations: [], yearsExperience: 5))
+        #expect(model.preferencesDraft.roles == ["ML Engineer"])
+        #expect(model.preferencesDraft.seniority == [.mid, .senior])
+        #expect(model.profileDraft.yearsExperience == 5)
+        #expect(OnboardingModel.seniority(forYears: 0.5) == [.junior])
+        #expect(OnboardingModel.seniority(forYears: 10) == [.senior, .staff])
+        _ = daemon
+    }
+
     @Test func storeNeedsOnboardingForFreshInstall() async {
         let (_, store, daemon) = await makeModel()
         #expect(store.needsOnboarding)
@@ -103,7 +126,9 @@ struct OnboardingTests {
         #expect(model.step == .preferences)
         #expect(daemon.repository.read { $0.profile.headline } == "Payments engineer")
 
-        // Preferences require a role.
+        // Resume pre-filled the job filters; preferences still require a role.
+        #expect(model.preferencesDraft.roles == MockCommandHandler.mockSuggestion.roles)
+        model.preferencesDraft.roles = []
         await model.primaryAction()
         #expect(model.step == .preferences)
         model.preferencesDraft.roles = ["Backend Engineer"]

@@ -1200,11 +1200,13 @@ struct ParseResumeResult: Codable, Sendable, Hashable {
     var resumeVariantId: Int
     var profile: Profile
     var uncertainFields: [String] = []
+    var suggestedPreferences: SuggestedPreferences? = nil
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case resumeVariantId = "resume_variant_id"
         case profile
         case uncertainFields = "uncertain_fields"
+        case suggestedPreferences = "suggested_preferences"
     }
 }
 
@@ -1214,6 +1216,7 @@ extension ParseResumeResult {
         resumeVariantId = try c.decode(Int.self, forKey: .resumeVariantId)
         profile = try c.decode(Profile.self, forKey: .profile)
         uncertainFields = try c.decodeIfPresent([String].self, forKey: .uncertainFields) ?? []
+        suggestedPreferences = try c.decodeIfPresent(SuggestedPreferences.self, forKey: .suggestedPreferences)
     }
 }
 
@@ -1944,6 +1947,39 @@ extension StatePayload {
     }
 }
 
+struct SuggestPreferencesPayload: Codable, Sendable, Hashable {
+}
+
+extension SuggestPreferencesPayload {
+    init(from decoder: any Decoder) throws {
+    }
+}
+
+/// Job-search preferences suggested from the resume; the app pre-fills, the user saves.
+struct SuggestedPreferences: Codable, Sendable, Hashable {
+    var roles: [String] = []
+    var seniority: [Seniority] = []
+    var locations: [String] = []
+    var yearsExperience: Double? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case roles
+        case seniority
+        case locations
+        case yearsExperience = "years_experience"
+    }
+}
+
+extension SuggestedPreferences {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        roles = try c.decodeIfPresent([String].self, forKey: .roles) ?? []
+        seniority = try c.decodeIfPresent([Seniority].self, forKey: .seniority) ?? []
+        locations = try c.decodeIfPresent([String].self, forKey: .locations) ?? []
+        yearsExperience = try c.decodeIfPresent(Double.self, forKey: .yearsExperience)
+    }
+}
+
 struct SystemCheckItem: Codable, Sendable, Hashable {
     enum Name: String, Codable, Sendable, CaseIterable, Hashable {
         case claudeCli = "claude_cli"
@@ -2319,6 +2355,7 @@ enum Command: Sendable, Hashable {
     case resetSourceCap(ResetSourceCapPayload)
     case setMailAccount(SetMailAccountPayload)
     case getMailAccount(GetMailAccountPayload)
+    case suggestPreferences(SuggestPreferencesPayload)
     case clearMailAccount(ClearMailAccountPayload)
     case onboardingSetStep(OnboardingSetStepPayload)
     case onboardingComplete(OnboardingCompletePayload)
@@ -2363,6 +2400,7 @@ enum Command: Sendable, Hashable {
         case .resetSourceCap: "reset_source_cap"
         case .setMailAccount: "set_mail_account"
         case .getMailAccount: "get_mail_account"
+        case .suggestPreferences: "suggest_preferences"
         case .clearMailAccount: "clear_mail_account"
         case .onboardingSetStep: "onboarding_set_step"
         case .onboardingComplete: "onboarding_complete"
@@ -2407,6 +2445,7 @@ enum Command: Sendable, Hashable {
         "reset_source_cap",
         "set_mail_account",
         "get_mail_account",
+        "suggest_preferences",
         "clear_mail_account",
         "onboarding_set_step",
         "onboarding_complete",
@@ -2542,6 +2581,7 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case "reset_source_cap": command = .resetSourceCap(try c.decode(ResetSourceCapPayload.self, forKey: .payload))
         case "set_mail_account": command = .setMailAccount(try c.decode(SetMailAccountPayload.self, forKey: .payload))
         case "get_mail_account": command = .getMailAccount(try c.decode(GetMailAccountPayload.self, forKey: .payload))
+        case "suggest_preferences": command = .suggestPreferences(try c.decode(SuggestPreferencesPayload.self, forKey: .payload))
         case "clear_mail_account": command = .clearMailAccount(try c.decode(ClearMailAccountPayload.self, forKey: .payload))
         case "onboarding_set_step": command = .onboardingSetStep(try c.decode(OnboardingSetStepPayload.self, forKey: .payload))
         case "onboarding_complete": command = .onboardingComplete(try c.decode(OnboardingCompletePayload.self, forKey: .payload))
@@ -2593,6 +2633,7 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case .resetSourceCap(let p): try c.encode(p, forKey: .payload)
         case .setMailAccount(let p): try c.encode(p, forKey: .payload)
         case .getMailAccount(let p): try c.encode(p, forKey: .payload)
+        case .suggestPreferences(let p): try c.encode(p, forKey: .payload)
         case .clearMailAccount(let p): try c.encode(p, forKey: .payload)
         case .onboardingSetStep(let p): try c.encode(p, forKey: .payload)
         case .onboardingComplete(let p): try c.encode(p, forKey: .payload)

@@ -9,8 +9,24 @@ struct PreferencesStep: View {
 
     var body: some View {
         StepHeader(title: "What are you looking for?")
+        if model.lastSuggestion != nil {
+            Label("Pre-filled from your resume. Change anything that's off.", systemImage: "doc.text.magnifyingglass")
+                .font(Typography.callout).foregroundStyle(Palette.textSecondary)
+        }
         Grid(alignment: .topLeading, horizontalSpacing: Space.l, verticalSpacing: Space.l) {
             row("Roles") { ChipField(values: $model.preferencesDraft.roles, placeholder: "+ add role") }
+            row("Experience") {
+                YearsField(years: Binding(
+                    get: { model.profileDraft.yearsExperience },
+                    set: { new in
+                        // Keep seniority in step with years unless the user picked levels by hand.
+                        let old = model.profileDraft.yearsExperience.map(OnboardingModel.seniority(forYears:)) ?? []
+                        if let new, model.preferencesDraft.seniority.isEmpty || model.preferencesDraft.seniority == old {
+                            model.preferencesDraft.seniority = OnboardingModel.seniority(forYears: new)
+                        }
+                        model.profileDraft.yearsExperience = new
+                    }))
+            }
             row("Seniority") {
                 ToggleChips(options: Seniority.allCases, selection: setBinding(\.seniority), label: { $0.rawValue.capitalized })
             }
@@ -179,6 +195,22 @@ private struct StoryCard: View {
                 .lineLimit(1...4)
                 .padding(Space.s)
                 .sunkenWell()
+        }
+    }
+}
+
+/// "2.5 years" stepper + field, shared by onboarding and Settings.
+struct YearsField: View {
+    @Binding var years: Double?
+
+    var body: some View {
+        HStack(spacing: Space.s) {
+            TextField("0", value: $years, format: .number.precision(.fractionLength(0...1)))
+                .textFieldStyle(.roundedBorder).frame(width: 64)
+            Stepper("", value: Binding(get: { years ?? 0 }, set: { years = max(0, min(60, ($0 * 2).rounded() / 2)) }),
+                    in: 0...60, step: 0.5)
+                .labelsHidden()
+            Text("years of experience").font(Typography.callout).foregroundStyle(Palette.textSecondary)
         }
     }
 }

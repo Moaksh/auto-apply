@@ -381,6 +381,41 @@ final class OnboardingModel {
         // First parse pre-fills the profile; later ones only fill gaps.
         profileDraft = Self.mergeProfile(profileDraft, with: result.profile)
         uncertainFields.formUnion(result.uncertainFields)
+        if let s = result.suggestedPreferences { applySuggestion(s) }
+    }
+
+    /// What the last resume suggested; fields still equal to it are refreshed on a new resume.
+    var lastSuggestion: SuggestedPreferences?
+
+    /// Pre-fill the job filters from the resume: empty fields, and fields the user hasn't changed
+    /// since the previous resume's suggestion (so swapping resumes updates them). Edits are kept.
+    func applySuggestion(_ s: SuggestedPreferences) {
+        let prev = lastSuggestion
+        if !s.roles.isEmpty, preferencesDraft.roles.isEmpty || preferencesDraft.roles == prev?.roles {
+            preferencesDraft.roles = s.roles
+        }
+        if !s.seniority.isEmpty, preferencesDraft.seniority.isEmpty || preferencesDraft.seniority == prev?.seniority {
+            preferencesDraft.seniority = s.seniority
+        }
+        if !s.locations.isEmpty, preferencesDraft.locations.isEmpty || preferencesDraft.locations == prev?.locations {
+            preferencesDraft.locations = s.locations
+        }
+        if profileDraft.yearsExperience == nil || profileDraft.yearsExperience == prev?.yearsExperience {
+            profileDraft.yearsExperience = s.yearsExperience ?? profileDraft.yearsExperience
+        }
+        lastSuggestion = s
+    }
+
+    /// Seniority bands for a years-of-experience value (mirrors autoapply.prefs_suggest).
+    static func seniority(forYears y: Double) -> [Seniority] {
+        switch y {
+        case ..<2: [.junior]
+        case ..<4: [.junior, .mid]
+        case ..<6: [.mid, .senior]
+        case ..<9: [.senior]
+        case ..<13: [.senior, .staff]
+        default: [.staff, .principal]
+        }
     }
 
     private func loadThumbnail(id: UUID, url: URL) async {

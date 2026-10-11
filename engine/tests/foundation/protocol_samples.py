@@ -111,6 +111,7 @@ def samples() -> list[Envelope]:
     c("reset_source_cap", {"source": "linkedin"})
     c("set_mail_account", {"email": "jane@gmail.com", "app_password": "abcd efgh ijkl mnop"})
     c("get_mail_account", {"test": False})
+    c("suggest_preferences", {})
     c("clear_mail_account", {})
     c("onboarding_set_step", {"step": 3})
     c("onboarding_complete", {"run_prep": True})

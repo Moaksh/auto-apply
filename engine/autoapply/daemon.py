@@ -1255,7 +1255,17 @@ class Daemon:
         if real:
             patch["links"] = {**(patch.get("links") or {}), **real}
         profile: Profile = db.update_profile(self.conn, patch) if patch else db.get_profile(self.conn)
-        return ParseResumeResult(resume_variant_id=vid, profile=profile, uncertain_fields=uncertain)
+        from autoapply.prefs_suggest import suggest_preferences
+
+        suggested = await suggest_preferences(profile, self.llm)
+        return ParseResumeResult(resume_variant_id=vid, profile=profile, uncertain_fields=uncertain,
+                                 suggested_preferences=suggested)
+
+    async def _cmd_suggest_preferences(self, p: Any) -> dict[str, Any]:
+        """Roles / seniority / locations suggested from the stored profile (Settings: "Fill from resume")."""
+        from autoapply.prefs_suggest import suggest_preferences
+
+        return (await suggest_preferences(db.get_profile(self.conn), self.llm)).model_dump(mode="json")
 
     def make_source(self, name: str) -> BrowserListingBase:
         if self._source_factory is not None:

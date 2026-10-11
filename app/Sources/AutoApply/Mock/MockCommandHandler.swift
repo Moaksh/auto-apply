@@ -333,7 +333,11 @@ enum MockCommandHandler {
             let id = addResume(world: world, label: label, path: p.filePath, tags: [], isDefault: false)
             let profile = MockFixtures.profile
             world.repository.update { $0.profile = profile }
-            return Handled(reply: ack(encoding: ParseResumeResult(resumeVariantId: id, profile: profile, uncertainFields: ["phone", "years_experience"])))
+            return Handled(reply: ack(encoding: ParseResumeResult(resumeVariantId: id, profile: profile, uncertainFields: ["phone", "years_experience"],
+                                                                  suggestedPreferences: Self.mockSuggestion)))
+
+        case .suggestPreferences:
+            return Handled(reply: ack(encoding: Self.mockSuggestion))
 
         case .onboardingConnectSource(let p):
             let source: SourceName = p.source == .linkedin ? .linkedin : .glassdoor
@@ -386,4 +390,7 @@ enum MockCommandHandler {
         }
         return id
     }
+
+    static let mockSuggestion = SuggestedPreferences(roles: ["AI Engineer", "ML Engineer", "Backend Engineer"],
+                                                     seniority: [.junior, .mid], locations: ["Bengaluru", "India"], yearsExperience: 2.3)
 }

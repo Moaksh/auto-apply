@@ -48,6 +48,7 @@ from autoapply.enums import (
     JobSource,
     LogLevel,
     Mode,
+    Seniority,
     QuestionReason,
     QuestionStatus,
     RemotePolicy,
@@ -633,12 +634,22 @@ class SystemCheckResult(_P):
     all_required_ok: bool
 
 
+class SuggestedPreferences(_P):
+    """Job-search preferences suggested from the resume; the app pre-fills, the user saves."""
+
+    roles: list[str] = Field(default_factory=list)
+    seniority: list[Seniority] = Field(default_factory=list)
+    locations: list[str] = Field(default_factory=list)
+    years_experience: float | None = Field(default=None, description="From the profile, else estimated from work history.")
+
+
 class ParseResumeResult(_P):
     """``ack.result`` for ``onboarding_parse_resume``."""
 
     resume_variant_id: int
     profile: Profile
     uncertain_fields: list[str] = Field(default_factory=list)
+    suggested_preferences: SuggestedPreferences | None = None
 
 
 class PerJobAnswer(_P):
@@ -837,6 +848,10 @@ class ClearMailAccountPayload(_P):
     pass
 
 
+class SuggestPreferencesPayload(_P):
+    pass
+
+
 class ResetSourceCapPayload(_P):
     source: Literal["linkedin", "glassdoor"]
 
@@ -887,6 +902,7 @@ COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "reset_source_cap": ResetSourceCapPayload,
     "set_mail_account": SetMailAccountPayload,
     "get_mail_account": GetMailAccountPayload,
+    "suggest_preferences": SuggestPreferencesPayload,
     "clear_mail_account": ClearMailAccountPayload,
     "onboarding_set_step": OnboardingSetStepPayload,
     "onboarding_complete": OnboardingCompletePayload,

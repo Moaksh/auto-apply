@@ -349,6 +349,19 @@ extension AppStore {
                             as: ParseResumeResult.self, timeout: .seconds(90))
     }
 
+    /// Roles / seniority / locations suggested from the stored profile (nothing is saved).
+    func suggestPreferences() async -> SuggestedPreferences? {
+        await performResult(.suggestPreferences(SuggestPreferencesPayload()), as: SuggestedPreferences.self,
+                            timeout: .seconds(40), silent: true)
+    }
+
+    /// Save just the years of experience (Settings → Preferences).
+    func setYearsExperience(_ years: Double) async {
+        var patch = ProfilePatch()
+        try? patch.set(.yearsExperience, years)
+        await updateProfile(patch)
+    }
+
     func onboardingConnectSource(_ source: OnboardingConnectSourcePayload.Source) async -> Bool {
         if case .success = await perform(.onboardingConnectSource(OnboardingConnectSourcePayload(source: source)), timeout: .seconds(10)) {
             return true
