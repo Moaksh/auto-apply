@@ -18,3 +18,9 @@ __pycache__/
 # macOS
 .DS_Store
 app/build/
+
+# Release builds (app/build/ holds AutoApply.app and AutoApply-<version>.dmg; never committed)
+# Rebuilding a release:
+#   1. Bump CFBundleShortVersionString in app/scripts/make_app.sh (e.g. 0.1.0 -> 0.1.1)
+#   2. app/scripts/make_dmg.sh            -> app/build/AutoApply-0.1.1.dmg
+#   3. gh release create v0.1.1 app/build/AutoApply-0.1.1.dmg --prerelease --title "AutoApply v0.1.1 (beta)"
