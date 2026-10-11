@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Job Application for Backend Engineer at Acme Robotics</title>
+<!-- Local test fixture imitating job-boards.greenhouse.io. Posts to the local test server only. -->
+<style>
+  body { font-family: sans-serif; max-width: 760px; margin: 2rem auto; }
+  .field { margin: 1rem 0; }
+  label { display: block; font-weight: 600; }
+  .asterisk { color: #c00; }
+  input[type=text], input[type=email], input[type=tel], textarea, select { width: 100%; padding: 6px; }
+  .visually-hidden { position: absolute; left: -9999px; }
+  ul[role=listbox] { border: 1px solid #999; list-style: none; padding: 0; margin: 0; }
+  ul[role=listbox] li { padding: 4px; cursor: pointer; }
+  .grecaptcha-badge { width: 1px; height: 1px; }
+</style>
+</head>
+<body>
+<div class="job__header"><h1>Backend Engineer</h1><p>Acme Robotics · Remote (US)</p></div>
+<div class="job__description"><p>We build robots. You build the backend that runs them.</p></div>
+
+<!-- invisible reCAPTCHA v3 badge, present on most real Greenhouse pages: must NOT count as a captcha -->
+<div class="grecaptcha-badge"><iframe title="reCAPTCHA" src="about:blank?recaptcha/api2/anchor&size=invisible" width="1" height="1"></iframe></div>
+
+<form id="application-form" action="/greenhouse/submit" method="post" enctype="multipart/form-data">
+  <div class="field">
+    <label for="first_name" id="first_name-label">First Name<span class="asterisk">*</span></label>
+    <input id="first_name" name="first_name" type="text" autocomplete="given-name" required aria-required="true">
+  </div>
+  <div class="field">
+    <label for="last_name">Last Name<span class="asterisk">*</span></label>
+    <input id="last_name" name="last_name" type="text" required aria-required="true">
+  </div>
+  <div class="field">
+    <label for="email">Email<span class="asterisk">*</span></label>
+    <input id="email" name="email" type="text" required aria-required="true">
+  </div>
+  <div class="field">
+    <label for="phone">Phone</label>
+    <input id="phone" name="phone" type="tel">
+  </div>
+  <div class="field file-upload">
+    <label for="resume">Resume/CV<span class="asterisk">*</span></label>
+    <button type="button" class="btn">Attach</button>
+    <input id="resume" name="resume" type="file" class="visually-hidden" accept=".pdf,.doc,.docx,.txt,.rtf" required>
+  </div>
+  <div class="field file-upload">
+    <label for="cover_letter">Cover Letter</label>
+    <button type="button" class="btn">Attach</button>
+    <input id="cover_letter" name="cover_letter" type="file" class="visually-hidden" accept=".pdf,.doc,.docx,.txt,.rtf">
+  </div>
+  <div class="field">
+    <label for="question_1001">LinkedIn Profile</label>
+    <input id="question_1001" name="question_1001" type="text">
+  </div>
+  <div class="field">
+    <label for="question_1002">Why do you want to work at Acme Robotics?<span class="asterisk">*</span></label>
+    <textarea id="question_1002" name="question_1002" rows="5" required></textarea>
+  </div>
+  <div class="field">
+    <label for="question_1003">Will you now or in the future require visa sponsorship to work in the United States?<span class="asterisk">*</span></label>
+    <select id="question_1003" name="question_1003" required>
+      <option value="">Select...</option>
+      <option value="1">Yes</option>
+      <option value="0">No</option>
+    </select>
+  </div>
+  <div class="field">
+    <label id="question_1004-label" for="question_1004">How did you hear about this job?<span class="asterisk">*</span></label>
+    <input id="question_1004" type="text" role="combobox" aria-autocomplete="list" aria-expanded="false"
+           aria-controls="question_1004-listbox" aria-labelledby="question_1004-label" required autocomplete="off">
+    <ul id="question_1004-listbox" role="listbox" hidden>
+      <li role="option">LinkedIn</li>
+      <li role="option">Referral</li>
+      <li role="option">Company website</li>
+    </ul>
+    <input type="hidden" name="question_1004" id="question_1004-value">
+  </div>
+  <fieldset class="field">
+    <legend>U.S. Equal Employment Opportunity information</legend>
+    <label for="gender">Gender</label>
+    <select id="gender" name="gender">
+      <option value="">Select...</option>
+      <option value="1">Male</option>
+      <option value="2">Female</option>
+      <option value="3">Decline To Self Identify</option>
+    </select>
+  </fieldset>
+  <button type="submit" class="btn btn--pill">Submit application</button>
+</form>
+
+<script>
+  // Minimal react-select stand-in: open on focus, filter on input, pick on click.
+  (function () {
+    const input = document.getElementById('question_1004');
+    const list = document.getElementById('question_1004-listbox');
+    const hidden = document.getElementById('question_1004-value');
+    const opts = Array.from(list.querySelectorAll('[role=option]'));
+    function show() { list.hidden = false; input.setAttribute('aria-expanded', 'true'); }
+    function filter() {
+      const q = input.value.toLowerCase();
+      opts.forEach(o => { o.hidden = q && !o.textContent.toLowerCase().includes(q); });
+      show();
+    }
+    input.addEventListener('focus', show);
+    input.addEventListener('click', show);
+    input.addEventListener('input', filter);
+    opts.forEach(o => o.addEventListener('click', () => {
+      input.value = o.textContent; hidden.value = o.textContent; list.hidden = true;
+      input.setAttribute('aria-expanded', 'false');
+    }));
+  })();
+</script>
+</body>
+</html>

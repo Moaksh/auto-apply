@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Data Engineer @ Acme Robotics</title>
+<!-- Local test fixture imitating jobs.ashbyhq.com/{org}/{id}/application (React form, yes/no buttons,
+     XHR submit, success message rendered in place). Posts to the local test server only.
+     ?fail=1 makes the server reject the submission (validation error shown in place). -->
+<style>
+  body { font-family: sans-serif; max-width: 760px; margin: 2rem auto; }
+  .ashby-application-form-field-entry { margin: 1rem 0; }
+  ._label_1v5e2_29 { display: block; font-weight: 600; }
+  ._required_1v5e2_50::after { content: "*"; color: #c00; }
+  ._yesno_hkyf8_143 button { padding: 6px 18px; }
+  ._yesno_hkyf8_143 button._active_hkyf8_200 { background: #333; color: #fff; }
+  ._errorMessage_q7cw0_10 { color: #c00; }
+  input[type=text], input[type=email], input[type=tel], textarea, select { width: 100%; padding: 6px; }
+</style>
+</head>
+<body>
+<div role="tablist"><button role="tab">Overview</button><button role="tab" aria-selected="true">Application</button></div>
+<div id="root">
+<form class="ashby-application-form-container _form_1v5e2_1" novalidate>
+  <div class="_fieldEntry_1v5e2_20 ashby-application-form-field-entry">
+    <label class="_label_1v5e2_29 _required_1v5e2_50" for="_systemfield_name">Name</label>
+    <input id="_systemfield_name" name="_systemfield_name" type="text" required>
+  </div>
+  <div class="_fieldEntry_1v5e2_20 ashby-application-form-field-entry">
+    <label class="_label_1v5e2_29 _required_1v5e2_50" for="_systemfield_email">Email</label>
+    <input id="_systemfield_email" name="_systemfield_email" type="email" required>
+  </div>
+  <div class="_fieldEntry_1v5e2_20 ashby-application-form-field-entry">
+    <label class="_label_1v5e2_29" for="_systemfield_phone">Phone Number</label>
+    <input id="_systemfield_phone" name="_systemfield_phone" type="tel">
+  </div>
+  <div class="_fieldEntry_1v5e2_20 ashby-application-form-field-entry">
+    <label class="_label_1v5e2_29 _required_1v5e2_50" for="_systemfield_resume">Resume</label>
+    <input id="_systemfield_resume" name="_systemfield_resume" type="file" required>
+  </div>
+  <div class="_fieldEntry_1v5e2_20 ashby-application-form-field-entry">
+    <label class="_label_1v5e2_29 _required_1v5e2_50" for="5d2c9a1e-why">What excites you about Acme Robotics?</label>
+    <textarea id="5d2c9a1e-why" name="5d2c9a1e-why" required></textarea>
+  </div>
+  <div class="_fieldEntry_1v5e2_20 ashby-application-form-field-entry">
+    <label class="_label_1v5e2_29" for="8f00b7aa-yoe">Years of professional experience</label>
+    <select id="8f00b7aa-yoe" name="8f00b7aa-yoe">
+      <option value="">Select...</option>
+      <option>0-2</option><option>3-5</option><option>6-9</option><option>10+</option>
+    </select>
+  </div>
+  <div class="_fieldEntry_1v5e2_20 ashby-application-form-field-entry">
+    <label class="_label_1v5e2_29 _required_1v5e2_50">Are you open to relocating to New York?</label>
+    <div class="_yesno_hkyf8_143">
+      <button type="button" data-v="Yes">Yes</button>
+      <button type="button" data-v="No">No</button>
+    </div>
+    <input type="hidden" name="a91e-relocate" value="">
+  </div>
+  <button type="submit" class="ashby-application-form-submit-button _submitButton_1v5e2_90">Submit Application</button>
+</form>
+</div>
+<script>
+  (function () {
+    const form = document.querySelector('form');
+    document.querySelectorAll('._yesno_hkyf8_143').forEach((box) => {
+      const hidden = box.parentElement.querySelector('input[type=hidden]');
+      box.querySelectorAll('button').forEach((b) => b.addEventListener('click', () => {
+        box.querySelectorAll('button').forEach((x) => x.classList.remove('_active_hkyf8_200'));
+        b.classList.add('_active_hkyf8_200');
+        hidden.value = b.dataset.v;
+      }));
+    });
+    function error(entry, msg) {
+      const p = document.createElement('p'); p.className = '_errorMessage_q7cw0_10'; p.textContent = msg; entry.appendChild(p);
+    }
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      document.querySelectorAll('._errorMessage_q7cw0_10').forEach((e) => e.remove());
+      let ok = true;
+      form.querySelectorAll('[required]').forEach((el) => {
+        if ((el.type === 'file' && !el.files.length) || (el.type !== 'file' && !el.value)) {
+          ok = false; error(el.closest('.ashby-application-form-field-entry'), 'This field is required');
+        }
+      });
+      const reloc = form.querySelector('input[name="a91e-relocate"]');
+      if (!reloc.value) { ok = false; error(reloc.closest('.ashby-application-form-field-entry'), 'This field is required'); }
+      if (!ok) return;
+      const fd = new FormData(form);
+      const resp = await fetch('/ashby/submit' + location.search, { method: 'POST', body: fd });
+      if (resp.ok) {
+        document.getElementById('root').innerHTML =
+          '<div class="_successContainer"><h2>Thank you</h2><p>Your application was successfully submitted. We\'ll be in touch!</p></div>';
+      } else {
+        error(form, 'Something went wrong submitting your application. Please try again.');
+      }
+    });
+  })();
+</script>
+</body>
+</html>

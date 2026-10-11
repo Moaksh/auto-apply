@@ -1,0 +1,58 @@
+[project]
+name = "autoapply"
+version = "0.1.0"
+description = "AutoApply engine: local job discovery + application daemon (autoapplyd)"
+readme = "README.md"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "pydantic>=2.7",
+    "httpx>=0.27",
+    "playwright>=1.45",
+    "claude-agent-sdk>=0.1.0",
+    "pyyaml>=6.0",
+    "typer>=0.12",
+    "rich>=13.7",
+    "numpy>=1.26",
+    # Local, offline embeddings for answer memory / question clustering (TF-IDF + cosine).
+    "scikit-learn>=1.5",
+    # Resume PDF text extraction (onboarding parse, resume picker).
+    "pypdf>=4.2",
+    # Career-page / fixture HTML parsing.
+    "beautifulsoup4>=4.12",
+    # Validating protocol messages against contract/protocol.schema.json.
+    "jsonschema>=4.22",
+    # Live-browser thumbnails (agent_step.screenshot_thumb).
+    "pillow>=10.0",
+]
+
+[project.optional-dependencies]
+# Optional higher-quality static embeddings. Downloads a model on first use, so it is
+# never required by tests; answers/memory.py must fall back to TF-IDF when absent.
+model2vec = ["model2vec>=0.3"]
+
+[project.scripts]
+autoapply = "autoapply.cli:main"
+autoapplyd = "autoapply.daemon:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.2",
+    "pytest-asyncio>=0.23",
+    "respx>=0.21",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["autoapply"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "network: test performs real network I/O (excluded by default; run with -m network)",
+]
+addopts = "-m 'not network'"

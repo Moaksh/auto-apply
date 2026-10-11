@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Acme Robotics - Platform Engineer</title>
+<!-- Local test fixture imitating jobs.lever.co/{company}/{id}/apply. Posts to the local test server only. -->
+<style>
+  body { font-family: sans-serif; max-width: 760px; margin: 2rem auto; }
+  .application-question { margin: 1rem 0; list-style: none; }
+  .application-label { font-weight: 600; }
+  .required { color: #c00; }
+  input[type=text], input[type=email], textarea, select { width: 100%; padding: 6px; }
+</style>
+</head>
+<body>
+<div class="posting-headline"><h2>Platform Engineer</h2><div class="posting-categories">San Francisco, CA · Engineering · Full-time</div></div>
+<form id="application-form" method="POST" action="/lever/apply" enctype="multipart/form-data">
+  <h4>Submit your application</h4>
+  <ul>
+    <li class="application-question resume">
+      <label>
+        <div class="application-label">Resume/CV<span class="required">✱</span></div>
+        <div class="application-field"><input type="file" name="resume" id="resume-upload-input" required></div>
+      </label>
+    </li>
+    <li class="application-question">
+      <label>
+        <div class="application-label">Full name<span class="required">✱</span></div>
+        <div class="application-field"><input type="text" name="name" required></div>
+      </label>
+    </li>
+    <li class="application-question">
+      <label>
+        <div class="application-label">Email<span class="required">✱</span></div>
+        <div class="application-field"><input type="email" name="email" required></div>
+      </label>
+    </li>
+    <li class="application-question">
+      <label>
+        <div class="application-label">Phone</div>
+        <div class="application-field"><input type="text" name="phone"></div>
+      </label>
+    </li>
+    <li class="application-question">
+      <label>
+        <div class="application-label">Current company</div>
+        <div class="application-field"><input type="text" name="org"></div>
+      </label>
+    </li>
+    <li class="application-question">
+      <label>
+        <div class="application-label">LinkedIn URL</div>
+        <div class="application-field"><input type="text" name="urls[LinkedIn]"></div>
+      </label>
+    </li>
+    <li class="application-question">
+      <label>
+        <div class="application-label">GitHub URL</div>
+        <div class="application-field"><input type="text" name="urls[GitHub]"></div>
+      </label>
+    </li>
+  </ul>
+
+  <h4>Additional questions</h4>
+  <ul>
+    <li class="application-question custom-question">
+      <div class="application-label full-width"><div class="text">Describe a distributed system you designed.<span class="required">✱</span></div></div>
+      <div class="application-field full-width"><textarea name="cards[7c1a][field0]" required></textarea></div>
+    </li>
+    <li class="application-question custom-question">
+      <div class="application-label full-width"><div class="text">Are you legally authorized to work in the United States?<span class="required">✱</span></div></div>
+      <div class="application-field full-width">
+        <ul data-qa="multiple-choice">
+          <li><label><input type="radio" name="cards[7c1a][field1]" value="Yes" required><span class="application-answer-alternative">Yes</span></label></li>
+          <li><label><input type="radio" name="cards[7c1a][field1]" value="No"><span class="application-answer-alternative">No</span></label></li>
+        </ul>
+      </div>
+    </li>
+    <li class="application-question custom-question">
+      <div class="application-label full-width"><div class="text">Which languages have you used in production?</div></div>
+      <div class="application-field full-width">
+        <ul data-qa="checkboxes">
+          <li><label><input type="checkbox" name="cards[7c1a][field2]" value="Go"><span>Go</span></label></li>
+          <li><label><input type="checkbox" name="cards[7c1a][field2]" value="Python"><span>Python</span></label></li>
+          <li><label><input type="checkbox" name="cards[7c1a][field2]" value="Rust"><span>Rust</span></label></li>
+        </ul>
+      </div>
+    </li>
+    <li class="application-question">
+      <label>
+        <div class="application-label">Additional information</div>
+        <div class="application-field"><textarea name="comments" placeholder="Add a cover letter or anything else you want to share."></textarea></div>
+      </label>
+    </li>
+  </ul>
+
+  <div class="eeo-section">
+    <h4>U.S. Equal Employment Opportunity information</h4>
+    <div class="application-question">
+      <div class="application-label">Gender</div>
+      <select name="eeo[gender]">
+        <option value="">Select ...</option>
+        <option value="Female">Female</option>
+        <option value="Male">Male</option>
+        <option value="Decline to self-identify">Decline to self-identify</option>
+      </select>
+    </div>
+  </div>
+  <div class="application-question">
+    <label><input type="checkbox" name="consent[store]" value="true" required> I agree to Acme storing my application data.<span class="required">✱</span></label>
+  </div>
+  <button type="submit" class="template-btn-submit" id="btn-submit" data-qa="btn-submit">Submit application</button>
+</form>
+</body>
+</html>

@@ -1,0 +1,92 @@
+{
+ "jobs": [
+  {
+   "absolute_url": "https://job-boards.greenhouse.io/acmerobotics/jobs/4012345002",
+   "data_compliance": [
+    {
+     "type": "gdpr",
+     "requires_consent": false
+    }
+   ],
+   "internal_job_id": 3011111002,
+   "location": {
+    "name": "Remote - US"
+   },
+   "metadata": null,
+   "id": 4012345002,
+   "updated_at": "2026-10-02T11:31:50-04:00",
+   "requisition_id": "ENG-101",
+   "title": "Senior Backend Engineer",
+   "company_name": "Acme Robotics",
+   "first_published": "2026-09-30T09:00:00-04:00",
+   "language": "en",
+   "content": "&lt;div class=&quot;content-intro&quot;&gt;&lt;p&gt;Acme builds warehouse robots.&lt;/p&gt;&lt;/div&gt;&lt;h3&gt;What you&#x27;ll do&lt;/h3&gt;&lt;ul&gt;&lt;li&gt;Design Go services for fleet telemetry&lt;/li&gt;&lt;li&gt;Own Postgres and Kafka pipelines&lt;/li&gt;&lt;/ul&gt;&lt;h3&gt;Compensation&lt;/h3&gt;&lt;p&gt;The base salary range for this role is $170,000 - $210,000 USD.&lt;/p&gt;&lt;p&gt;We offer remote work across the US.&lt;/p&gt;",
+   "departments": [
+    {
+     "id": 1,
+     "name": "Engineering",
+     "child_ids": [],
+     "parent_id": null
+    }
+   ],
+   "offices": [
+    {
+     "id": 9,
+     "name": "Remote - US",
+     "location": "United States",
+     "child_ids": [],
+     "parent_id": null
+    }
+   ]
+  },
+  {
+   "absolute_url": "https://acme.example/careers/listing?gh_jid=4012345003",
+   "internal_job_id": 3011111003,
+   "location": {
+    "name": "Berlin, Germany"
+   },
+   "metadata": null,
+   "id": 4012345003,
+   "updated_at": "2026-10-01T10:00:00Z",
+   "requisition_id": "ENG-102",
+   "title": "Frontend Engineer (Hybrid)",
+   "company_name": "Acme Robotics",
+   "first_published": "2026-09-29T10:00:00Z",
+   "language": "en",
+   "content": "&lt;p&gt;React and TypeScript. Hybrid, 3 days in our Berlin office.&lt;/p&gt;&lt;p&gt;Salary: \u20ac70.000 \u2013 \u20ac90.000 per year.&lt;/p&gt;",
+   "departments": [
+    {
+     "id": 1,
+     "name": "Engineering"
+    }
+   ],
+   "offices": [
+    {
+     "id": 10,
+     "name": "Berlin"
+    }
+   ]
+  },
+  {
+   "absolute_url": "https://job-boards.greenhouse.io/acmerobotics/jobs/4012345004",
+   "internal_job_id": 3011111004,
+   "location": {
+    "name": "San Francisco, CA"
+   },
+   "metadata": null,
+   "id": 4012345004,
+   "updated_at": "2026-10-01T10:00:00Z",
+   "requisition_id": "SAL-7",
+   "title": "Account Executive",
+   "company_name": "Acme Robotics",
+   "first_published": "2026-09-28T10:00:00Z",
+   "language": "en",
+   "content": "&lt;p&gt;Sell robots. 3-5 years of SaaS sales experience.&lt;/p&gt;",
+   "departments": [],
+   "offices": []
+  }
+ ],
+ "meta": {
+  "total": 3
+ }
+}

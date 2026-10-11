@@ -1,0 +1,296 @@
+{
+ "absolute_url": "https://job-boards.greenhouse.io/acmerobotics/jobs/4012345002",
+ "data_compliance": [
+  {
+   "type": "gdpr",
+   "requires_consent": false
+  }
+ ],
+ "internal_job_id": 3011111002,
+ "location": {
+  "name": "Remote - US"
+ },
+ "metadata": null,
+ "id": 4012345002,
+ "updated_at": "2026-10-02T11:31:50-04:00",
+ "requisition_id": "ENG-101",
+ "title": "Senior Backend Engineer",
+ "company_name": "Acme Robotics",
+ "first_published": "2026-09-30T09:00:00-04:00",
+ "language": "en",
+ "content": "&lt;div class=&quot;content-intro&quot;&gt;&lt;p&gt;Acme builds warehouse robots.&lt;/p&gt;&lt;/div&gt;&lt;h3&gt;What you&#x27;ll do&lt;/h3&gt;&lt;ul&gt;&lt;li&gt;Design Go services for fleet telemetry&lt;/li&gt;&lt;li&gt;Own Postgres and Kafka pipelines&lt;/li&gt;&lt;/ul&gt;&lt;h3&gt;Compensation&lt;/h3&gt;&lt;p&gt;The base salary range for this role is $170,000 - $210,000 USD.&lt;/p&gt;&lt;p&gt;We offer remote work across the US.&lt;/p&gt;",
+ "departments": [
+  {
+   "id": 1,
+   "name": "Engineering",
+   "child_ids": [],
+   "parent_id": null
+  }
+ ],
+ "offices": [
+  {
+   "id": 9,
+   "name": "Remote - US",
+   "location": "United States",
+   "child_ids": [],
+   "parent_id": null
+  }
+ ],
+ "pay_input_ranges": [
+  {
+   "min_cents": 17000000,
+   "max_cents": 21000000,
+   "currency_type": "USD",
+   "title": "US base",
+   "blurb": null
+  }
+ ],
+ "questions": [
+  {
+   "description": null,
+   "label": "First Name",
+   "required": true,
+   "fields": [
+    {
+     "name": "first_name",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Last Name",
+   "required": true,
+   "fields": [
+    {
+     "name": "last_name",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Email",
+   "required": true,
+   "fields": [
+    {
+     "name": "email",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Phone",
+   "required": false,
+   "fields": [
+    {
+     "name": "phone",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Resume/CV",
+   "required": true,
+   "fields": [
+    {
+     "name": "resume",
+     "type": "input_file",
+     "values": []
+    },
+    {
+     "name": "resume_text",
+     "type": "textarea",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Cover Letter",
+   "required": false,
+   "fields": [
+    {
+     "name": "cover_letter",
+     "type": "input_file",
+     "values": []
+    },
+    {
+     "name": "cover_letter_text",
+     "type": "textarea",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "LinkedIn Profile",
+   "required": false,
+   "fields": [
+    {
+     "name": "question_1001",
+     "type": "input_text",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": "&lt;p&gt;Max 500 words.&lt;/p&gt;",
+   "label": "Why do you want to work at Acme Robotics?",
+   "required": true,
+   "fields": [
+    {
+     "name": "question_1002",
+     "type": "textarea",
+     "values": []
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Will you now or in the future require visa sponsorship to work in the United States?",
+   "required": true,
+   "fields": [
+    {
+     "name": "question_1003",
+     "type": "multi_value_single_select",
+     "values": [
+      {
+       "label": "Yes",
+       "value": 1
+      },
+      {
+       "label": "No",
+       "value": 0
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "How did you hear about this job?",
+   "required": true,
+   "fields": [
+    {
+     "name": "question_1004",
+     "type": "multi_value_single_select",
+     "values": [
+      {
+       "label": "LinkedIn",
+       "value": 11
+      },
+      {
+       "label": "Referral",
+       "value": 12
+      },
+      {
+       "label": "Company website",
+       "value": 13
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "description": null,
+   "label": "Internal tracking",
+   "required": false,
+   "fields": [
+    {
+     "name": "question_1005",
+     "type": "input_hidden",
+     "values": []
+    }
+   ]
+  }
+ ],
+ "location_questions": [],
+ "compliance": [
+  {
+   "type": "eeoc",
+   "description": "&lt;p&gt;Voluntary self-identification.&lt;/p&gt;",
+   "questions": [
+    {
+     "required": false,
+     "label": "Gender",
+     "fields": [
+      {
+       "name": "gender",
+       "type": "multi_value_single_select",
+       "values": [
+        {
+         "label": "Male",
+         "value": "1"
+        },
+        {
+         "label": "Female",
+         "value": "2"
+        },
+        {
+         "label": "Decline To Self Identify",
+         "value": "3"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "required": false,
+     "label": "VeteranStatus",
+     "fields": [
+      {
+       "name": "veteran_status",
+       "type": "multi_value_single_select",
+       "values": [
+        {
+         "label": "I am not a protected veteran",
+         "value": "1"
+        },
+        {
+         "label": "I don't wish to answer",
+         "value": "3"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "demographic_questions": {
+  "header": "Voluntary demographics",
+  "description": "",
+  "questions": [
+   {
+    "id": 77,
+    "label": "Which pronouns do you use?",
+    "required": false,
+    "type": "multi_value_multi_select",
+    "answer_options": [
+     {
+      "id": 1,
+      "label": "she/her",
+      "free_form": false
+     },
+     {
+      "id": 2,
+      "label": "he/him",
+      "free_form": false
+     },
+     {
+      "id": 3,
+      "label": "they/them",
+      "free_form": false
+     }
+    ]
+   }
+  ]
+ }
+}

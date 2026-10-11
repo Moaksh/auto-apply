@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Application (challenge)</title></head>
+<body>
+<!-- Local test fixture: an application form guarded by a VISIBLE captcha widget. -->
+<form id="application-form" action="/greenhouse/submit" method="post">
+  <div class="field"><label for="first_name">First Name*</label><input id="first_name" name="first_name" required></div>
+  <div data-aa-captcha style="width: 304px; height: 78px; border: 1px solid #ccc">I'm not a robot</div>
+  <button type="submit">Submit application</button>
+</form>
+</body>
+</html>

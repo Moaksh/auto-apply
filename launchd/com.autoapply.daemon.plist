@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Reference template for the autoapplyd LaunchAgent. The installed copy is RENDERED by
+  engine/autoapply/launchd_install.py (render_plist), which fills the placeholders:
+    __AUTOAPPLYD__  absolute path to the autoapplyd executable
+    __HOME_DIR__    AutoApply data dir (~/Library/Application Support/AutoApply)
+    __PATH__        PATH with Homebrew / ~/.local/bin so claude, node, uv resolve
+    __ENGINE_DIR__  directory containing the autoapply package (PYTHONPATH)
+  Install:   uv run python -m autoapply.launchd_install install
+  Loads with: launchctl bootstrap gui/$UID ~/Library/LaunchAgents/com.autoapply.daemon.plist
+-->
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.autoapply.daemon</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>__AUTOAPPLYD__</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<dict>
+		<key>SuccessfulExit</key>
+		<false/>
+	</dict>
+	<key>ThrottleInterval</key>
+	<integer>30</integer>
+	<key>ProcessType</key>
+	<string>Interactive</string>
+	<key>WorkingDirectory</key>
+	<string>__HOME_DIR__</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>PATH</key>
+		<string>__PATH__</string>
+		<key>PYTHONUNBUFFERED</key>
+		<string>1</string>
+		<key>PYTHONPATH</key>
+		<string>__ENGINE_DIR__</string>
+	</dict>
+	<key>StandardOutPath</key>
+	<string>__HOME_DIR__/logs/autoapplyd.stdout.log</string>
+	<key>StandardErrorPath</key>
+	<string>__HOME_DIR__/logs/autoapplyd.stderr.log</string>
+</dict>
+</plist>

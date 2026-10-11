@@ -1,0 +1,20 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Swift
+.build/
+.swiftpm/
+*.xcodeproj/xcuserdata/
+
+# Data
+*.db
+*.db-wal
+*.db-shm
+
+# macOS
+.DS_Store
+app/build/

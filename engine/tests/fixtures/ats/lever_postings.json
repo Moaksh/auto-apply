@@ -1,0 +1,70 @@
+[
+ {
+  "additionalPlain": "We are an equal opportunity employer.",
+  "additional": "<div>We are an equal opportunity employer.</div>",
+  "categories": {
+   "commitment": "Full-time",
+   "location": "San Francisco, CA",
+   "team": "Platform",
+   "department": "Engineering",
+   "allLocations": [
+    "San Francisco, CA",
+    "New York, NY"
+   ]
+  },
+  "createdAt": 1786469891368,
+  "descriptionPlain": "Acme Robotics is hiring a Platform Engineer to run our Kubernetes fleet.\n",
+  "description": "<div>Acme Robotics is hiring a Platform Engineer to run our Kubernetes fleet.</div>",
+  "id": "6ed76ce8-4156-4b60-b120-403538bd66cd",
+  "lists": [
+   {
+    "text": "Requirements",
+    "content": "<li>5+ years with Kubernetes</li><li>Terraform</li>"
+   }
+  ],
+  "text": "Platform Engineer",
+  "country": "US",
+  "workplaceType": "hybrid",
+  "salaryRange": {
+   "currency": "USD",
+   "interval": "per-year-salary",
+   "min": 160000,
+   "max": 200000
+  },
+  "hostedUrl": "https://jobs.lever.co/acmerobotics/6ed76ce8-4156-4b60-b120-403538bd66cd",
+  "applyUrl": "https://jobs.lever.co/acmerobotics/6ed76ce8-4156-4b60-b120-403538bd66cd/apply"
+ },
+ {
+  "additionalPlain": "",
+  "categories": {
+   "commitment": "Contract",
+   "location": "Remote",
+   "team": "Data",
+   "allLocations": [
+    "Remote"
+   ]
+  },
+  "createdAt": 1786000000000,
+  "descriptionPlain": "Hourly contract role. Pay: $60 - $80 per hour.",
+  "id": "0b1e3f6a-1111-2222-3333-444455556666",
+  "lists": [],
+  "text": "Data Engineer (Contract)",
+  "country": "US",
+  "workplaceType": "remote",
+  "hostedUrl": "https://jobs.lever.co/acmerobotics/0b1e3f6a-1111-2222-3333-444455556666",
+  "applyUrl": "https://jobs.lever.co/acmerobotics/0b1e3f6a-1111-2222-3333-444455556666/apply"
+ },
+ {
+  "categories": {
+   "location": "London, UK"
+  },
+  "createdAt": 1785000000000,
+  "descriptionPlain": "Office manager.",
+  "id": "aa",
+  "lists": [],
+  "text": "Office Manager",
+  "workplaceType": "on-site",
+  "hostedUrl": "https://jobs.lever.co/acmerobotics/aa",
+  "applyUrl": "https://jobs.lever.co/acmerobotics/aa/apply"
+ }
+]

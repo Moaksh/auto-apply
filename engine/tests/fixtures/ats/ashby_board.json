@@ -1,0 +1,88 @@
+{
+ "apiVersion": "1",
+ "jobs": [
+  {
+   "id": "34413f8d-26bf-4bbc-8ade-eb309a0e2245",
+   "title": " Data Engineer ",
+   "department": "Engineering",
+   "team": "Data",
+   "employmentType": "FullTime",
+   "location": "New York, NY (HQ)",
+   "shouldDisplayCompensationOnJobPostings": true,
+   "secondaryLocations": [
+    {
+     "location": "Remote (US)",
+     "address": {
+      "postalAddress": {
+       "addressCountry": "United States"
+      }
+     }
+    }
+   ],
+   "publishedAt": "2026-04-07T17:12:35.753+00:00",
+   "isListed": true,
+   "isRemote": true,
+   "workplaceType": "Hybrid",
+   "address": {
+    "postalAddress": {
+     "addressRegion": "NY",
+     "addressCountry": "USA",
+     "addressLocality": "New York City"
+    }
+   },
+   "jobUrl": "https://jobs.ashbyhq.com/acmerobotics/34413f8d-26bf-4bbc-8ade-eb309a0e2245",
+   "applyUrl": "https://jobs.ashbyhq.com/acmerobotics/34413f8d-26bf-4bbc-8ade-eb309a0e2245/application",
+   "descriptionHtml": "<h1>About Acme</h1><p>Spark, Airflow, dbt.</p>",
+   "descriptionPlain": "ABOUT ACME\n\nSpark, Airflow, dbt.",
+   "compensation": {
+    "compensationTierSummary": "$211.4K \u2013 $290.6K \u2022 Offers Equity",
+    "scrapeableCompensationSalarySummary": "$211.4K - $290.6K",
+    "compensationTiers": [],
+    "summaryComponents": [
+     {
+      "compensationType": "EquityPercentage",
+      "interval": "NONE",
+      "currencyCode": null,
+      "minValue": null,
+      "maxValue": null
+     },
+     {
+      "compensationType": "Salary",
+      "interval": "1 YEAR",
+      "currencyCode": "USD",
+      "minValue": 211400,
+      "maxValue": 290600
+     }
+    ]
+   }
+  },
+  {
+   "id": "unlisted-1",
+   "title": "Secret Role",
+   "location": "Remote",
+   "isListed": false,
+   "isRemote": true,
+   "workplaceType": "Remote",
+   "jobUrl": "https://jobs.ashbyhq.com/acmerobotics/unlisted-1",
+   "descriptionPlain": "hidden"
+  },
+  {
+   "id": "c0ffee00-0000-4000-8000-000000000001",
+   "title": "ML Engineer",
+   "location": "Remote (Canada)",
+   "secondaryLocations": [],
+   "isListed": true,
+   "isRemote": true,
+   "workplaceType": "Remote",
+   "jobUrl": "https://jobs.ashbyhq.com/acmerobotics/c0ffee00-0000-4000-8000-000000000001",
+   "applyUrl": "https://jobs.ashbyhq.com/acmerobotics/c0ffee00-0000-4000-8000-000000000001/application",
+   "descriptionPlain": "PyTorch. Compensation: CA$150K - CA$190K.",
+   "publishedAt": "2026-05-01T00:00:00Z",
+   "compensation": {
+    "compensationTierSummary": "CA$150K \u2013 CA$190K",
+    "scrapeableCompensationSalarySummary": "CA$150K - CA$190K",
+    "summaryComponents": []
+   }
+  }
+ ]
+}

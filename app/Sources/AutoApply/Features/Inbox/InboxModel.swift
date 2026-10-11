@@ -1,0 +1,506 @@
+// InboxModel.swift — Needs-You inbox logic (docs/UI_UX_PLAN.md §5.5): impact-first clusters,
+// an adaptive composer per cluster, answer-once with a 10 s Undo window (the command is held
+// until the window closes, so Undo is a true undo), auto-advance, and the inbox-zero moment.
+import AppKit
+import Foundation
+import Observation
+
+/// How the composer adapts to a cluster's question.
+enum AnswerKind: Equatable, Sendable {
+    case shortText
+    case longText          // template with {company} / {role} tokens + per-company preview
+    case number
+    case yesNo
+    case choice(multi: Bool)
+    case url
+    case email
+    case date
+    case captcha           // "solve it in the agent's Chrome, then confirm"
+
+    init(cluster: QuestionCluster) {
+        if cluster.reason == .captcha { self = .captcha; return }
+        switch cluster.fieldType {
+        case .textarea: self = .longText
+        case .number: self = .number
+        case .boolean: self = .yesNo
+        case .select: self = cluster.options.isEmpty ? .shortText : .choice(multi: false)
+        case .multiselect: self = cluster.options.isEmpty ? .shortText : .choice(multi: true)
+        case .url: self = .url
+        case .email: self = .email
+        case .date: self = .date
+        case .text, .phone, .file:
+            // "Why…", "Describe…", "Tell us…" read as essays even when the form used a text input.
+            let q = cluster.canonicalQuestion.lowercased()
+            let essay = ["why ", "describe", "tell us", "what draws", "what excites", "explain", "how would you"].contains { q.hasPrefix($0) || q.contains(" \($0)") }
+            self = essay ? .longText : .shortText
+        }
+    }
+
+    var supportsTemplate: Bool { self == .longText }
+}
+
+/// Per-cluster composer state. Drafts survive switching between clusters.
+struct AnswerDraft: Equatable, Sendable {
+    var text = ""
+    var yesNo: Bool?
+    var choices: [String] = []
+    var saveToMemory = true
+    /// Never-guess clusters: write the value into the profile's facts instead of memory.
+    var saveToProfile = false
+    /// "Answer per job instead" escape hatch.
+    var perJob = false
+    var perJobAnswers: [Int: String] = [:]
+
+    init() {}
+
+    init(cluster: QuestionCluster) {
+        let isNeverGuess = cluster.neverGuessKey != nil || cluster.reason == .neverGuess
+        saveToProfile = isNeverGuess && cluster.neverGuessKey != nil
+        saveToMemory = !saveToProfile && cluster.reason != .captcha
+    }
+}
+
+enum AnswerValidationError: Error, Equatable, Sendable {
+    case empty
+    case notANumber
+    case invalidURL
+    case invalidEmail
+    case missingPerJob(count: Int)
+
+    var message: String {
+        switch self {
+        case .empty: "Type an answer first."
+        case .notANumber: "This one needs a number."
+        case .invalidURL: "That doesn't look like a link (https://…)."
+        case .invalidEmail: "That doesn't look like an email address."
+        case .missingPerJob(let n): n == 1 ? "One job still needs an answer." : "\(n) jobs still need an answer."
+        }
+    }
+}
+
+/// The validated, wire-ready answer for `answer_question`.
+struct ResolvedAnswer: Equatable, Sendable {
+    var answer: String
+    var saveToMemory: Bool
+    var saveToProfile: Bool
+    var perJobAnswers: [PerJobAnswer]
+}
+
+enum AnswerComposerLogic {
+    /// Validate a draft into the payload fields, or say what's wrong.
+    static func resolve(_ draft: AnswerDraft, kind: AnswerKind, jobIDs: [Int]) -> Result<ResolvedAnswer, AnswerValidationError> {
+        if draft.perJob {
+            let missing = jobIDs.filter { (draft.perJobAnswers[$0] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            if !missing.isEmpty { return .failure(.missingPerJob(count: missing.count)) }
+            let answers = jobIDs.map { PerJobAnswer(jobId: $0, answer: draft.perJobAnswers[$0]!.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            for a in answers {
+                if case .failure(let e) = validateValue(a.answer, kind: kind) { return .failure(e) }
+            }
+            // `answer` is required on the wire: use the most common per-job value.
+            let counts = Dictionary(grouping: answers.map(\.answer), by: { $0 }).mapValues(\.count)
+            let representative = counts.max { a, b in a.value == b.value ? a.key > b.key : a.value < b.value }?.key ?? answers[0].answer
+            return .success(ResolvedAnswer(answer: representative, saveToMemory: false, saveToProfile: false, perJobAnswers: answers))
+        }
+        let value: String
+        switch kind {
+        case .yesNo:
+            guard let yes = draft.yesNo else { return .failure(.empty) }
+            value = yes ? "Yes" : "No"
+        case .choice:
+            guard !draft.choices.isEmpty else { return .failure(.empty) }
+            value = draft.choices.joined(separator: ", ")
+        case .captcha:
+            value = "solved"
+        default:
+            value = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if case .failure(let e) = validateValue(value, kind: kind) { return .failure(e) }
+        return .success(ResolvedAnswer(answer: value, saveToMemory: draft.saveToMemory && !draft.saveToProfile,
+                                       saveToProfile: draft.saveToProfile, perJobAnswers: []))
+    }
+
+    static func validateValue(_ value: String, kind: AnswerKind) -> Result<Void, AnswerValidationError> {
+        let v = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !v.isEmpty else { return .failure(.empty) }
+        switch kind {
+        case .number:
+            // Allow "4", "4.5", "4 years", "₹45L"-style values only when they start numeric.
+            let numeric = v.replacingOccurrences(of: ",", with: "")
+            guard let first = numeric.split(separator: " ").first, Double(first) != nil else { return .failure(.notANumber) }
+        case .url:
+            guard let url = URL(string: v.contains("://") ? v : "https://\(v)"), let host = url.host, host.contains(".") else {
+                return .failure(.invalidURL)
+            }
+        case .email:
+            let parts = v.split(separator: "@")
+            guard parts.count == 2, parts[1].contains("."), !v.contains(" ") else { return .failure(.invalidEmail) }
+        default:
+            break
+        }
+        return .success(())
+    }
+
+    /// `{company}` / `{role}` substitution for the per-company preview.
+    static func render(template: String, company: String, role: String) -> String {
+        template
+            .replacingOccurrences(of: "{company}", with: company)
+            .replacingOccurrences(of: "{role}", with: role)
+    }
+
+    static func usesTokens(_ text: String) -> Bool { text.contains("{company}") || text.contains("{role}") }
+}
+
+/// Ranks stories against a question by tag / keyword overlap ("Suggested from your stories").
+enum StorySuggester {
+    private static let stopwords: Set<String> = ["the", "a", "an", "you", "your", "to", "of", "and", "in", "on", "at", "for", "with",
+                                                 "do", "did", "how", "what", "why", "when", "tell", "us", "about", "time", "describe", "is", "are", "we", "our"]
+
+    static func keywords(_ text: String) -> Set<String> {
+        Set(text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init).filter { $0.count > 2 && !stopwords.contains($0) })
+    }
+
+    static func rank(question: String, stories: [StoryItem], limit: Int = 3) -> [StoryItem] {
+        let q = keywords(question)
+        guard !q.isEmpty else { return [] }
+        let scored: [(StoryItem, Int)] = stories.map { story in
+            let tags = Set(story.tags.map { $0.lowercased() })
+            let body = keywords([story.title, story.situation, story.task, story.action, story.result].joined(separator: " "))
+            let score = q.intersection(tags).count * 3 + q.intersection(body).count
+            return (story, score)
+        }
+        return scored.filter { $0.1 > 0 }.sorted { $0.1 != $1.1 ? $0.1 > $1.1 : $0.0.uses > $1.0.uses }.prefix(limit).map(\.0)
+    }
+
+    /// Compact first-person paragraph to drop into a draft.
+    static func snippet(_ story: StoryItem) -> String {
+        [story.situation, story.action, story.result].map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }.joined(separator: " ")
+    }
+}
+
+/// One answered/skipped cluster for the collapsed "Answered today" section.
+struct InboxAnsweredRecord: Identifiable, Equatable, Sendable {
+    var id: String { clusterID }
+    var clusterID: String
+    var question: String
+    var jobCount: Int
+    var status: QuestionResolvedPayload.Status
+    var at: Date
+    /// Still inside the Undo window (command not sent yet).
+    var isPending: Bool
+}
+
+@MainActor
+@Observable
+final class InboxModel {
+    let store: AppStore
+    @ObservationIgnored var clipboard: ClipboardWriting = SystemClipboard.shared
+
+    /// Undo window before the answer is actually sent (§5.5: "Undo (⌘Z) is available for 10s").
+    @ObservationIgnored var undoWindow: Duration = .seconds(10)
+
+    var selectedClusterID: String?
+    private(set) var drafts: [String: AnswerDraft] = [:]
+    private(set) var answered: [InboxAnsweredRecord] = []
+    private(set) var seenClusterIDs: Set<String> = []
+    /// Bumps on the transition to zero open clusters (drives the celebration once per transition).
+    private(set) var inboxZeroTrigger = 0
+    /// Inline validation message for the selected cluster (cleared on edit).
+    var validationMessage: String?
+    /// Bumped to shake the composer on invalid input.
+    private(set) var shakeTrigger = 0
+
+    private struct Pending {
+        var cluster: QuestionCluster
+        var answer: ResolvedAnswer?   // nil = skip
+        var skipReason: String?
+        var task: Task<Void, Never>
+        /// When the Undo window opened, and the cluster's `resolvedToday` timestamp at that moment
+        /// (if it had one) — used to tell whether the daemon resolved it while we held the answer.
+        var enqueuedAt: Date
+        var priorResolvedAt: Date?
+    }
+    @ObservationIgnored private var pending: [String: Pending] = [:]
+    @ObservationIgnored private var terminationObserver: NSObjectProtocol?
+
+    static func shared(for store: AppStore) -> InboxModel {
+        FeatureModels.model(InboxModel.self, for: store) { InboxModel(store: store) }
+    }
+
+    init(store: AppStore) {
+        self.store = store
+        terminationObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.willTerminateNotification, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.flushSynchronouslyOnQuit() }
+        }
+    }
+
+    // MARK: Derived
+
+    /// Open clusters, impact first (the store already sorts by jobs unblocked).
+    var clusters: [QuestionCluster] { store.inbox.clusters.filter { pending[$0.clusterId] == nil } }
+
+    var selectedCluster: QuestionCluster? {
+        guard let id = selectedClusterID else { return nil }
+        return clusters.first { $0.clusterId == id }
+    }
+
+    var openCount: Int { clusters.count }
+
+    var jobsWaiting: Int { Set(clusters.flatMap(\.jobIds)).count }
+
+    var pendingCount: Int { pending.count }
+
+    /// Total jobs resumed by answers today (inbox-zero subline).
+    var resumedToday: Int { answered.filter { $0.status == .answered }.reduce(0) { $0 + $1.jobCount } }
+
+    var isInboxZero: Bool { clusters.isEmpty }
+
+    func isUnread(_ cluster: QuestionCluster) -> Bool { !seenClusterIDs.contains(cluster.clusterId) }
+
+    func kind(for cluster: QuestionCluster) -> AnswerKind { AnswerKind(cluster: cluster) }
+
+    func draft(for cluster: QuestionCluster) -> AnswerDraft { drafts[cluster.clusterId] ?? AnswerDraft(cluster: cluster) }
+
+    func updateDraft(for cluster: QuestionCluster, _ body: (inout AnswerDraft) -> Void) {
+        var d = draft(for: cluster)
+        body(&d)
+        drafts[cluster.clusterId] = d
+        validationMessage = nil
+    }
+
+    /// Jobs (company + role) blocked by a cluster, for previews and the per-job list.
+    func jobs(for cluster: QuestionCluster) -> [JobItem] {
+        cluster.jobIds.compactMap { store.jobs.job(id: $0) }
+    }
+
+    /// "Stripe, Ramp, +12"
+    func companiesLine(_ cluster: QuestionCluster, max: Int = 2) -> String {
+        var names = cluster.companies
+        if names.isEmpty { names = jobs(for: cluster).map(\.company) }
+        var seen = Set<String>()
+        names = names.filter { seen.insert($0).inserted }
+        guard !names.isEmpty else { return "" }
+        let shown = names.prefix(max).joined(separator: ", ")
+        return names.count > max ? "\(shown), +\(names.count - max)" : shown
+    }
+
+    func suggestedStories(for cluster: QuestionCluster) -> [StoryItem] {
+        guard kind(for: cluster) == .longText else { return [] }
+        return StorySuggester.rank(question: cluster.canonicalQuestion + " " + cluster.variants.joined(separator: " "),
+                                   stories: store.library.stories)
+    }
+
+    /// An existing memory answer for a near-identical question (offered as a starting point).
+    func memorySuggestion(for cluster: QuestionCluster) -> MemoryAnswerItem? {
+        let q = StorySuggester.keywords(cluster.canonicalQuestion)
+        guard !q.isEmpty else { return nil }
+        var best: MemoryAnswerItem?
+        var bestScore = 0.6
+        for answer in store.library.memoryAnswers {
+            let k = StorySuggester.keywords(answer.canonicalQuestion)
+            guard !k.isEmpty else { continue }
+            let jaccard = Double(q.intersection(k).count) / Double(q.union(k).count)
+            if jaccard >= bestScore {
+                bestScore = jaccard
+                best = answer
+            }
+        }
+        return best
+    }
+
+    // MARK: Selection
+
+    /// Keep a valid selection: the first (highest impact) cluster when nothing valid is selected.
+    func ensureSelection() {
+        if selectedCluster == nil { select(clusters.first?.clusterId) }
+    }
+
+    func select(_ clusterID: String?) {
+        selectedClusterID = clusterID
+        validationMessage = nil
+        if let clusterID { seenClusterIDs.insert(clusterID) }
+    }
+
+    func moveSelection(by delta: Int) {
+        let list = clusters
+        guard !list.isEmpty else { return }
+        let current = list.firstIndex { $0.clusterId == selectedClusterID } ?? (delta > 0 ? -1 : list.count)
+        let next = max(0, min(list.count - 1, current + delta))
+        select(list[next].clusterId)
+    }
+
+    // MARK: Answer once
+
+    /// Validate and answer the selected cluster. Returns false (and shakes) on invalid input.
+    @discardableResult
+    func submitSelected(undoManager: UndoManager? = nil) -> Bool {
+        guard let cluster = selectedCluster else { return false }
+        let draft = draft(for: cluster)
+        switch AnswerComposerLogic.resolve(draft, kind: kind(for: cluster), jobIDs: cluster.jobIds) {
+        case .failure(let error):
+            validationMessage = error.message
+            shakeTrigger += 1
+            return false
+        case .success(let resolved):
+            enqueue(cluster: cluster, answer: resolved, skipReason: nil, undoManager: undoManager)
+            return true
+        }
+    }
+
+    /// "Skip these jobs": parks every job in the cluster as skipped (same Undo window).
+    func skipSelected(reason: String? = "user_skipped_question", undoManager: UndoManager? = nil) {
+        guard let cluster = selectedCluster else { return }
+        enqueue(cluster: cluster, answer: nil, skipReason: reason, undoManager: undoManager)
+    }
+
+    private func enqueue(cluster: QuestionCluster, answer: ResolvedAnswer?, skipReason: String?, undoManager: UndoManager?) {
+        let id = cluster.clusterId
+        let wasLast = clusters.count == 1
+        // Leave the list now (the cluster compresses into "Answered today"), send after the window.
+        store.inbox.removeOptimistically(clusterID: id)
+        let window = undoWindow
+        let task = Task { [weak self] in
+            try? await Task.sleep(for: window)
+            guard !Task.isCancelled else { return }
+            await self?.commit(clusterID: id)
+        }
+        pending[id] = Pending(cluster: cluster, answer: answer, skipReason: skipReason, task: task, enqueuedAt: Date(),
+                              priorResolvedAt: store.inbox.resolvedToday.first { $0.clusterID == id }?.at)
+        answered.removeAll { $0.clusterID == id }
+        answered.insert(InboxAnsweredRecord(clusterID: id, question: cluster.canonicalQuestion, jobCount: cluster.jobCount,
+                                            status: answer == nil ? .skipped : .answered, at: Date(), isPending: true), at: 0)
+        drafts.removeValue(forKey: id)
+        validationMessage = nil
+        // Auto-advance to the next highest-impact cluster.
+        select(clusters.first?.clusterId)
+        if wasLast || clusters.isEmpty {
+            inboxZeroTrigger += 1
+            Haptics.levelChange()
+        }
+        let jobsText = C3Format.plural(cluster.jobCount, "job")
+        let message = answer == nil ? "Skipped · \(jobsText)" : "Answered · \(jobsText) resumed"
+        store.toasts.show(message, symbol: answer == nil ? "arrow.uturn.right" : "checkmark", style: .success,
+                          duration: window, actionTitle: "Undo") { [weak self] in self?.undo(clusterID: id) }
+        if let undoManager {
+            undoManager.registerUndo(withTarget: self) { model in
+                MainActor.assumeIsolated { model.undo(clusterID: id) }
+            }
+            undoManager.setActionName(answer == nil ? "Skip Question" : "Answer")
+        }
+    }
+
+    /// Cancel a pending answer inside its window and put the cluster back, selected.
+    @discardableResult
+    func undo(clusterID: String? = nil) -> Bool {
+        guard let id = clusterID ?? answered.first(where: \.isPending)?.clusterID, let p = pending.removeValue(forKey: id) else { return false }
+        p.task.cancel()
+        answered.removeAll { $0.clusterID == id }
+        if resolvedElsewhere(p) {
+            // The daemon already resolved it (CLI / another window): nothing to put back.
+            store.toasts.show("Already resolved elsewhere", symbol: "info.circle", style: .info)
+            return false
+        }
+        store.inbox.restore(p.cluster)
+        restoreDraft(from: p)
+        select(id)
+        return true
+    }
+
+    /// Put a held answer back in the composer (text, yes/no, choices, per-job, save toggles) so
+    /// nothing typed is lost.
+    private func restoreDraft(from p: Pending) {
+        guard let a = p.answer else { return }
+        var d = AnswerDraft(cluster: p.cluster)
+        d.text = a.perJobAnswers.isEmpty ? a.answer : ""
+        d.saveToMemory = a.saveToMemory
+        d.saveToProfile = a.saveToProfile
+        if !a.perJobAnswers.isEmpty {
+            d.perJob = true
+            d.perJobAnswers = Dictionary(a.perJobAnswers.map { ($0.jobId, $0.answer) }, uniquingKeysWith: { a, _ in a })
+        }
+        if AnswerKind(cluster: p.cluster) == .yesNo { d.yesNo = a.answer == "Yes" }
+        if case .choice = AnswerKind(cluster: p.cluster) { d.choices = a.answer.components(separatedBy: ", ") }
+        drafts[p.cluster.clusterId] = d
+    }
+
+    /// Whether the daemon resolved this cluster (a `question_resolved` from elsewhere) while the
+    /// answer was held in its Undo window.
+    private func resolvedElsewhere(_ p: Pending) -> Bool {
+        guard let entry = store.inbox.resolvedToday.first(where: { $0.clusterID == p.cluster.clusterId }) else { return false }
+        if let prior = p.priorResolvedAt { return entry.at != prior }
+        return true
+    }
+
+    /// Send everything still pending now (leaving the app, tests).
+    func flushPending() async {
+        for id in Array(pending.keys) {
+            pending[id]?.task.cancel()
+            await commit(clusterID: id)
+        }
+    }
+
+    private func commit(clusterID id: String) async {
+        guard let p = pending.removeValue(forKey: id) else { return }
+        if resolvedElsewhere(p) {
+            // Resolved by the daemon / CLI / another window during the window: sending now would
+            // only error. Drop ours and let the remote "Answered today" row stand.
+            answered.removeAll { $0.clusterID == id }
+            store.toasts.show("Already resolved elsewhere · your answer wasn't sent", symbol: "info.circle", style: .info)
+            return
+        }
+        let ok: Bool
+        if let a = p.answer {
+            ok = await store.answerQuestion(clusterID: id, answer: a.answer, saveToMemory: a.saveToMemory,
+                                            saveToProfile: a.saveToProfile, perJobAnswers: a.perJobAnswers)
+        } else {
+            ok = await store.skipQuestion(clusterID: id, reason: p.skipReason)
+        }
+        if ok {
+            if let i = answered.firstIndex(where: { $0.clusterID == id }) { answered[i].isPending = false }
+        } else {
+            answered.removeAll { $0.clusterID == id }
+            // Resolved elsewhere while the send was in flight: don't resurrect a phantom cluster.
+            guard !resolvedElsewhere(p) else { return }
+            // The store already toasted the failure; bring the cluster back so nothing is lost.
+            store.inbox.restore(p.cluster)
+            restoreDraft(from: p)
+        }
+    }
+
+    /// App is quitting inside an Undo window: send the held commands (no reply wait), blocking
+    /// termination for at most ~1 s so they reach the socket.
+    private func flushSynchronouslyOnQuit() {
+        guard !pending.isEmpty else { return }
+        let client = store.client
+        for p in pending.values { p.task.cancel() }
+        let commands: [Command] = pending.filter { !resolvedElsewhere($0.value) }.map { id, p in
+            p.answer.map {
+                .answerQuestion(AnswerQuestionPayload(clusterId: id, answer: $0.answer, saveToMemory: $0.saveToMemory,
+                                                      saveToProfile: $0.saveToProfile, perJobAnswers: $0.perJobAnswers))
+            } ?? .skipQuestion(SkipQuestionPayload(clusterId: id, reason: p.skipReason))
+        }
+        pending.removeAll()
+        let done = DispatchSemaphore(value: 0)
+        Task.detached {
+            for command in commands { _ = try? await client.send(command) }
+            done.signal()
+        }
+        _ = done.wait(timeout: .now() + 1)
+    }
+
+    /// Clusters answered in this session that the daemon resolved but we never saw locally
+    /// (answered from the CLI / another window) — shown in "Answered today" too.
+    var answeredTodayRows: [InboxAnsweredRecord] {
+        let local = Set(answered.map(\.clusterID))
+        let remote = store.inbox.resolvedToday.filter { !local.contains($0.clusterID) }.map {
+            InboxAnsweredRecord(clusterID: $0.clusterID, question: $0.question, jobCount: $0.jobCount, status: $0.status, at: $0.at, isPending: false)
+        }
+        return (answered + remote).sorted { $0.at > $1.at }
+    }
+
+    func copyQuestion(_ cluster: QuestionCluster) {
+        clipboard.write(cluster.canonicalQuestion)
+        store.toasts.show("Copied · question", symbol: "doc.on.clipboard", style: .success)
+    }
+}
