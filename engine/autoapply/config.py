@@ -36,6 +36,7 @@ def _default_sources() -> dict[str, bool]:
         "careers": True,
         "linkedin": False,
         "glassdoor": False,
+        "google": True,
     }
 
 

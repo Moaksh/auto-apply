@@ -91,7 +91,7 @@ from autoapply.models import (
 )
 
 #: Must equal MAX(version) seeded by contract/schema.sql.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 #: Forward migrations: version -> SQL to go from (version-1) to version. Append-only.
 #: Version 1 is the baseline created by contract/schema.sql itself.
@@ -107,7 +107,44 @@ ALTER TABLE questions ADD COLUMN suggested_confidence REAL;
     4: """
 ALTER TABLE questions ADD COLUMN suggested_note TEXT;
 """,
+    5: "python:_migrate_v5",
 }
+
+
+def _migrate_v5(conn: sqlite3.Connection) -> None:
+    """v5: jobs.source accepts 'google' (Google Jobs); scores.basis remembers what a score was
+    computed against so a threshold-only change can reuse it. SQLite can't alter a CHECK, so
+    jobs is rebuilt (the documented 12-step procedure, foreign keys off for the swap)."""
+    conn.execute("PRAGMA foreign_keys = OFF")
+    try:
+        conn.execute("BEGIN")
+        ddl = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'jobs'").fetchone()[0]
+        if "'google'" not in ddl:
+            new_ddl = re.sub(r"^CREATE TABLE (IF NOT EXISTS )?\"?jobs\"?", "CREATE TABLE jobs_v5", ddl, count=1)
+            new_ddl = new_ddl.replace("'glassdoor','manual'", "'glassdoor','google','manual'")
+            if new_ddl == ddl or "'google'" not in new_ddl:
+                raise DBError("v5 migration: unexpected jobs table definition")
+            extras = [r[0] for r in conn.execute(
+                "SELECT sql FROM sqlite_master WHERE tbl_name = 'jobs' AND type IN ('index', 'trigger') AND sql IS NOT NULL")]
+            conn.execute(new_ddl)
+            conn.execute("INSERT INTO jobs_v5 SELECT * FROM jobs")
+            conn.execute("DROP TABLE jobs")
+            conn.execute("ALTER TABLE jobs_v5 RENAME TO jobs")
+            for sql in extras:
+                conn.execute(sql)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(scores)")}
+        if "basis" not in cols:
+            conn.execute("ALTER TABLE scores ADD COLUMN basis TEXT")
+        bad = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if bad:
+            raise DBError(f"v5 migration broke foreign keys: {bad[:3]}")
+        conn.execute("INSERT INTO schema_version(version) VALUES (5)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+    finally:
+        conn.execute("PRAGMA foreign_keys = ON")
 
 
 # =====================================================================================
@@ -196,6 +233,10 @@ def migrate(conn: sqlite3.Connection, schema_path: Path | str | None = None) -> 
         sql = MIGRATIONS.get(nxt)
         if sql is None:
             raise DBError(f"no migration registered for schema v{nxt}")
+        if sql.startswith("python:"):
+            globals()[sql.removeprefix("python:")](conn)
+            version = nxt
+            continue
         conn.executescript(
             "BEGIN;\n" + sql + f"\nINSERT INTO schema_version(version) VALUES ({nxt});\nCOMMIT;"
         )
@@ -994,14 +1035,16 @@ def upsert_score(
     model: str | None = None,
     tokens_in: int = 0,
     tokens_out: int = 0,
+    basis: str | None = None,
 ) -> Score:
     ts = now_ts()
     with transaction(conn):
         conn.execute(
-            "INSERT INTO scores(job_id, score, reasons, skip_reason, model, tokens_in, tokens_out, scored_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+            "INSERT INTO scores(job_id, score, reasons, skip_reason, model, tokens_in, tokens_out, basis, scored_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
             "ON CONFLICT(job_id) DO UPDATE SET score = excluded.score, reasons = excluded.reasons, skip_reason = excluded.skip_reason, "
-            "model = excluded.model, tokens_in = excluded.tokens_in, tokens_out = excluded.tokens_out, scored_at = excluded.scored_at",
-            (job_id, score, _j(reasons or {}), skip_reason, model, tokens_in, tokens_out, ts),
+            "model = excluded.model, tokens_in = excluded.tokens_in, tokens_out = excluded.tokens_out, basis = excluded.basis, "
+            "scored_at = excluded.scored_at",
+            (job_id, score, _j(reasons or {}), skip_reason, model, tokens_in, tokens_out, basis, ts),
         )
     return get_score(conn, job_id)  # type: ignore[return-value]
 

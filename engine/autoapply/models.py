@@ -125,7 +125,7 @@ ALLOWED_TRANSITIONS: dict[AppState, frozenset[AppState]] = {
     S.SUBMITTING: frozenset({S.SUBMITTED, S.FAILED, S.UNKNOWN_VERIFY}),
     S.UNKNOWN_VERIFY: frozenset({S.SUBMITTED, S.FAILED}),
     S.FAILED: frozenset({S.QUEUED}),
-    S.SKIPPED: frozenset({S.QUEUED}),
+    S.SKIPPED: frozenset({S.QUEUED, S.DISCOVERED}),  # -> discovered: re-judged after a settings change
     S.SUBMITTED: frozenset(),
 }
 
@@ -353,6 +353,7 @@ class Score(RowModel):
     model: str | None = None
     tokens_in: int = 0
     tokens_out: int = 0
+    basis: str | None = None
     scored_at: Timestamp
 
 

@@ -218,20 +218,22 @@ def parse_glassdoor_detail(html: str, base_url: str = GLASSDOOR_BASE) -> JobDeta
     )
 
 
+GLASSDOOR_WINDOWS = ("1", "7", "30")  # fromAge in days
+
+
+def glassdoor_search_url(prefs: Preferences, role: str, location: str, window: int = 0, page: int = 0) -> str:
+    u = f"{GLASSDOOR_BASE}/Job/jobs.htm?sc.keyword={quote_plus(role)}&fromAge={GLASSDOOR_WINDOWS[min(window, len(GLASSDOOR_WINDOWS) - 1)]}"
+    if location:
+        u += f"&locKeyword={quote_plus(location)}"
+    if set(prefs.remote_policy) == {RemotePolicy.REMOTE}:
+        u += "&remoteWorkType=1"
+    return u
+
+
 def glassdoor_search_urls(prefs: Preferences) -> list[str]:
-    roles = [r for r in prefs.roles if r.strip()]
-    locations = [loc for loc in prefs.locations if loc.strip()] or [""]
-    remote_only = set(prefs.remote_policy) == {RemotePolicy.REMOTE}
-    urls: list[str] = []
-    for role in roles:
-        for loc in locations:
-            u = f"{GLASSDOOR_BASE}/Job/jobs.htm?sc.keyword={quote_plus(role)}&fromAge=1"
-            if loc:
-                u += f"&locKeyword={quote_plus(loc)}"
-            if remote_only:
-                u += "&remoteWorkType=1"
-            urls.append(u)
-    return urls
+    from autoapply.discovery.planner import SearchPlanner
+
+    return [glassdoor_search_url(prefs, r, loc) for r, loc in SearchPlanner.combos(prefs)]
 
 
 class GlassdoorSource(BrowserListingBase):
@@ -254,8 +256,11 @@ class GlassdoorSource(BrowserListingBase):
     def sessions_limit(self, prefs: Preferences) -> int:
         return prefs.glassdoor_sessions_per_day
 
-    def build_search_urls(self, prefs: Preferences) -> list[str]:
-        return glassdoor_search_urls(prefs)
+    date_windows = GLASSDOOR_WINDOWS
+    max_pages = 1  # Glassdoor's result paging is click-only; widening the date window reads further back
+
+    def search_url(self, prefs: Preferences, role: str, location: str, window: int, page: int) -> str:
+        return glassdoor_search_url(prefs, role, location, window, page)
 
     def parse_search(self, html: str, base_url: str) -> list[ListingCard]:
         return parse_glassdoor_search(html, base_url or GLASSDOOR_BASE)

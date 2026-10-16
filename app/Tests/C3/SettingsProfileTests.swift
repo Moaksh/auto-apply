@@ -115,6 +115,23 @@ struct SettingsModelTests {
         #expect(model.neverGuessBaseline.salaryExpectation == "₹45L")
     }
 
+    @Test func eeoAnswersSaveAndBlankBecomesNull() async throws {
+        let (store, daemon, model) = await setup()
+        model.neverGuessDraft.eeoPolicy = "fill"
+        model.neverGuessDraft.eeoGender = "Male"
+        model.neverGuessDraft.eeoRace = "Asian"
+        model.neverGuessDraft.eeoVeteran = "  "
+        let patch = model.pendingNeverGuessPatch
+        #expect(patch.values["eeo_policy"] == .string("fill"))
+        #expect(patch.values["eeo_gender"] == .string("Male"))
+        #expect(patch.values["eeo_race"] == .string("Asian"))
+        #expect(patch.values["eeo_veteran"] == nil)  // blank, and it was already empty: nothing to send
+        #expect(await model.saveNeverGuess())
+        #expect(daemon.sent("update_never_guess").last?.neverGuessValues?["eeo_gender"] == .string("Male"))
+        #expect(store.library.neverGuess.eeoGender == "Male")
+        #expect(!model.hasUnsavedNeverGuess)
+    }
+
     @Test func remoteChangesAdoptOnlyWhenClean() async {
         let (store, _, model) = await setup()
         var remote = store.preferences

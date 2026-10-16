@@ -188,6 +188,7 @@ enum CapKind: String, Codable, Sendable, CaseIterable, Hashable {
     case companyCooldown = "company_cooldown"
     case linkedinBudget = "linkedin_budget"
     case glassdoorBudget = "glassdoor_budget"
+    case googleBudget = "google_budget"
 }
 
 enum DaemonActivity: String, Codable, Sendable, CaseIterable, Hashable {
@@ -233,6 +234,7 @@ enum JobSource: String, Codable, Sendable, CaseIterable, Hashable {
     case careers
     case linkedin
     case glassdoor
+    case google
     case manual
 }
 
@@ -294,6 +296,7 @@ enum Seniority: String, Codable, Sendable, CaseIterable, Hashable {
 enum SourceName: String, Codable, Sendable, CaseIterable, Hashable {
     case linkedin
     case glassdoor
+    case google
     case greenhouse
     case lever
     case ashby
@@ -1281,7 +1284,7 @@ struct Preferences: Codable, Sendable, Hashable {
     var glassdoorSessionsPerDay: Int = 3
     var searchesPerSession: Int = 3
     var jobsPerSession: Int = 30
-    var sourcesEnabled: [String: Bool] = ["greenhouse": true, "lever": true, "ashby": true, "careers": true, "linkedin": false, "glassdoor": false]
+    var sourcesEnabled: [String: Bool] = ["greenhouse": true, "lever": true, "ashby": true, "careers": true, "linkedin": false, "glassdoor": false, "google": true]
     var careerPageUrls: [String] = []
     var alwaysAskPatterns: [String] = []
 
@@ -1345,7 +1348,7 @@ extension Preferences {
         glassdoorSessionsPerDay = try c.decodeIfPresent(Int.self, forKey: .glassdoorSessionsPerDay) ?? 3
         searchesPerSession = try c.decodeIfPresent(Int.self, forKey: .searchesPerSession) ?? 3
         jobsPerSession = try c.decodeIfPresent(Int.self, forKey: .jobsPerSession) ?? 30
-        sourcesEnabled = try c.decodeIfPresent([String: Bool].self, forKey: .sourcesEnabled) ?? ["greenhouse": true, "lever": true, "ashby": true, "careers": true, "linkedin": false, "glassdoor": false]
+        sourcesEnabled = try c.decodeIfPresent([String: Bool].self, forKey: .sourcesEnabled) ?? ["greenhouse": true, "lever": true, "ashby": true, "careers": true, "linkedin": false, "glassdoor": false, "google": true]
         careerPageUrls = try c.decodeIfPresent([String].self, forKey: .careerPageUrls) ?? []
         alwaysAskPatterns = try c.decodeIfPresent([String].self, forKey: .alwaysAskPatterns) ?? []
     }

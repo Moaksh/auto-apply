@@ -29,7 +29,10 @@ struct PreferencesSettingsTab: View {
             .padding(Space.m)
             .sunkenWell()
         }
-        SettingsRow("Roles") { ChipField(values: $model.preferencesDraft.roles, placeholder: "+ add role") }
+        SettingsRow("Roles") {
+            ChipField(values: $model.preferencesDraft.roles, placeholder: "+ add role",
+                      suggestions: QuickFillLists.roles(for: store.library.profile, chosen: model.preferencesDraft.roles))
+        }
         SettingsRow("Experience", help: "Used to match seniority and score jobs. Saved to your profile right away.") {
             YearsField(years: Binding(get: { years }, set: { new in
                 let old = years.map(OnboardingModel.seniority(forYears:)) ?? []
@@ -51,7 +54,8 @@ struct PreferencesSettingsTab: View {
         }
         SettingsRow("Location", issue: model.issue(for: .remotePolicy)) {
             ToggleChips(options: RemotePolicy.allCases, selection: setBinding(\.remotePolicy), label: { $0.rawValue.capitalized })
-            ChipField(values: $model.preferencesDraft.locations, placeholder: "+ city or country")
+            ChipField(values: $model.preferencesDraft.locations, placeholder: "+ city or country",
+                      suggestions: QuickFillLists.locations(for: store.library.profile))
         }
         .errorShake(trigger: model.issue(for: .remotePolicy) == nil ? 0 : model.shakeTrigger)
         SettingsRow("Work authorization") {
@@ -76,8 +80,12 @@ struct PreferencesSettingsTab: View {
         }
         .errorShake(trigger: model.issue(for: .salaryFloor) == nil ? 0 : model.shakeTrigger)
         SettingsRow("Exclude companies") { ChipField(values: $model.preferencesDraft.excludeCompanies, placeholder: "+ company") }
-        SettingsRow("Exclude industries") { ChipField(values: $model.preferencesDraft.excludeIndustries, placeholder: "+ industry") }
-        SettingsRow("Exclude keywords") { ChipField(values: $model.preferencesDraft.excludeKeywords, placeholder: "+ keyword (e.g. crypto)") }
+        SettingsRow("Exclude industries") {
+            ChipField(values: $model.preferencesDraft.excludeIndustries, placeholder: "+ industry", suggestions: QuickFillLists.excludeIndustries)
+        }
+        SettingsRow("Exclude keywords") {
+            ChipField(values: $model.preferencesDraft.excludeKeywords, placeholder: "+ keyword (e.g. crypto)", suggestions: QuickFillLists.excludeKeywords)
+        }
         SettingsRow("Match threshold", help: "Jobs scoring below this are skipped (you can still see them in Pipeline).") {
             ThresholdSlider(value: $model.preferencesDraft.matchThreshold, bins: histogram, weeklyEstimate: weeklyEstimate)
         }
@@ -144,7 +152,7 @@ struct GuardrailsSettingsTab: View {
             }
             Text("These only ever come from you. If a form asks something not listed here, the agent stops and asks.")
                 .font(Typography.callout).foregroundStyle(Palette.textSecondary)
-            NeverGuessEditor(draft: $model.neverGuessDraft)
+            NeverGuessEditor(draft: $model.neverGuessDraft, profile: model.store.library.profile)
         }
         Divider()
         SettingsRow("Ask me when", help: confidenceHelp) {
@@ -175,6 +183,8 @@ struct GuardrailsSettingsTab: View {
 /// means "always ask me".
 struct NeverGuessEditor: View {
     @Binding var draft: NeverGuess
+    /// Orders the country quick-picks (home country first).
+    var profile: Profile? = nil
     @State private var newCountry = ""
     @State private var newStatus = "citizen"
 
@@ -190,6 +200,7 @@ struct NeverGuessEditor: View {
                     ForEach(draft.workAuth.keys.sorted(), id: \.self) { country in
                         HStack(spacing: Space.s) {
                             Text(country).font(Typography.mono).frame(width: 40, alignment: .leading)
+                                .help(QuickFillLists.countryName(country) ?? country)
                             Picker(country, selection: Binding(
                                 get: { draft.workAuth[country] ?? "" },
                                 set: { draft.workAuth[country] = $0 })) {
@@ -202,8 +213,8 @@ struct NeverGuessEditor: View {
                                 .accessibilityLabel("Remove \(country)")
                         }
                     }
-                    HStack(spacing: Space.s) {
-                        TextField("Country (US)", text: $newCountry).textFieldStyle(.roundedBorder).frame(width: 110)
+                    HStack(alignment: .top, spacing: Space.s) {
+                        CountryCodeField(code: $newCountry, options: QuickFillLists.countries(for: profile, excluding: draft.workAuth.keys))
                         Picker("Status", selection: $newStatus) {
                             ForEach(Self.workAuthStatuses, id: \.self) { Text($0.replacingOccurrences(of: "_", with: " ")).tag($0) }
                         }
@@ -465,6 +476,9 @@ struct SourcesSettingsTab: View {
     private func statusLine(_ source: SourceName, _ status: SourceStatus?) -> String {
         guard model.isSourceEnabled(source) else { return "Off" }
         let needsLogin = source == .linkedin || source == .glassdoor
+        if source == .google, status?.connected != false {
+            return "Searches Google's Jobs tab in the agent's Chrome window · no login needed"
+        }
         guard let status else { return needsLogin ? "Not connected" : "Public job boards · no login needed" }
         if needsLogin {
             let health = status.connected ? "\(C3Format.sourceName(source)) session valid" : (status.detail ?? "Session expired")

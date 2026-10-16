@@ -247,6 +247,7 @@ final class AppStore {
             case .linkedinBudget: snapshotCaps.linkedinSessionsUsed = p.used; snapshotCaps.linkedinSessionsLimit = p.limit
             case .glassdoorBudget: snapshotCaps.glassdoorSessionsUsed = p.used; snapshotCaps.glassdoorSessionsLimit = p.limit
             case .companyCooldown: snapshotCaps.companiesCoolingDown = max(snapshotCaps.companiesCoolingDown, 1)
+            case .googleBudget: break  // Google Jobs sessions: shown in the activity log only
             }
         case .runFinished:
             scheduleStats()

@@ -242,6 +242,7 @@ Enforced by `autoapply.db.transition()` (raises `IllegalTransition`; the daemon 
 | unknown_verify → failed | **user only** | `resolve_unknown{submitted:false}` |
 | failed → queued | **user only** | `retry_application` |
 | skipped → queued | **user only** | `apply_anyway` |
+| skipped → discovered | agent | re-judged after the threshold, preferences or profile changed (never `user_*` skips); `autoapply.reconsider` |
 | submitted → (none) | — | terminal (board status takes over) |
 
 Special path (not an edge): `mark_easy_apply_done` records a **manual** application from

@@ -66,6 +66,7 @@ class JobSource(StrEnum):
     CAREERS = "careers"
     LINKEDIN = "linkedin"
     GLASSDOOR = "glassdoor"
+    GOOGLE = "google"
     MANUAL = "manual"
 
 
@@ -183,6 +184,7 @@ class CapKind(StrEnum):
     COMPANY_COOLDOWN = "company_cooldown"
     LINKEDIN_BUDGET = "linkedin_budget"
     GLASSDOOR_BUDGET = "glassdoor_budget"
+    GOOGLE_BUDGET = "google_budget"
 
 
 class SourceName(StrEnum):
@@ -190,6 +192,7 @@ class SourceName(StrEnum):
 
     LINKEDIN = "linkedin"
     GLASSDOOR = "glassdoor"
+    GOOGLE = "google"
     GREENHOUSE = "greenhouse"
     LEVER = "lever"
     ASHBY = "ashby"

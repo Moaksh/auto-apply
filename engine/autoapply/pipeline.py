@@ -26,6 +26,7 @@ Double-apply protection (PLAN.md §4.2, protocol.md §7):
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 import os
 import contextvars
 import inspect
@@ -49,6 +50,7 @@ from autoapply.enums import (
     Ats,
     CapKind,
     DaemonActivity,
+    JobSource,
     LogLevel,
     Mode,
     QuestionReason,
@@ -215,6 +217,8 @@ def basic_hard_filter(conn: sqlite3.Connection, job: Job, company: Company, pref
 #: A run keeps searching (up to ``MAX_EXTRA_ROUNDS`` deeper rounds) until this many jobs are queued.
 MIN_MATCHES_PER_RUN = int(os.environ.get("AUTOAPPLY_MIN_MATCHES", "3"))
 MAX_EXTRA_ROUNDS = 2
+#: Companies the agent adds to the watchlist by itself stop at this many (the user can add more).
+MAX_WATCHED_COMPANIES = 150
 #: Jobs scoring within this many points below the threshold are kept as "borderline" and the best of
 #: them fill the quota when the run would otherwise end with fewer than ``MIN_MATCHES_PER_RUN``.
 BORDERLINE_BAND = 15
@@ -448,6 +452,11 @@ class Pipeline:
         return info.model_copy(update={"stats": self.stats.model_copy(), "tokens_in": usage.input_tokens, "tokens_out": usage.output_tokens})
 
     async def _step_discover(self) -> None:
+        from autoapply.reconsider import reconsider
+
+        n, why = reconsider(self.conn)
+        if n:
+            await self._log(LogLevel.INFO, f"Re-checking {n} skipped job(s) because {why}")
         await self.discover()
 
     async def _step_score(self) -> None:
@@ -513,7 +522,15 @@ class Pipeline:
     # ---- discover ----------------------------------------------------------------------
 
     def _enabled_sources(self, prefs: Preferences) -> list[Source]:
-        return [s for s in self.sources if prefs.sources_enabled.get(str(getattr(s.name, "value", s.name)), False)]
+        from autoapply.config import _default_sources
+
+        defaults = _default_sources()
+        out = []
+        for s in self.sources:
+            name = str(getattr(s.name, "value", s.name))
+            if prefs.sources_enabled.get(name, defaults.get(name, False)):
+                out.append(s)
+        return out
 
     async def discover(self, round_: int = 0) -> list[int]:
         """Returns new job ids. ``round_`` > 0 = a deeper pass: only the browser sources, on the next search URLs."""
@@ -556,17 +573,10 @@ class Pipeline:
                 for who, why in (ctx.errors or {}).items():
                     await self._log(LogLevel.WARNING, f"{name} · {who}: {why}")
 
-            async def browser_chain(items: list[Source]) -> None:
-                for src in items:
-                    await run_source(src)
-
-            # LinkedIn/Glassdoor drive one shared Chrome profile at human pace, so they stay sequential
-            # (one window, one site at a time). Plain-HTTP job boards touch other hosts and run alongside.
-            browser_sources = [s for s in sources if hasattr(s, "browser_factory")]
-            http_sources = [s for s in sources if not hasattr(s, "browser_factory")]
-            outcomes = await asyncio.gather(
-                browser_chain(browser_sources), *(run_source(s) for s in http_sources), return_exceptions=True,
-            )
+            # Every source at once: LinkedIn / Glassdoor / Google Jobs share one Chrome window (each
+            # site browses its own searches in its own tabs, human-paced); job boards and career
+            # pages are plain HTTP to other hosts.
+            outcomes = await asyncio.gather(*(run_source(s) for s in sources), return_exceptions=True)
             for outcome in outcomes:
                 if isinstance(outcome, BaseException):
                     raise outcome
@@ -576,11 +586,19 @@ class Pipeline:
                 await http.aclose()
         return new_ids
 
+    def _auto_watch_room(self) -> bool:
+        return len(db.list_companies(self.conn, watch_only=True)) < MAX_WATCHED_COMPANIES
+
     async def _persist(self, dj: DiscoveredJob) -> int | None:
         try:
             enrich: dict[str, Any] = {}
             if dj.board_token and dj.ats in (Ats.GREENHOUSE, Ats.LEVER, Ats.ASHBY):
                 enrich = {"ats": dj.ats, "board_token": dj.board_token}
+            if enrich and dj.source in (JobSource.LINKEDIN, JobSource.GLASSDOOR, JobSource.GOOGLE, "linkedin", "glassdoor", "google"):
+                # A listing pointed at this company's public ATS board: watch it, so every later run reads
+                # all its openings straight from the board (free JSON, no browser, no daily budget).
+                if self._auto_watch_room():
+                    enrich["watch"] = True
             company = db.upsert_company(self.conn, dj.company_name, domain=dj.company_domain, **enrich)
             job, created = db.insert_job(
                 self.conn, company_id=company.id, source=dj.source, title=dj.title, location=dj.location,
@@ -673,8 +691,24 @@ class Pipeline:
         if not survivors:
             return
         self._check_pause()
+        from autoapply.reconsider import scoring_basis
+
+        basis = scoring_basis(profile, prefs)
+        reused = []
+        fresh = []
+        for job, company in survivors:
+            old = db.get_score(self.conn, job.id)
+            if old is not None and old.score is not None and old.basis == basis:
+                reused.append(SimpleNamespace(job_id=job.id, score=old.score, reasons=old.reasons, skip_reason=None,
+                                              model=old.model, tokens_in=0, tokens_out=0, error=None))
+            else:
+                fresh.append((job, company))
+        if reused:
+            await self._log(LogLevel.INFO, f"Re-using {len(reused)} earlier score(s) computed against the same settings (no tokens)")
         try:
-            results = await _maybe_await(self.hooks.score_jobs(self.llm, profile=profile, preferences=prefs, jobs=survivors))
+            results = list(reused)
+            if fresh:
+                results += list(await _maybe_await(self.hooks.score_jobs(self.llm, profile=profile, preferences=prefs, jobs=fresh)))
         except NotImplementedError:
             await self._not_implemented("scoring.score_jobs (jobs stay 'discovered' until it is)")
             return
@@ -690,6 +724,7 @@ class Pipeline:
             db.upsert_score(
                 self.conn, job.id, score=r.score, reasons=r.reasons, skip_reason=r.skip_reason,
                 model=getattr(r, "model", None) or getattr(self.llm, "model", None), tokens_in=r.tokens_in, tokens_out=r.tokens_out,
+                basis=basis,
             )
             if r.tokens_in or r.tokens_out:
                 db.add_application_tokens(self.conn, app.id, r.tokens_in, r.tokens_out)
@@ -715,6 +750,7 @@ class Pipeline:
                 elif passed:
                     await self._transition(app.id, AppState.QUEUED, reason=f"score {r.score} >= {prefs.match_threshold}")
                     queued = True
+                    self._credit_search(job)
                 elif (
                     r.skip_reason in (None, "below_threshold") and r.score is not None
                     and prefs.match_threshold - BORDERLINE_BAND <= r.score < prefs.match_threshold
@@ -748,6 +784,18 @@ class Pipeline:
                 ),
             )
             await self._state(DaemonActivity.SCORING, f"Scored {done}/{total}", progress=(done, total))
+
+    def _credit_search(self, job: Job) -> None:
+        """Tell the search planner which search produced a match, so it is revisited first."""
+        key = (job.raw or {}).get("search_key") if isinstance(job.raw, dict) else None
+        if not key:
+            return
+        from autoapply.discovery.planner import SearchPlanner
+
+        try:
+            SearchPlanner(self.conn, str(getattr(job.source, "value", job.source)), windows=1, max_pages=1).record_matches(key, 1)
+        except Exception:  # noqa: BLE001 - learning is best-effort
+            log.debug("could not credit search %s", key, exc_info=True)
 
     async def _draft_easy_apply(self, job: Job) -> None:
         try:

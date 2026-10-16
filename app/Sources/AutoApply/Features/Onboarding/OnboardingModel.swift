@@ -529,6 +529,10 @@ final class OnboardingModel {
         try? patch.set(.startDate, n.startDate.nonEmpty)
         try? patch.set(.relocation, n.relocation.nonEmpty)
         try? patch.set(.eeoPolicy, n.eeoPolicy)
+        try? patch.set(.eeoGender, n.eeoGender.nonEmpty)
+        try? patch.set(.eeoRace, n.eeoRace.nonEmpty)
+        try? patch.set(.eeoVeteran, n.eeoVeteran.nonEmpty)
+        try? patch.set(.eeoDisability, n.eeoDisability.nonEmpty)
         try? patch.set(.attestAccuracy, n.attestAccuracy)
         try? patch.set(.attestBackgroundCheck, n.attestBackgroundCheck)
         if !n.workAuth.isEmpty { try? patch.set(.workAuth, n.workAuth) }

@@ -4,14 +4,35 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 /// Token input for roles, cities, excludes: chips with × plus an inline "+ add" field.
+/// With `suggestions`, quick-fill capsules sit under the field (tap to add) and typing filters
+/// them into a match list; Return takes the top match, or the typed text when nothing matches.
 struct ChipField: View {
     @Binding var values: [String]
     var placeholder: String = "Add"
     var suggestions: [String] = []
+    /// Capsules shown before "More…".
+    var visibleSuggestions = 8
     @State private var draft = ""
+    @State private var showAll = false
     @FocusState private var focused: Bool
 
+    private var matches: [String] { QuickFillLists.filter(suggestions, query: draft, excluding: values) }
+    private var typing: Bool { !draft.trimmingCharacters(in: .whitespaces).isEmpty && !draft.contains(",") }
+
     var body: some View {
+        VStack(alignment: .leading, spacing: Space.xs) {
+            field
+            if !suggestions.isEmpty {
+                if typing {
+                    matchList
+                } else {
+                    quickFill
+                }
+            }
+        }
+    }
+
+    private var field: some View {
         FlowLayout(spacing: Space.xs) {
             ForEach(values, id: \.self) { value in
                 HStack(spacing: 3) {
@@ -42,6 +63,11 @@ struct ChipField: View {
                     values.removeLast()
                     return .handled
                 }
+                .onKeyPress(.escape) {
+                    guard !draft.isEmpty else { return .ignored }
+                    draft = ""
+                    return .handled
+                }
         }
         .padding(Space.xs)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -50,12 +76,85 @@ struct ChipField: View {
         .onTapGesture { focused = true }
     }
 
+    /// Unchosen suggestions as tappable capsules.
+    @ViewBuilder
+    private var quickFill: some View {
+        let pool = matches
+        if !pool.isEmpty {
+            FlowLayout(spacing: Space.xs) {
+                ForEach(showAll ? pool : Array(pool.prefix(visibleSuggestions)), id: \.self) { s in
+                    QuickFillChip(title: s) { add(s) }
+                }
+                if pool.count > visibleSuggestions {
+                    Button(showAll ? "Less" : "More…") { showAll.toggle() }
+                        .buttonStyle(.link)
+                        .font(Typography.callout)
+                }
+            }
+        }
+    }
+
+    /// While typing: the matching suggestions; the first is what Return adds.
+    @ViewBuilder
+    private var matchList: some View {
+        let top = Array(matches.prefix(6))
+        if !top.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(top.enumerated()), id: \.element) { i, s in
+                    Button { add(s) } label: {
+                        HStack(spacing: Space.xs) {
+                            Text(s).font(Typography.body)
+                            Spacer()
+                            if i == 0 { Text("↩").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary) }
+                        }
+                        .padding(.horizontal, Space.s).padding(.vertical, 3)
+                        .background(i == 0 ? Palette.accent.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+                Button { commitTyped() } label: {
+                    Text("Add “\(draft.trimmingCharacters(in: .whitespaces))”")
+                        .font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                        .padding(.horizontal, Space.s).padding(.vertical, 3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(Space.xs)
+            .frame(maxWidth: 320, alignment: .leading)
+            .sunkenWell()
+        }
+    }
+
+    private func add(_ s: String) {
+        if !values.contains(where: { $0.caseInsensitiveCompare(s) == .orderedSame }) { values.append(s) }
+        draft = ""
+        focused = true
+    }
+
     private func commit() {
+        if typing, let top = ChipField.pick(draft: draft, matches: matches) {
+            add(top)
+            return
+        }
+        commitTyped()
+    }
+
+    private func commitTyped() {
         let parts = draft.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
         for p in parts where !values.contains(where: { $0.caseInsensitiveCompare(p) == .orderedSame }) {
             values.append(p)
         }
         draft = ""
+    }
+
+    /// What Return adds: the top suggestion when one matches, else nil (add the typed text).
+    static func pick(draft: String, matches: [String]) -> String? {
+        let q = draft.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty, !q.contains(","), let top = matches.first else { return nil }
+        return top
     }
 }
 

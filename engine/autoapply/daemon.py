@@ -469,11 +469,13 @@ def default_sources(available: dict[str, Any]) -> list[Source]:
     from autoapply.discovery.ashby import AshbySource
     from autoapply.discovery.careers import CareersSource
     from autoapply.discovery.glassdoor import GlassdoorSource
+    from autoapply.discovery.google_jobs import GoogleJobsSource
     from autoapply.discovery.greenhouse import GreenhouseSource
     from autoapply.discovery.lever import LeverSource
     from autoapply.discovery.linkedin import LinkedinSource
 
-    out = [_construct(c, available) for c in (GreenhouseSource, LeverSource, AshbySource, CareersSource, LinkedinSource, GlassdoorSource)]
+    out = [_construct(c, available) for c in (GreenhouseSource, LeverSource, AshbySource, CareersSource, LinkedinSource,
+                                              GlassdoorSource, GoogleJobsSource)]
     return [s for s in out if s is not None]
 
 
@@ -1103,8 +1105,10 @@ class Daemon:
 
     async def _cmd_update_never_guess(self, p: Any) -> dict[str, Any]:
         ng = db.set_never_guess(self.conn, p.values.model_dump(exclude_unset=True, mode="json"))
+        # Reply as soon as the facts are stored: re-checking open Needs-You questions against them can
+        # take seconds (embeddings), and a slow ack made the app report "not saved" for a saved edit.
         if self.pipeline is not None:
-            await self.pipeline.auto_resolve_inbox()
+            self._spawn(self.pipeline.auto_resolve_inbox(), name="auto-resolve-inbox")
         return {"never_guess": ng.model_dump(mode="json")}
 
     async def _cmd_update_profile(self, p: Any) -> dict[str, Any]:

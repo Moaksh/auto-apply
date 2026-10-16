@@ -323,7 +323,8 @@ final class SettingsModel {
 
     func toggleSource(_ source: SourceName, _ on: Bool) { preferencesDraft.sourcesEnabled[source.rawValue] = on }
 
-    func isSourceEnabled(_ source: SourceName) -> Bool { preferencesDraft.sourcesEnabled[source.rawValue] ?? false }
+    /// A source missing from saved preferences (added in a later version, e.g. Google Jobs) uses the daemon's default.
+    func isSourceEnabled(_ source: SourceName) -> Bool { preferencesDraft.sourcesEnabled[source.rawValue] ?? (source == .google) }
 
     func addCareerURL(_ raw: String) -> Bool {
         let url = CareerURL.normalize(raw)
@@ -357,6 +358,10 @@ final class SettingsModel {
         draft.noticePeriod = draft.noticePeriod.c3Trimmed
         draft.startDate = draft.startDate.c3Trimmed
         draft.relocation = draft.relocation.c3Trimmed
+        draft.eeoGender = draft.eeoGender.c3Trimmed
+        draft.eeoRace = draft.eeoRace.c3Trimmed
+        draft.eeoVeteran = draft.eeoVeteran.c3Trimmed
+        draft.eeoDisability = draft.eeoDisability.c3Trimmed
         if draft.salaryExpectation == nil { draft.salaryNegotiable = nil }
         draft.workAuth = draft.workAuth.filter { !$0.key.trimmingCharacters(in: .whitespaces).isEmpty && !$0.value.isEmpty }
         return JSONDiff.neverGuessPatch(from: neverGuessBaseline, to: draft)

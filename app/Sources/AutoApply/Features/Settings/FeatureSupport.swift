@@ -196,6 +196,7 @@ enum C3Format {
         switch source {
         case .linkedin: "LinkedIn"
         case .glassdoor: "Glassdoor"
+        case .google: "Google Jobs"
         case .greenhouse: "Greenhouse"
         case .lever: "Lever"
         case .ashby: "Ashby"

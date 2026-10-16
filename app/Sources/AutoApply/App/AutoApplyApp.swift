@@ -53,6 +53,13 @@ struct AutoApplyApp: App {
         }
         .defaultSize(width: 980, height: 760)
 
+        Window("Send Feedback", id: WindowID.feedback) {
+            FeedbackView()
+                .appEnvironment(store, simulateReduceMotion: simulateReduceMotion)
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+
         Settings {
             ScreenRegistry.shared.view(for: .settings)
                 .appEnvironment(store, simulateReduceMotion: simulateReduceMotion)
@@ -74,6 +81,7 @@ enum WindowID {
     static let main = "main"
     static let onboarding = "onboarding"
     static let job = "job"
+    static let feedback = "feedback"
 }
 
 enum DebugSettings {

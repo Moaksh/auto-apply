@@ -14,7 +14,10 @@ struct PreferencesStep: View {
                 .font(Typography.callout).foregroundStyle(Palette.textSecondary)
         }
         Grid(alignment: .topLeading, horizontalSpacing: Space.l, verticalSpacing: Space.l) {
-            row("Roles") { ChipField(values: $model.preferencesDraft.roles, placeholder: "+ add role") }
+            row("Roles") {
+                ChipField(values: $model.preferencesDraft.roles, placeholder: "+ add role",
+                          suggestions: QuickFillLists.roles(for: model.profileDraft, chosen: model.preferencesDraft.roles))
+            }
             row("Experience") {
                 YearsField(years: Binding(
                     get: { model.profileDraft.yearsExperience },
@@ -33,7 +36,8 @@ struct PreferencesStep: View {
             row("Location") {
                 VStack(alignment: .leading, spacing: Space.s) {
                     ToggleChips(options: RemotePolicy.allCases, selection: setBinding(\.remotePolicy), label: { $0.rawValue.capitalized })
-                    ChipField(values: $model.preferencesDraft.locations, placeholder: "+ city or country")
+                    ChipField(values: $model.preferencesDraft.locations, placeholder: "+ city or country",
+                              suggestions: QuickFillLists.locations(for: model.profileDraft))
                 }
             }
             row("Work auth") {
@@ -60,7 +64,8 @@ struct PreferencesStep: View {
             row("Exclude") {
                 VStack(alignment: .leading, spacing: Space.s) {
                     ChipField(values: $model.preferencesDraft.excludeCompanies, placeholder: "+ company")
-                    ChipField(values: $model.preferencesDraft.excludeKeywords, placeholder: "+ keyword (e.g. crypto)")
+                    ChipField(values: $model.preferencesDraft.excludeKeywords, placeholder: "+ keyword (e.g. crypto)",
+                              suggestions: QuickFillLists.excludeKeywords, visibleSuggestions: 6)
                 }
             }
             row("Daily cap") {
@@ -125,7 +130,7 @@ struct NeverGuessStep: View {
                    subtitle: "These only ever come from you. If a form asks something not listed, the agent stops and asks.")
         // Same editor as Settings ▸ Never-guess, so onboarding also asks *where you can work*
         // (per country). Without it every "authorized to work in …?" question stops the agent.
-        NeverGuessEditor(draft: $model.neverGuessDraft)
+        NeverGuessEditor(draft: $model.neverGuessDraft, profile: model.profileDraft)
         Text("Leave anything blank to always be asked.").font(Typography.callout).foregroundStyle(Palette.textTertiary)
     }
 

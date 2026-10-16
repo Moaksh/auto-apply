@@ -15,7 +15,7 @@ extension AppState {
         .submitting: [(.submitted, false), (.failed, false), (.unknownVerify, false)],
         .unknownVerify: [(.submitted, true), (.failed, true)],
         .failed: [(.queued, true)],
-        .skipped: [(.queued, true)],
+        .skipped: [(.queued, true), (.discovered, false)],
         .submitted: [],
     ]
 
@@ -145,6 +145,7 @@ extension JobSource {
         case .careers: "Career pages"
         case .linkedin: "LinkedIn"
         case .glassdoor: "Glassdoor"
+        case .google: "Google Jobs"
         case .manual: "Manual"
         }
     }

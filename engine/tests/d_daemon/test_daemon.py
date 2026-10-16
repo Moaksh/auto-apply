@@ -128,7 +128,7 @@ async def test_hello_snapshot_round_trip(daemon: Daemon) -> None:
                              "active_application_id": None, "active_job_id": None}
     assert snap["mode"] == "auto" and snap["preferences"]["daily_cap"] == 15
     assert snap["caps"]["daily_limit"] == 15 and snap["caps"]["linkedin_sessions_limit"] == 3
-    assert {s["source"] for s in snap["sources"]} == {"linkedin", "glassdoor", "greenhouse", "lever", "ashby", "careers"}
+    assert {s["source"] for s in snap["sources"]} == {"linkedin", "glassdoor", "google", "greenhouse", "lever", "ashby", "careers"}
     assert snap["onboarding"] == {"completed": False, "step": 0}
     await c.close()
 
@@ -383,6 +383,29 @@ async def test_skip_question_skips_jobs(daemon: Daemon) -> None:
     reply, _ = await c.request("skip_question", {"cluster_id": q.cluster_id, "reason": "no clearance"})
     assert reply["payload"]["result"] == {"skipped_application_ids": [a1]}
     assert db.get_application(conn, a1).state is AppState.SKIPPED
+    await c.close()
+
+
+async def test_never_guess_ack_does_not_wait_for_inbox_auto_resolve(daemon: Daemon, monkeypatch) -> None:
+    """A slow inbox re-check must not delay the ack (the app timed out and showed EEO edits as unsaved)."""
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_resolve() -> int:
+        started.set()
+        await release.wait()
+        return 0
+
+    assert daemon.pipeline is not None
+    monkeypatch.setattr(daemon.pipeline, "auto_resolve_inbox", slow_resolve)
+    c = await client(daemon)
+    reply, _ = await asyncio.wait_for(
+        c.request("update_never_guess", {"values": {"eeo_policy": "fill", "eeo_gender": "Female", "eeo_race": "Asian"}}), 2.0)
+    ng = reply["payload"]["result"]["never_guess"]
+    assert (ng["eeo_policy"], ng["eeo_gender"], ng["eeo_race"]) == ("fill", "Female", "Asian")
+    assert db.get_never_guess(daemon.conn).eeo_gender == "Female"
+    await asyncio.wait_for(started.wait(), 2.0)  # the re-check still runs, in the background
+    release.set()
     await c.close()
 
 

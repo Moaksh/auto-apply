@@ -113,7 +113,8 @@ extension AppStore {
     func updateNeverGuess(_ patch: NeverGuessPatch) async -> NeverGuess? {
         struct Result: Decodable { var neverGuess: NeverGuess
             enum CodingKeys: String, CodingKey { case neverGuess = "never_guess" } }
-        let result = await performResult(.updateNeverGuess(UpdateNeverGuessPayload(values: patch)), as: Result.self)
+        let result = await performResult(.updateNeverGuess(UpdateNeverGuessPayload(values: patch)), as: Result.self,
+                                         timeout: .seconds(10))
         if let ng = result?.neverGuess { library.neverGuess = ng }
         return result?.neverGuess
     }

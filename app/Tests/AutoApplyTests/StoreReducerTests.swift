@@ -233,7 +233,8 @@ struct StateMachineAndStatsTests {
         #expect(AppState.unknownVerify.canTransition(to: .submitted, actor: .user))
         #expect(!AppState.unknownVerify.canTransition(to: .submitted, actor: .agent))
         let edgeCount = AppState.allowedTransitions.values.reduce(0) { $0 + $1.count }
-        #expect(edgeCount == 32, "protocol.md §7 lists 32 edges")
+        #expect(edgeCount == 33, "protocol.md §7 lists 33 edges (incl. skipped → discovered re-check)")
+        #expect(AppState.skipped.canTransition(to: .discovered, actor: .agent))
         #expect(Set(AppState.allowedTransitions.keys) == Set(AppState.allCases))
     }
 

@@ -1,6 +1,6 @@
 -- =====================================================================================
 -- AutoApply SQLite schema — SINGLE SOURCE OF TRUTH for the database.
--- Contract version: schema_version = 4   (keep in sync with autoapply.db.SCHEMA_VERSION)
+-- Contract version: schema_version = 5   (keep in sync with autoapply.db.SCHEMA_VERSION)
 --
 -- Location: ~/Library/Application Support/AutoApply/autoapply.db (AUTOAPPLY_HOME overrides)
 --
@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS preferences (
     glassdoor_sessions_per_day  INTEGER NOT NULL DEFAULT 3 CHECK (glassdoor_sessions_per_day >= 0),
     searches_per_session        INTEGER NOT NULL DEFAULT 3 CHECK (searches_per_session BETWEEN 1 AND 10),   -- v2
     jobs_per_session            INTEGER NOT NULL DEFAULT 30 CHECK (jobs_per_session BETWEEN 1 AND 200),     -- v2
-    sources_enabled             TEXT NOT NULL DEFAULT '{"greenhouse":true,"lever":true,"ashby":true,"careers":true,"linkedin":false,"glassdoor":false}' CHECK (json_valid(sources_enabled)),
+    sources_enabled             TEXT NOT NULL DEFAULT '{"greenhouse":true,"lever":true,"ashby":true,"careers":true,"linkedin":false,"glassdoor":false,"google":true}' CHECK (json_valid(sources_enabled)),
     career_page_urls            TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(career_page_urls)),
     always_ask_patterns         TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(always_ask_patterns)),
     updated_at                  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
@@ -204,7 +204,7 @@ CREATE INDEX IF NOT EXISTS ix_companies_watch ON companies(watch) WHERE watch = 
 -- -------------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS jobs (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    source          TEXT NOT NULL CHECK (source IN ('greenhouse','lever','ashby','careers','linkedin','glassdoor','manual')),
+    source          TEXT NOT NULL CHECK (source IN ('greenhouse','lever','ashby','careers','linkedin','glassdoor','google','manual')),
     source_url      TEXT,
     apply_url       TEXT,
     apply_url_norm  TEXT,                                   -- autoapply.db.normalize_url(apply_url)
@@ -243,6 +243,7 @@ CREATE TABLE IF NOT EXISTS scores (
     model       TEXT,
     tokens_in   INTEGER NOT NULL DEFAULT 0,
     tokens_out  INTEGER NOT NULL DEFAULT 0,
+    basis       TEXT,                                               -- v5: fingerprint of profile+prefs the score was computed against
     scored_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
 CREATE INDEX IF NOT EXISTS ix_scores_score ON scores(score);
@@ -418,3 +419,4 @@ INSERT OR IGNORE INTO schema_version (version) VALUES (1);
 INSERT OR IGNORE INTO schema_version (version) VALUES (2);
 INSERT OR IGNORE INTO schema_version (version) VALUES (3);
 INSERT OR IGNORE INTO schema_version (version) VALUES (4);
+INSERT OR IGNORE INTO schema_version (version) VALUES (5);

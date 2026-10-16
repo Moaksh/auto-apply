@@ -12,7 +12,7 @@ import Observation
 final class Updater {
     static let shared = Updater()
 
-    static let repo = "Moaksh/auto-apply"
+    nonisolated static let repo = "Moaksh/auto-apply"
     static let autoCheckKey = "updates.autoCheck"
     static let autoInstallKey = "updates.autoInstall"
     static let lastCheckKey = "updates.lastCheck"

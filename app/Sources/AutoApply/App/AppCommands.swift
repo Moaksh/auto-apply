@@ -13,6 +13,16 @@ struct AppCommands: Commands {
                 Task { await updater.check(userInitiated: true) }
             }
         }
+        CommandGroup(after: .help) {
+            Button("Report a Bug…") {
+                FeedbackRequest.kind = .bug
+                openWindow(id: WindowID.feedback)
+            }
+            Button("Request a Feature…") {
+                FeedbackRequest.kind = .feature
+                openWindow(id: WindowID.feedback)
+            }
+        }
         CommandGroup(after: .sidebar) {
             Button(AppShortcut.toggleInspector.title) { store.router.toggleInspector() }.keyboardShortcut(.toggleInspector)
             Button(AppShortcut.toggleSidebar.title) { store.router.toggleSidebar() }.keyboardShortcut(.toggleSidebar)

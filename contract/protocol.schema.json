@@ -134,6 +134,7 @@
         "queued"
       ],
       "skipped": [
+        "discovered",
         "queued"
       ],
       "submitted": []
@@ -593,7 +594,8 @@
         "daily",
         "company_cooldown",
         "linkedin_budget",
-        "glassdoor_budget"
+        "glassdoor_budget",
+        "google_budget"
       ],
       "title": "CapKind",
       "type": "string"
@@ -1205,6 +1207,7 @@
         "careers",
         "linkedin",
         "glassdoor",
+        "google",
         "manual"
       ],
       "title": "JobSource",
@@ -2248,7 +2251,8 @@
             "ashby": true,
             "careers": true,
             "linkedin": false,
-            "glassdoor": false
+            "glassdoor": false,
+            "google": true
           }
         },
         "career_page_urls": {
@@ -3773,6 +3777,7 @@
       "enum": [
         "linkedin",
         "glassdoor",
+        "google",
         "greenhouse",
         "lever",
         "ashby",

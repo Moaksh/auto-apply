@@ -144,7 +144,14 @@ struct OnboardingTests {
         // Never-guess: blank → null ("always ask me").
         model.neverGuessDraft.noticePeriod = "60 days"
         model.neverGuessDraft.sponsorship = nil
+        model.neverGuessDraft.eeoPolicy = "fill"
+        model.neverGuessDraft.eeoGender = "Female"
+        model.neverGuessDraft.eeoDisability = "No"
         await model.primaryAction()
+        // Every EEO answer typed in onboarding is persisted (it used to send eeo_policy only).
+        #expect(daemon.repository.read { $0.neverGuess.eeoPolicy } == "fill")
+        #expect(daemon.repository.read { $0.neverGuess.eeoGender } == "Female")
+        #expect(daemon.repository.read { $0.neverGuess.eeoDisability } == "No")
         #expect(model.step == .stories)
         #expect(daemon.repository.read { $0.neverGuess.noticePeriod } == "60 days")
         #expect(daemon.repository.read { $0.neverGuess.sponsorship } == nil)

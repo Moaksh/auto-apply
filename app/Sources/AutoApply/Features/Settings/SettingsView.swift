@@ -152,6 +152,27 @@ private struct GeneralSettingsTab: View {
             Toggle("Trackpad haptics", isOn: $haptics)
         }
         UpdatesSettingsRow()
+        FeedbackSettingsRow()
+    }
+}
+
+/// Settings → General → Feedback: opens the pre-filled GitHub issue window.
+private struct FeedbackSettingsRow: View {
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        SettingsRow("Feedback", help: "Opens a GitHub issue in your browser, filled in for you. Bug reports can include redacted logs.") {
+            HStack(spacing: Space.s) {
+                Button("Report a Bug…") {
+                    FeedbackRequest.kind = .bug
+                    openWindow(id: WindowID.feedback)
+                }
+                Button("Request a Feature…") {
+                    FeedbackRequest.kind = .feature
+                    openWindow(id: WindowID.feedback)
+                }
+            }
+        }
     }
 }
 

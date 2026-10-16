@@ -123,6 +123,7 @@ enum ChartMath {
             let label: String = switch stat.source {
             case .linkedin: "LinkedIn→ATS"
             case .glassdoor: "Glassdoor→ATS"
+            case .google: "Google Jobs"
             default: stat.source.label
             }
             // Easy Apply jobs are counted in their LinkedIn source; show them separately.
