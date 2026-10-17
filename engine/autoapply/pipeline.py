@@ -253,6 +253,7 @@ def skip_tag(reason: str | None, score: int | None = None, threshold: int | None
         "daily_cap_reached": "daily application cap reached",
         "no_apply_url": "no company apply link (LinkedIn/Glassdoor only)",
         "unscored": "couldn't be scored",
+        "role_off_field": f"a {detail} job, not your field" if detail else "not your field",
     }
     return table.get(key) or (reason or "other").replace("_", " ")
 
@@ -452,8 +453,14 @@ class Pipeline:
         return info.model_copy(update={"stats": self.stats.model_copy(), "tokens_in": usage.input_tokens, "tokens_out": usage.output_tokens})
 
     async def _step_discover(self) -> None:
+        from autoapply import role_focus
         from autoapply.reconsider import reconsider
 
+        focus, changed = await role_focus.ensure(self.conn, self.llm)
+        prefs = db.get_preferences(self.conn)
+        if changed and [s.lower() for s in focus.searches] != [r.strip().lower() for r in prefs.roles]:
+            field = f" ({focus.field})" if focus.field else ""
+            await self._log(LogLevel.INFO, f"Reading your roles {', '.join(prefs.roles)} as: {', '.join(focus.searches)}{field}")
         n, why = reconsider(self.conn)
         if n:
             await self._log(LogLevel.INFO, f"Re-checking {n} skipped job(s) because {why}")
@@ -534,8 +541,14 @@ class Pipeline:
 
     async def discover(self, round_: int = 0) -> list[int]:
         """Returns new job ids. ``round_`` > 0 = a deeper pass: only the browser sources, on the next search URLs."""
+        from autoapply import role_focus
+
         prefs = db.get_preferences(self.conn)
         sources = self._enabled_sources(prefs)
+        focus = role_focus.current(self.conn, prefs)
+        # Sites are searched for the agent's concrete reading of the roles ("Engineering" on a
+        # software resume -> "Software Engineer", "AI Engineer", ...), not the raw words.
+        search_prefs = prefs.model_copy(update={"roles": focus.searches}) if focus.searches else prefs
         if round_ > 0:
             sources = [s for s in sources if hasattr(s, "browser_factory")]
         companies = db.list_companies(self.conn, watch_only=True)
@@ -550,7 +563,8 @@ class Pipeline:
                 self._check_pause()
                 name = str(getattr(src.name, "value", src.name))
                 await self._state(DaemonActivity.DISCOVERING, f"Reading {name}", progress=(done, len(sources)))
-                ctx = DiscoveryContext(preferences=prefs, companies=companies, http=http, run_id=self.run_uid, round=round_)
+                ctx = DiscoveryContext(preferences=search_prefs, companies=companies, http=http, run_id=self.run_uid,
+                                       round=round_, focus=focus)
                 try:
                     found = await src.discover(ctx)
                 except NotImplementedError:
@@ -708,7 +722,11 @@ class Pipeline:
         try:
             results = list(reused)
             if fresh:
-                results += list(await _maybe_await(self.hooks.score_jobs(self.llm, profile=profile, preferences=prefs, jobs=fresh)))
+                from autoapply import role_focus
+
+                focus = role_focus.current(self.conn, prefs, profile)
+                score_prefs = prefs.model_copy(update={"roles": focus.searches}) if focus.searches else prefs
+                results += list(await _maybe_await(self.hooks.score_jobs(self.llm, profile=profile, preferences=score_prefs, jobs=fresh)))
         except NotImplementedError:
             await self._not_implemented("scoring.score_jobs (jobs stay 'discovered' until it is)")
             return

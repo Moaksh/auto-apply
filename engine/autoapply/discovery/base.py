@@ -89,6 +89,9 @@ class DiscoveryContext:
     filter_roles: bool = True
     #: Per-company failures from the last pass (``company name -> error``), filled by sources.
     errors: dict[str, str] = field(default_factory=dict)
+    #: The agent's reading of the roles (:mod:`autoapply.role_focus`); ``preferences.roles`` already
+    #: holds its concrete searches. Titles of other disciplines are dropped.
+    focus: Any = None
 
 
 @runtime_checkable
@@ -509,9 +512,20 @@ async def gather_per_company(
     return [j for batch in results for j in batch]
 
 
+def wanted_title(ctx: DiscoveryContext, title: str) -> bool:
+    """Title matches a target role and is not another discipline's job (no-op when filtering is off)."""
+    if not ctx.filter_roles:
+        return True
+    if ctx.focus is not None:
+        from autoapply.role_focus import off_field
+
+        if off_field(title, ctx.focus):
+            return False
+    return title_matches_roles(title, ctx.preferences.roles)
+
+
 def filter_jobs(ctx: DiscoveryContext, jobs: list[DiscoveredJob]) -> list[DiscoveredJob]:
-    if ctx.filter_roles and ctx.preferences.roles:
-        jobs = [j for j in jobs if title_matches_roles(j.title, ctx.preferences.roles)]
+    jobs = [j for j in jobs if wanted_title(ctx, j.title)]
     if ctx.limit_per_company is not None:
         jobs = jobs[: ctx.limit_per_company]
     return jobs

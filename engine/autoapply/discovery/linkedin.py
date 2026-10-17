@@ -905,6 +905,7 @@ class BrowserListingBase:
     async def discover(self, ctx: DiscoveryContext) -> list[DiscoveredJob]:
         from autoapply.discovery.base import title_matches_roles
         from autoapply.discovery.planner import SearchPlanner
+        from autoapply.role_focus import off_field
 
         prefs = ctx.preferences
         limit = self.sessions_limit(prefs)
@@ -960,6 +961,8 @@ class BrowserListingBase:
                 seen.add(key)
                 if self.prefilter_titles and not title_matches_roles(card.title, prefs.roles):
                     continue
+                if ctx.focus is not None and off_field(card.title, ctx.focus):
+                    continue  # another discipline's job (e.g. "Electrical Engineer" for a software resume)
                 per_company[card.company] = per_company.get(card.company, 0) + 1
                 if per_company[card.company] > MAX_PER_COMPANY_PER_SESSION:
                     continue  # one prolific poster (e.g. a staffing/gig company) must not crowd out everyone else

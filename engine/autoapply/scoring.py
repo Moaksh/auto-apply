@@ -46,6 +46,7 @@ SKIP_MISSING_SALARY = "missing_salary"
 SKIP_COOLDOWN = "company_cooldown"
 SKIP_DAILY_CAP = "daily_cap_reached"
 SKIP_BELOW_THRESHOLD = "below_threshold"
+SKIP_OFF_FIELD = "role_off_field"
 
 #: Reasons that mean "not now" rather than "never": the caller should leave the application
 #: where it is (``discovered``) instead of skipping it.
@@ -386,6 +387,13 @@ def hard_filter(
         if kw.strip() and _has_phrase(text_n, kw):
             return f"excluded_keyword:{kw.strip().lower()}"
 
+    # 2b. another discipline's job ("Electrical Engineer" for a software resume that targets "Engineering")
+    from autoapply.role_focus import current as role_focus, off_field
+
+    hit = off_field(job.title, role_focus(conn, p))
+    if hit:
+        return f"{SKIP_OFF_FIELD}:{hit}"
+
     # 3. excluded industries (synonym-expanded; title + description + company name)
     hay = f"{company_n} {text_n}"
     for ind in p.exclude_industries:
@@ -513,7 +521,10 @@ SCORE_SYSTEM = (
     "candidate on a 0-100 scale (90+ exceptional fit, 70-89 strong, 50-69 partial, <50 poor). "
     "Judge only from the candidate profile and the job text given; never assume skills that are "
     "not stated. Factors are 0-100: skills (required skills overlap), seniority (level fit), role "
-    "(target-role fit), domain (industry/product familiarity). Return one result per job_id."
+    "(target-role fit), domain (industry/product familiarity). Read the target roles as the candidate "
+    "means them given their background: a job in a different discipline that merely shares a word "
+    "(e.g. electrical, industrial or sales engineering for a software/AI candidate) is a poor fit, "
+    "under 30, whatever its title. Return one result per job_id."
 )
 
 
