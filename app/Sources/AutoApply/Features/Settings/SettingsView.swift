@@ -34,6 +34,7 @@ struct SettingsView: View {
         .onChange(of: store.preferences) { model.syncFromStore() }
         .onChange(of: store.library.neverGuess) { model.syncFromStore() }
         .onDisappear { Task { await model.flush() } }
+        .overlay { ConfettiOverlay() }
         .toastHost(store.toasts)
     }
 }
@@ -59,6 +60,7 @@ private struct SettingsTabContent: View {
                     SaveStatusLine(state: tab == .guardrails ? model.neverGuessSave : model.preferencesSave,
                                    secondary: tab == .guardrails ? model.preferencesSave : nil)
                 }
+                MadeWithLoveFooter()
             }
             .padding(Space.xl)
             .frame(maxWidth: .infinity, alignment: .leading)

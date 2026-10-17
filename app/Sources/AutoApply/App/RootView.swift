@@ -42,6 +42,8 @@ struct RootView: View {
         }
         .navigationTitle(store.isPaused ? "Paused" : router.selection.title)
         .overlay { CommandPaletteHost() }
+        .overlay { ConfettiOverlay() }
+        .onAppear { EasterEggs.installKonami() }
         .toastHost(store.toasts)
         .onChange(of: router.settingsRequest) { openSettings() }
         .onChange(of: router.jobWindowRequest) { _, request in

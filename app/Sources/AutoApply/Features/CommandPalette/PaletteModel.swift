@@ -125,6 +125,7 @@ struct PaletteItem: Identifiable, Hashable, Sendable {
         case story(Int)
         case setting(SettingsTab, String)
         case action(AppAction)
+        case easterEgg(String)
     }
 
     var id: String
@@ -166,6 +167,10 @@ final class PaletteModel {
         if scope == .all { items += storyItems(text) }
         if scope == .all || scope == .settings { items += settingItems(text) }
         if scope == .all || scope == .actions { items += actionItems(text) }
+        if let egg = EasterEggs.phrase(for: text) {
+            items.append(PaletteItem(id: "egg.\(egg.trigger)", section: .actions, kind: .easterEgg(egg.trigger), title: egg.title,
+                                     subtitle: "Psst…", symbol: egg.symbol, trailing: nil, score: 10_000))
+        }
         // Group by section (fixed order), best first within a section, capped.
         var out: [PaletteItem] = []
         for section in PaletteItem.Section.allCases {
@@ -290,6 +295,8 @@ final class PaletteModel {
             router.isPalettePresented = false
             await store.perform(action)
             return true
+        case .easterEgg(let trigger):
+            if let egg = EasterEggs.phrases.first(where: { $0.trigger == trigger }) { EasterEggs.play(egg, toasts: store.toasts) }
         }
         router.isPalettePresented = false
         return true
