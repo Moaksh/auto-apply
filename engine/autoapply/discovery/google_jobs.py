@@ -163,7 +163,8 @@ class GoogleJobsSource(BrowserListingBase):
     easy_apply_ats = Ats.OTHER
     date_windows = GOOGLE_WINDOWS
     max_pages = 1
-    tabs = 2
+    tabs = 3         # different roles searched side by side
+    detail_tabs = 3  # apply links opened side by side (each tab human-paced)
     prefilter_titles = True  # Google matches loosely; don't open apply links for unrelated titles
 
     def sessions_limit(self, prefs: Preferences) -> int:

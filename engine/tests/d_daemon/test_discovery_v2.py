@@ -3,6 +3,7 @@ and re-checking skipped jobs after a settings change."""
 
 from __future__ import annotations
 
+import asyncio
 import sqlite3
 
 import httpx
@@ -16,7 +17,7 @@ from autoapply.discovery.planner import SearchPlanner
 from autoapply.enums import AppState, Ats
 from autoapply.reconsider import reconsider
 
-from .fakes import EventSink, FakeBrowser, fixture, instant_pacer
+from .fakes import EventSink, FakeBrowser, FakePage, fixture, instant_pacer
 
 LI_ROUTES = [
     (r"linkedin\.com/jobs/search", lambda: fixture("linkedin_search.html")),
@@ -103,7 +104,10 @@ async def test_parallel_tabs_and_second_run_reads_new_pages(conn: sqlite3.Connec
     src = LinkedinSource(conn, emit=EventSink(), browser_factory=browser.factory(), pacer=instant_pacer())
     jobs = await src.discover(ctx_for(conn))
     assert jobs and all(j.raw.get("search_key") for j in jobs)
-    assert len(browser.pages) == 2                      # two searches -> two tabs
+    # two searches -> two search tabs; job pages are read in tabs of their own, never the search tab
+    search_tabs = [p for p in browser.pages if any("/jobs/search" in u for u in p.history)]
+    assert len(search_tabs) == 2
+    assert all(all("/jobs/search" in u for u in p.history) for p in search_tabs)
     searches = [u for u in browser.visited if "/jobs/search" in u]
     assert any("Backend" in u for u in searches) and any("Platform" in u for u in searches)
     # store them, then run again: the planner moves to the next result page instead of re-reading page 1
@@ -195,3 +199,106 @@ def test_google_is_a_valid_job_source(conn: sqlite3.Connection, source: str) -> 
     co = db.upsert_company(conn, "Initech")
     job, created = db.insert_job(conn, company_id=co.id, source=source, title="AI Engineer")
     assert created and job.source.value == "google"
+
+
+# ---- concurrency: several searches and several job-page visits in flight at once ------
+
+
+class _SlowPage(FakePage):
+    """A tab whose navigation takes a moment, counting how many tabs are mid-navigation."""
+
+    async def goto(self, url: str) -> None:
+        b = self.browser
+        kind = "search" if "/search" in url else "visit"
+        b.in_flight[kind] += 1
+        b.peak[kind] = max(b.peak[kind], b.in_flight[kind])
+        try:
+            await asyncio.sleep(0.01)
+            await super().goto(url)
+        finally:
+            b.in_flight[kind] -= 1
+
+
+class _SlowBrowser(FakeBrowser):
+    def __init__(self, **kw: object) -> None:
+        super().__init__(**kw)  # type: ignore[arg-type]
+        self.in_flight = {"search": 0, "visit": 0}
+        self.peak = {"search": 0, "visit": 0}
+
+    async def new_page(self) -> FakePage:
+        p = _SlowPage(self)
+        self.pages.append(p)
+        return p
+
+
+def _google_page(role: str, prefix: str, n: int) -> str:
+    panes = "".join(
+        f"""<div jscontroller="b11o3b"><div>{role}</div><div>{prefix} Co {i}</div><div>Bengaluru • via {prefix} Co {i} Careers</div>
+        <span>1 day ago</span><template><div data-encoded-docid="{prefix}{i}" data-is-preview="true" data-title="{role}">
+        <a href="/goto?url={prefix}{i}" title="Apply on {prefix} Co {i} Careers"></a><h2>Job description</h2><div>Python.</div>
+        </div></template></div>"""
+        for i in range(n)
+    )
+    return f"<html><head><title>{role} jobs - Google Search</title></head><body>{panes}</body></html>"
+
+
+def _google_browser(*roles: tuple[str, str]) -> _SlowBrowser:
+    routes: list = [(r"q=" + role.replace(" ", r"\+"), _google_page(role, prefix, 4)) for role, prefix in roles]
+    return _SlowBrowser(routes=[*routes, (r"greenhouse", "<html>apply</html>")],
+                        redirects=[(r"goto\?url=", "https://boards.greenhouse.io/co/jobs/1")])
+
+
+async def test_google_runs_searches_and_apply_links_in_parallel_tabs(conn: sqlite3.Connection) -> None:
+    db.update_preferences(conn, {"roles": ["AI Engineer", "ML Engineer", "Data Scientist"], "locations": [],
+                                 "searches_per_session": 3, "jobs_per_session": 30})
+    browser = _google_browser(("AI Engineer", "A"), ("ML Engineer", "M"), ("Data Scientist", "D"))
+    sink = EventSink()
+    src = GoogleJobsSource(conn, emit=sink, browser_factory=browser.factory(), pacer=instant_pacer())
+    jobs = await src.discover(ctx_for(conn))
+
+    assert len(jobs) == 12 and all(j.apply_url for j in jobs)
+    assert browser.peak["search"] == 3          # three roles searched at the same time
+    assert browser.peak["visit"] >= 2           # apply links resolved side by side...
+    assert browser.peak["visit"] <= GoogleJobsSource.detail_tabs  # ...by a bounded pool of tabs
+    # search tabs only ever show result pages; apply links open in the job-page tabs
+    search_tabs = [p for p in browser.pages if any("/search" in u for u in p.history)]
+    assert len(search_tabs) == 3 and all(all("/search" in u for u in p.history) for p in search_tabs)
+    # every search was recorded once, with its own new-listing count
+    summary = SearchPlanner(conn, "google", windows=4, max_pages=1).summary()
+    assert sorted((st["runs"], st["last_new"]) for st in summary.values()) == [(1, 4)] * 3
+    # log lines name the tab doing the work
+    logs = [p.message for p in sink.of("log")]
+    opening = [m for m in logs if "opening apply link" in m]
+    assert opening and all(m.startswith("Google Jobs [tab ") for m in opening)
+    assert len({m.split("]")[0] for m in opening}) >= 2
+
+
+async def test_parallel_visits_respect_the_shared_budget(conn: sqlite3.Connection) -> None:
+    db.update_preferences(conn, {"roles": ["AI Engineer", "ML Engineer"], "locations": [], "searches_per_session": 2,
+                                 "jobs_per_session": 5})
+    browser = _google_browser(("AI Engineer", "A"), ("ML Engineer", "M"))
+    src = GoogleJobsSource(conn, emit=EventSink(), browser_factory=browser.factory(), pacer=instant_pacer())
+    jobs = await src.discover(ctx_for(conn))
+    assert len(jobs) == 5
+    assert sum("goto?url=" in u for u in browser.visited) == 5
+    summary = SearchPlanner(conn, "google", windows=4, max_pages=1).summary()
+    assert sum(st["last_new"] for st in summary.values()) == 5
+    # the search the budget cut short stays on the same page for next time
+    assert any((st["window"], st["page"]) == (0, 0) for st in summary.values())
+
+
+async def test_linkedin_job_pages_read_in_parallel_and_captcha_stops_every_tab(conn: sqlite3.Connection) -> None:
+    db.update_preferences(conn, {"roles": ["Backend Engineer"], "locations": ["India"], "searches_per_session": 1})
+    browser = _SlowBrowser(routes=LI_ROUTES)
+    src = LinkedinSource(conn, emit=EventSink(), browser_factory=browser.factory(), pacer=instant_pacer())
+    jobs = await src.discover(ctx_for(conn))
+    assert len(jobs) == 3 and browser.peak["visit"] >= 2
+
+    db.update_preferences(conn, {"roles": ["Platform Engineer"]})
+    routes = [(r"/jobs/view/4012345678", lambda: fixture("linkedin_captcha.html")), *LI_ROUTES]
+    blocked = _SlowBrowser(routes=routes)
+    sink = EventSink()
+    src2 = LinkedinSource(conn, emit=sink, browser_factory=blocked.factory(), pacer=instant_pacer())
+    await src2.discover(ctx_for(conn))
+    assert [e.details["reason"] for e in sink.of("error")] == ["captcha"]   # reported once, not per tab
+    assert src2.last_state is not None and src2.last_state.value == "captcha"
