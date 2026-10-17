@@ -151,6 +151,10 @@ LINKEDIN_SELECTORS: dict[str, list[str]] = {
         "button.apply-button",
         "a.apply-button",
         "button[data-control-name='jobdetails_topcard_inapply']",
+        # 2026 job page (hashed class names): only labels and data-view-name are stable
+        "[data-view-name='job-apply-button']",
+        "button[aria-label*='Apply']",
+        "a[aria-label*='Apply']",
     ],
     #: Elements that may carry the off-site apply URL in the DOM (href / data-* / comment).
     "detail_apply_link": [
@@ -159,6 +163,8 @@ LINKEDIN_SELECTORS: dict[str, list[str]] = {
         "a[data-tracking-control-name*='apply-link'][href]",
         "a[data-tracking-control-name*='offsite'][href]",
         "code#applyUrl",
+        "a[aria-label*='company website'][href]",
+        "a[data-view-name='job-apply-button'][href]",
     ],
     # --- page-state detection ------------------------------------------------------
     "login_wall": [
@@ -171,8 +177,9 @@ LINKEDIN_SELECTORS: dict[str, list[str]] = {
         "section.authwall",
     ],
     "captcha": [
+        # Not "iframe[src*='captcha']": every normal LinkedIn page now embeds an invisible
+        # reCAPTCHA badge. A real challenge redirects to /checkpoint/challenge (URL markers).
         "#captcha-internal",
-        "iframe[src*='captcha']",
         "form[action*='checkpoint/challenge']",
         "#challenge",
         "div#arkose",
@@ -226,6 +233,23 @@ class ListingBrowser(Protocol):
 BrowserFactory = Callable[[], Awaitable[ListingBrowser]]
 
 
+#: Centre of the biggest scrollable results pane in view (known list containers first).
+_SCROLL_TARGET_JS = """() => {
+  const known = ['.scaffold-layout__list', '.jobs-search-results-list', '[data-test="JobsList"]'];
+  const scrollable = el => { const s = getComputedStyle(el);
+    return /(auto|scroll)/.test(s.overflowY) && el.scrollHeight > el.clientHeight + 40; };
+  let el = null;
+  for (const q of known) { for (const c of document.querySelectorAll(q)) {
+    let n = c; while (n && n !== document.body && !scrollable(n)) n = n.parentElement;
+    if (n && n !== document.body) { el = n; break; }
+    for (const d of c.querySelectorAll('*')) { if (scrollable(d)) { el = d; break; } }
+    if (el) break; } if (el) break; }
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return {x: r.left + r.width / 2, y: r.top + Math.min(r.height / 2, 300)};
+}"""
+
+
 class _PlaywrightPage:
     def __init__(self, page: Any) -> None:
         self._page = page
@@ -266,6 +290,14 @@ class _PlaywrightPage:
         return thumb_from_bytes(await self._page.screenshot(type="jpeg", quality=60, timeout=3_000))
 
     async def scroll(self, pixels: int) -> None:
+        """Wheel-scroll over the page's results list (LinkedIn's list is its own scroll pane; a
+        wheel over the header scrolls nothing), else over the page."""
+        try:
+            box = await self._page.evaluate(_SCROLL_TARGET_JS)
+        except Exception:  # noqa: BLE001
+            box = None
+        if box:
+            await self._page.mouse.move(box["x"], box["y"])
         await self._page.mouse.wheel(0, pixels)
 
     async def close(self) -> None:
@@ -902,6 +934,10 @@ class BrowserListingBase:
         final = page.url
         return None if is_host(final, self.hosts) else strip_tracking(final)
 
+    async def load_results(self, page: ListingPage) -> None:
+        """Bring every result on the page into the HTML (default: the pacer's human scroll)."""
+        await self.pacer.scroll(page)
+
     async def discover(self, ctx: DiscoveryContext) -> list[DiscoveredJob]:
         from autoapply.discovery.base import title_matches_roles
         from autoapply.discovery.planner import SearchPlanner
@@ -948,7 +984,7 @@ class BrowserListingBase:
                 await self._report_blocked(state)
                 budget["blocked"] = True
                 return
-            await self.pacer.scroll(page)
+            await self.load_results(page)
             cards = self.parse_search(await page.content(), page.url)
             new, complete = 0, True
             for card in cards:
@@ -1205,12 +1241,30 @@ def linkedin_job_url(job_id: str) -> str:
     return f"{LINKEDIN_BASE}/jobs/view/{job_id}/"
 
 
+#: Max extra scroll steps to load a LinkedIn result page's lazy cards.
+LINKEDIN_LOAD_STEPS = 12
+
+
+def linkedin_unloaded_cards(html: str) -> tuple[int, int]:
+    """(cards still empty placeholders, all cards) on a LinkedIn results page."""
+    soup = _soup(html)
+    cards = soup.select("li[data-occludable-job-id]")
+    return sum(1 for c in cards if not c.get_text(strip=True)), len(cards)
+
+
+_VERIFIED = re.compile(r"\s+with verification\s*$", re.I)
+
+
 def parse_linkedin_search(html: str, base_url: str = LINKEDIN_BASE) -> list[ListingCard]:
     sel = LINKEDIN_SELECTORS
     soup = _soup(html)
+    # Screen-reader copies repeat every title ("AI Engineer AI Engineer") and add badge text.
+    for hidden in soup.select(".visually-hidden"):
+        hidden.decompose()
     out: list[ListingCard] = []
     for card in select_all(soup, sel["search_card"]):
         title = text_of(card, sel["card_title"])
+        title = _VERIFIED.sub("", title) if title else title
         company = text_of(card, sel["card_company"])
         if not title or not company:
             continue
@@ -1252,12 +1306,43 @@ def parse_linkedin_detail(html: str, base_url: str = LINKEDIN_BASE) -> JobDetail
                 break
     desc_el = select_first(soup, sel["detail_description"])
     description = clean_text(desc_el.get_text("\n")) if desc_el is not None else None
+    if not description:
+        description = _section_after_heading(soup, "About the job")
+    title, company = text_of(soup, sel["detail_title"]), text_of(soup, sel["detail_company"])
+    if not company:
+        tag = soup.select_one("[aria-label^='Company, ']")
+        if tag is not None:  # aria-label="Company, GoML." (the name itself may end in "Inc.")
+            company = clean_text(str(tag.get("aria-label"))[len("Company, "):].removesuffix("."))
+    if not title or not company:
+        # "<title>AI Researcher (Remote | $80/hr) | Synthires | LinkedIn</title>": split from the right
+        raw = re.sub(r"^\(\d+\)\s*", "", soup.title.get_text().strip() if soup.title else "")
+        parts = [p.strip() for p in raw.split(" | ")]
+        if parts and parts[-1].lower() == "linkedin":
+            parts = parts[:-1]
+        if len(parts) >= 2:
+            title, company = title or " | ".join(parts[:-1]), company or parts[-1]
     return JobDetail(
-        title=text_of(soup, sel["detail_title"]), company=text_of(soup, sel["detail_company"]),
+        title=title, company=company,
         location=text_of(soup, sel["detail_location"]), description=description, easy_apply=easy,
         apply_url=apply_url, salary_text=text_of(soup, sel["detail_salary"]),
         workplace=text_of(soup, sel["detail_workplace"]),
     )
+
+
+def _section_after_heading(soup: BeautifulSoup, heading: str) -> str | None:
+    """Text of the block a heading ("About the job") introduces, without the heading."""
+    for h in soup.find_all(["h1", "h2", "h3"]):
+        if clean_text(h.get_text(" ")) != heading:
+            continue
+        block = h.parent
+        while block is not None and len(clean_text(block.get_text(" ")) or "") <= len(heading) + 5:
+            block = block.parent
+        if block is None:
+            return None
+        text = clean_text(block.get_text("\n")) or ""
+        text = text[len(heading):].strip() if text.startswith(heading) else text
+        return text or None
+    return None
 
 
 _LI_WORKPLACE = {RemotePolicy.ONSITE: "1", RemotePolicy.REMOTE: "2", RemotePolicy.HYBRID: "3"}
@@ -1307,6 +1392,19 @@ class LinkedinSource(BrowserListingBase):
 
     date_windows = LINKEDIN_WINDOWS
     max_pages = 3
+
+    async def load_results(self, page: ListingPage) -> None:
+        """LinkedIn renders ~7 of a page's 25 cards and fills the rest only as the list pane is
+        scrolled: keep scrolling (human-paced) until every card has content or nothing changes."""
+        await self.pacer.scroll(page)
+        last = -1
+        for _ in range(LINKEDIN_LOAD_STEPS):
+            empty, total = linkedin_unloaded_cards(await page.content())
+            if empty == 0 or empty == last:
+                return
+            last = empty
+            await page.scroll(self.pacer.rng.randint(600, 900))
+            await self.pacer._wait(self.pacer.scroll_pause)
 
     def search_url(self, prefs: Preferences, role: str, location: str, window: int, page: int) -> str:
         return linkedin_search_url(prefs, role, location, window, page)
