@@ -84,6 +84,20 @@ class PausedError(Exception):
     """Raised by ``ApplyContext.check_pause`` when the kill switch is on."""
 
 
+class HarvestBlocked(Exception):
+    """Raised by ``harvest_questions`` when the form can't be reached / read without the
+    user (account or login wall, CAPTCHA, no online form). Prep parks ``unresolved`` in the
+    Needs-You inbox straight away (job -> needs_you) instead of re-queueing the job for a
+    fill that would hit the same wall. ``questions`` are any form questions that were
+    still harvested (resolved as usual)."""
+
+    def __init__(self, reason: str, unresolved: list[UnresolvedField], questions: list[FormQuestion] | None = None):
+        super().__init__(reason)
+        self.reason = reason
+        self.unresolved = unresolved
+        self.questions = list(questions or [])
+
+
 @dataclass(slots=True)
 class ApplyContext:
     conn: sqlite3.Connection

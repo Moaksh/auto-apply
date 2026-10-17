@@ -62,7 +62,7 @@ from autoapply.answers.guardrails import (
 from autoapply.answers.resolver import AnswerResolver, ResolvedAnswer, profile_answer
 from autoapply.answers.resume_picker import pick_resume
 from autoapply.answers.textnorm import match_option, normalize_question, yes_no
-from autoapply.apply.base import ApplyContext, FillResult, PausedError, SubmitResult, UnresolvedField
+from autoapply.apply.base import ApplyContext, FillResult, HarvestBlocked, PausedError, SubmitResult, UnresolvedField
 from autoapply.enums import AnswerOrigin, AppState, Ats, FieldType, Mode, QuestionReason
 from autoapply.llm.provider import AgentSDKProvider, TokenUsage
 from autoapply.models import AgentStepPayload, ApplicationAnswer, FormQuestion, Job, now_ts
@@ -133,6 +133,78 @@ _REF_RX = re.compile(r'-\s*([a-z]+)\s+"([^"]*)"[^\n]*?\[ref=([A-Za-z0-9_\-]+)\]'
 
 
 # =====================================================================================
+# harvest fallback: questions read straight from a page snapshot (accessibility tree)
+# =====================================================================================
+
+#: snapshot roles that are form inputs (a page showing any of these may be the form)
+_FORM_FIELD_ROLES = {"textbox", "combobox", "listbox", "checkbox", "radiogroup", "radio", "spinbutton"}
+_SNAP_LINE_RX = re.compile(r'^(\s*)-\s*([a-z]+)(?:\s+"((?:[^"\\]|\\.)*)")?')
+_SNAP_SKIP_RX = re.compile(r"\bsearch\b|\bnewsletter\b|\bsubscribe\b|\bcookie|\bkeyword|\bjob alert", re.I)
+_SNAP_UPLOAD_RX = re.compile(r"\b(resume|cv|cover letter)\b", re.I)
+_SNAP_REQUIRED_RX = re.compile(r"\s*(\*|\(required\))\s*", re.I)
+#: fewer fields than this is a search box / newsletter signup, not an application form
+MIN_SNAPSHOT_FIELDS = 2
+
+
+def _snap_field_type(role: str, label: str) -> FieldType:
+    if role in {"combobox", "listbox", "radiogroup"}:
+        return FieldType.SELECT
+    if role == "checkbox":
+        return FieldType.BOOLEAN
+    if role == "spinbutton":
+        return FieldType.NUMBER
+    low = label.lower()
+    if re.search(r"\be-?mail\b", low):
+        return FieldType.EMAIL
+    if re.search(r"\b(phone|mobile|telephone)\b", low):
+        return FieldType.PHONE
+    if re.search(r"\b(linkedin|github|website|portfolio|url)\b", low):
+        return FieldType.URL
+    return FieldType.TEXT
+
+
+def questions_from_snapshot(text: str) -> list[FormQuestion]:
+    """Best-effort form questions from a Playwright MCP snapshot (used when the agent did not
+    call report_form_questions). Labels come from the inputs' accessible names; options from
+    the ``option`` / ``radio`` children of a combobox / listbox / radiogroup. Returns [] when
+    the page does not look like an application form."""
+    out: list[FormQuestion] = []
+    seen: set[str] = set()
+    container: tuple[int, FormQuestion] | None = None  # (indent, question collecting options)
+    for line in (text or "").splitlines():
+        m = _SNAP_LINE_RX.match(line)
+        if not m:
+            continue
+        indent, role, raw_name = len(m.group(1)), m.group(2), (m.group(3) or "").replace('\\"', '"')
+        if container is not None and indent <= container[0]:
+            container = None
+        if container is not None and role in {"option", "radio"}:
+            name = raw_name.strip()
+            if name and not re.fullmatch(r"(select|choose|please select)\b.*|-+", name, re.I) and name not in container[1].options:
+                container[1].options.append(name)
+            continue
+        if role not in _FORM_FIELD_ROLES - {"radio"} and not (role == "button" and _SNAP_UPLOAD_RX.search(raw_name)):
+            continue
+        required = bool(_SNAP_REQUIRED_RX.search(raw_name))
+        label = _SNAP_REQUIRED_RX.sub(" ", raw_name).strip(" :")
+        if not label or _SNAP_SKIP_RX.search(label):
+            continue
+        if role == "button":  # "Upload resume" / "Attach CV" -> the file field
+            ftype, label = FieldType.FILE, ("Cover letter" if re.search(r"cover letter", label, re.I) else "Resume")
+        else:
+            ftype = _snap_field_type(role, label)
+        norm = normalize_question(label)
+        if not norm or norm in seen:
+            continue
+        seen.add(norm)
+        q = FormQuestion(key=f"snap{len(out)}", label=label, field_type=ftype, required=required)
+        out.append(q)
+        if role in {"combobox", "listbox", "radiogroup"}:
+            container = (indent, q)
+    return out if len(out) >= MIN_SNAPSHOT_FIELDS else []
+
+
+# =====================================================================================
 # client seam
 # =====================================================================================
 
@@ -187,13 +259,18 @@ class ToolGate:
     denials: list[tuple[str, str]] = field(default_factory=list)
     #: harvest phase: no data entry at all (navigation / reading / non-submit clicks only)
     read_only: bool = False
+    #: the latest page snapshot that contained form fields (harvest fallback)
+    last_form_snapshot: str = ""
     _decided: dict[str, GateDecision] = field(default_factory=dict, repr=False)
 
     # -- observation of page snapshots ------------------------------------------------
 
     def observe(self, text: str) -> None:
-        for role, name, ref in _REF_RX.findall(text or ""):
+        found = _REF_RX.findall(text or "")
+        for role, name, ref in found:
             self.refs[ref] = (role, name)
+        if any(role in _FORM_FIELD_ROLES for role, _, _ in found):
+            self.last_form_snapshot = text
 
     def arm_submit(self) -> None:
         self.submit_armed = True
@@ -883,6 +960,8 @@ class SessionOutcome:
     error: str | None = None
     steps: int = 0
     interrupted: bool = False
+    #: the session raised (the client was disconnected; it can't take a follow-up query)
+    crashed: bool = False
 
 
 class AgenticAdapter:
@@ -897,6 +976,7 @@ class AgenticAdapter:
         client_factory: ClientFactory | None = None,
         model: str | None = None,
         max_turns: int = 80,
+        harvest_max_turns: int = 40,
         max_budget_usd: float | None = None,
         playwright_mcp_package: str = PLAYWRIGHT_MCP_PACKAGE,
         chrome_profile_dir: Path | None = None,
@@ -906,6 +986,7 @@ class AgenticAdapter:
         self.client_factory: ClientFactory = client_factory or default_client_factory
         self.model = model
         self.max_turns = max_turns
+        self.harvest_max_turns = harvest_max_turns
         self.max_budget_usd = max_budget_usd
         self.playwright_mcp_package = playwright_mcp_package
         self.chrome_profile_dir = chrome_profile_dir
@@ -926,22 +1007,75 @@ class AgenticAdapter:
         return job.ats in self.HANDLES or "myworkdayjobs.com" in host
 
     async def harvest_questions(self, ctx: ApplyContext) -> list[FormQuestion]:
-        """Browser scan: the agent lists the form's questions without filling anything."""
+        """Browser scan: the agent lists the form's questions without filling anything.
+
+        Outcomes, in order:
+
+        * CAPTCHA, or the agent called ``ask_user`` (account / login wall, no online form)
+          -> :class:`HarvestBlocked` carrying those inbox items (prep parks the job now
+          instead of re-queueing it for a fill that would hit the same wall);
+        * ``report_form_questions`` was called -> those questions;
+        * otherwise ONE follow-up turn in the same session demanding the report;
+        * otherwise the questions read from the last page snapshot that showed form fields;
+        * otherwise ``RuntimeError`` with the session's own error (max turns, crash, ...).
+        """
         await self.close()  # one browser per Chrome profile: release any kept-open session first
         toolbox = self._toolbox(ctx, "harvest")
         company = db.get_company(ctx.conn, ctx.job.company_id).name
         prompt = (
             "LIST QUESTIONS ONLY. Do not type into, select, upload or click anything except navigation needed to reveal "
-            "the application form (e.g. an 'Apply' button that opens it, or 'Next' on multi-page forms only if no "
-            "data entry is required). Open the application URL, read the form with browser_snapshot, and call "
-            "report_form_questions with every field (label, field_type, required, options). Then stop.\n\n"
+            "the application form (e.g. an 'Apply' / 'Apply now' button or link that opens it — also when this page is "
+            "a job board, aggregator or news post that links to the employer's application page — or 'Next' on "
+            "multi-page forms only if no data entry is required). Open the application URL, read the form with "
+            "browser_snapshot, and call report_form_questions with every field (label, field_type, required, options). "
+            "Then stop.\n"
+            "You MUST finish with exactly one of these calls:\n"
+            "- report_form_questions (the form's fields);\n"
+            "- ask_user with question 'Account required to apply at <site>' if applying needs an account or login;\n"
+            "- ask_user with question 'No online application form at <site>: <what the posting says to do instead>' "
+            "if there is no form to fill (e.g. apply by email or an external Google Form);\n"
+            "- report_captcha for a CAPTCHA / human check.\n"
+            "Do not spend long exploring: if the form is not reachable in a few steps, use ask_user as above.\n\n"
             + _job_header(ctx.job, company)
         )
-        await self._run(ctx, toolbox, prompt)
+        client = self.client_factory(self._options(ctx, toolbox, max_turns=self.harvest_max_turns), toolbox)
+        outcome = await self._run(ctx, toolbox, prompt, client=client, keep_open=True)
+        try:
+            if self._harvest_settled(toolbox) is None and not outcome.crashed:
+                log.info("harvest: agent stopped without reporting the questions (%s); asking once more",
+                         outcome.error or "no report")
+                retry = (
+                    "You stopped without calling report_form_questions. Do it NOW, without further navigation: call "
+                    "report_form_questions with every field of the application form you have seen (label, field_type, "
+                    "required, options). If there was no form to read, call ask_user instead ('Account required to "
+                    "apply at <site>' or 'No online application form at <site>: <how to apply>'). Then stop."
+                )
+                second = await self._run(ctx, toolbox, retry, client=client, keep_open=True, already_connected=True)
+                outcome.error = second.error or outcome.error
+        finally:
+            await self._disconnect(client)
+
+        settled = self._harvest_settled(toolbox)
+        if settled is not None:
+            return settled
+        fallback = questions_from_snapshot(toolbox.gate.last_form_snapshot)
+        if fallback:
+            log.info("harvest: agent did not report; read %d questions from the page snapshot", len(fallback))
+            return fallback
+        detail = outcome.error or (f"last refusal: {toolbox.gate.denials[-1][1]}" if toolbox.gate.denials else "")
+        raise RuntimeError("agent did not report the form questions" + (f" ({detail})" if detail else ""))
+
+    def _harvest_settled(self, toolbox: AgentToolbox) -> list[FormQuestion] | None:
+        """Questions if the harvest session reached an outcome (raises HarvestBlocked when it
+        needs the user), None when the agent never reported."""
+        company = db.get_company(toolbox.ctx.conn, toolbox.ctx.job.company_id).name
         if toolbox.captcha:
-            return [FormQuestion(key="captcha", label=f"Solve the CAPTCHA at {company}", required=True)]
-        if toolbox.harvested is None:
-            raise RuntimeError("agent did not report the form questions")
+            q = FormQuestion(key="captcha", label=f"Solve the CAPTCHA at {company}", required=True)
+            raise HarvestBlocked("captcha", [UnresolvedField(question=q, reason=QuestionReason.CAPTCHA.value)],
+                                 toolbox.harvested)
+        if toolbox.unresolved:
+            items = list(toolbox.unresolved.values())
+            raise HarvestBlocked(items[0].question.label, items, toolbox.harvested)
         return toolbox.harvested
 
     async def fill(self, ctx: ApplyContext) -> FillResult:
@@ -1060,7 +1194,7 @@ class AgenticAdapter:
             args.append("--headless")
         return {"type": "stdio", "command": self.npx_command, "args": args}
 
-    def _options(self, ctx: ApplyContext, toolbox: AgentToolbox) -> Any:
+    def _options(self, ctx: ApplyContext, toolbox: AgentToolbox, *, max_turns: int | None = None) -> Any:
         from claude_agent_sdk import ClaudeAgentOptions, HookMatcher, create_sdk_mcp_server
 
         server = create_sdk_mcp_server(TOOL_SERVER, tools=toolbox.sdk_tools())
@@ -1075,7 +1209,7 @@ class AgenticAdapter:
             "hooks": {"PreToolUse": [HookMatcher(matcher=None, hooks=[toolbox.gate.pre_tool_use_hook])]},
             "permission_mode": "default",
             "setting_sources": [],
-            "max_turns": self.max_turns,
+            "max_turns": max_turns or self.max_turns,
             "cwd": str(self._output_dir(ctx)),
         }
         from autoapply.llm.provider import model_for_tier
@@ -1135,6 +1269,7 @@ class AgenticAdapter:
         except Exception as e:
             log.exception("agent session failed")
             outcome.error = f"agent session failed: {e}"
+            outcome.crashed = True
             keep_open = False
         self._account(ctx, toolbox, outcome)
         if not keep_open:

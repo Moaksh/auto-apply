@@ -4,7 +4,7 @@ import pytest
 
 from autoapply import db
 from autoapply.answers.resolver import get_inbox_answers
-from autoapply.apply.base import ApplyContext
+from autoapply.apply.base import ApplyContext, HarvestBlocked, UnresolvedField
 from autoapply.enums import Actor, AnswerOrigin, AppState, Ats, FieldType, QuestionStatus
 from autoapply.llm.provider import FakeLLMProvider
 from autoapply.models import DraftedAnswer, FormQuestion, Job
@@ -208,6 +208,34 @@ async def test_harvest_failure_requeues(conn, emit):
     assert report.harvest_failed_jobs == [j.id]
     app = db.get_application(conn, a.id)
     assert app.state is AppState.QUEUED and app.state_reason == "harvest_unavailable"
+
+
+async def test_harvest_blocked_parks_job_with_reason(conn, emit):
+    j, a = make_job(conn, ats=Ats.OTHER)
+    wall = UnresolvedField(question=FormQuestion(key="acct", label="Account required to apply at PeopleStrong"), reason="unknown")
+    adapter = FakeAdapter({j.id: HarvestBlocked("Account required to apply at PeopleStrong", [wall])})
+    report = await run_prep(conn, llm=FakeLLMProvider(), adapters=[adapter], emit=emit)
+    assert report.harvest_failed_jobs == [] and report.parked_jobs == [j.id]
+    app = db.get_application(conn, a.id)
+    assert app.state is AppState.NEEDS_YOU and app.state_reason == "Account required to apply at PeopleStrong"
+    (c,) = db.list_open_clusters(conn)
+    assert "Account required" in c.canonical_question
+
+
+async def test_harvest_blocked_still_resolves_harvested_questions(conn, emit):
+    seed_profile(conn)
+    j, a = make_job(conn, ats=Ats.OTHER)
+    cap = UnresolvedField(question=FormQuestion(key="captcha", label="Solve the CAPTCHA at Stripe", required=True), reason="captcha")
+    adapter = FakeAdapter({j.id: HarvestBlocked("captcha", [cap], [
+        FormQuestion(key="e", label="Email", field_type=FieldType.EMAIL, required=True),
+        FormQuestion(key="c", label="Do you hold an active security clearance?", required=True),
+    ])})
+    report = await run_prep(conn, llm=FakeLLMProvider(), adapters=[adapter], emit=emit)
+    assert report.questions_seen == 2 and report.resolved == 1
+    app = db.get_application(conn, a.id)
+    assert app.state is AppState.NEEDS_YOU and app.state_reason == "2 questions need you"
+    reasons = sorted(q.reason.value for q in db.list_questions(conn, status=QuestionStatus.OPEN))
+    assert reasons == ["captcha", "never_guess"]  # clearance is never guessed
 
 
 async def test_no_adapter_requeues(conn, emit):

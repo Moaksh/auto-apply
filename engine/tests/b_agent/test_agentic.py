@@ -21,11 +21,13 @@ from autoapply.apply.agentic import (
     AgentToolbox,
     ToolGate,
     browser_id,
+    questions_from_snapshot,
     tool_id,
 )
-from autoapply.apply.base import PausedError
-from autoapply.enums import AnswerOrigin, AppState, Ats, Mode
+from autoapply.apply.base import HarvestBlocked, PausedError
+from autoapply.enums import AnswerOrigin, AppState, Ats, FieldType, Mode
 from autoapply.llm.provider import FakeLLMProvider
+from autoapply.prep import run_prep
 
 from .conftest import gen, make_ctx, make_job, seed_profile
 
@@ -450,6 +452,111 @@ async def test_harvest_questions(world):
 async def test_harvest_without_report_raises(world):
     with pytest.raises(RuntimeError):
         await adapter_with([[step("browser_snapshot", {})]], {}).harvest_questions(ctx_for(world))
+
+
+FORM_SNAPSHOT = """### Page state
+- Page URL: https://careers.example.test/apply/42
+```yaml
+- generic [ref=e1]:
+  - searchbox "Search jobs" [ref=e2]
+  - heading "Apply: AI Engineer" [level=1] [ref=e3]
+  - textbox "Full name*" [ref=e4]
+  - textbox "Email address *" [ref=e5]
+  - textbox "Mobile number" [ref=e6]
+  - combobox "Notice period*" [ref=e7]:
+    - option "Select..." [selected]
+    - option "Immediate"
+    - option "30 days"
+  - radiogroup "Are you willing to relocate?" [ref=e8]:
+    - radio "Yes" [ref=e9]
+    - radio "No" [ref=e10]
+  - button "Upload resume" [ref=e11]
+  - checkbox "I agree to the privacy policy (required)" [ref=e12]
+  - button "Submit application" [ref=e13]
+```"""
+
+
+def test_questions_from_snapshot():
+    qs = questions_from_snapshot(FORM_SNAPSHOT)
+    by = {q.label: q for q in qs}
+    assert list(by) == ["Full name", "Email address", "Mobile number", "Notice period", "Are you willing to relocate?",
+                        "Resume", "I agree to the privacy policy"]
+    assert by["Full name"].required and not by["Mobile number"].required
+    assert by["Email address"].field_type is FieldType.EMAIL and by["Mobile number"].field_type is FieldType.PHONE
+    assert by["Notice period"].field_type is FieldType.SELECT and by["Notice period"].options == ["Immediate", "30 days"]
+    assert by["Are you willing to relocate?"].options == ["Yes", "No"]
+    assert by["Resume"].field_type is FieldType.FILE
+    assert by["I agree to the privacy policy"].field_type is FieldType.BOOLEAN and by["I agree to the privacy policy"].required
+    # a search box / newsletter signup alone is not an application form
+    assert questions_from_snapshot('- searchbox "Search" [ref=e1]\n- textbox "Subscribe to our newsletter" [ref=e2]') == []
+    assert questions_from_snapshot("") == []
+
+
+async def test_harvest_account_wall_is_blocked_not_unreported(world):
+    """Regression (Scalio on corehrx.com, L&T): the agent hit an account wall during the harvest and
+    followed the system prompt (ask_user 'Account required...'); the harvest ignored that and raised
+    'agent did not report the form questions', so the job bounced queued -> filling -> needs_you."""
+    log: dict = {}
+    script = [step("browser_navigate", {"url": "https://www.corehrx.com/jobs/ai-engineer/x"}, "- button \"Sign in\" [ref=e1]"),
+              step("ask_user", {"question": "Account required to apply at CoreHRx"})]
+    with pytest.raises(HarvestBlocked) as exc:
+        await adapter_with([script], log).harvest_questions(ctx_for(world))
+    assert [u.question.label for u in exc.value.unresolved] == ["Account required to apply at CoreHRx"]
+    assert len(log["prompts"]) == 1  # a definitive outcome: no retry
+    assert log["clients"][0].options.max_turns == 40  # harvest runs on a tighter turn budget
+    assert not log["clients"][0].connected
+
+
+async def test_harvest_captcha_is_blocked(world):
+    script = [step("browser_navigate", {"url": "https://stripe.wd1.myworkdayjobs.com/apply/1"}, SNAPSHOT),
+              step("report_captcha", {"detail": "hCaptcha"})]
+    with pytest.raises(HarvestBlocked) as exc:
+        await adapter_with([script], {}).harvest_questions(ctx_for(world))
+    (u,) = exc.value.unresolved
+    assert u.reason == "captcha" and "CAPTCHA" in u.question.label
+
+
+async def test_harvest_retries_once_in_same_session(world):
+    log: dict = {}
+    first = [step("browser_navigate", {"url": "https://stripe.wd1.myworkdayjobs.com/apply/1"}, SNAPSHOT)]
+    second = [step("report_form_questions", {"questions": [{"label": "First name", "required": True}]})]
+    qs = await adapter_with([first, second], log).harvest_questions(ctx_for(world))
+    assert [q.label for q in qs] == ["First name"]
+    assert len(log["clients"]) == 1 and len(log["prompts"]) == 2
+    assert "You stopped without calling report_form_questions" in log["prompts"][1]
+
+
+async def test_harvest_falls_back_to_page_snapshot(world):
+    log: dict = {}
+    first = [step("browser_navigate", {"url": "https://careers.example.test/apply/42"}, FORM_SNAPSHOT),
+             step("browser_snapshot", {}, "- generic [ref=e1]: Loading")]
+    second = [step("browser_snapshot", {}, "- generic [ref=e1]: Loading")]
+    qs = await adapter_with([first, second], log).harvest_questions(ctx_for(world))
+    assert "Notice period" in [q.label for q in qs] and len(qs) == 7
+    assert len(log["prompts"]) == 2
+
+
+async def test_harvest_failure_reports_why(world):
+    first = [step("browser_navigate", {"url": "https://www.linkedin.com/jobs/1"}, "")]  # denied by the gate
+    with pytest.raises(RuntimeError, match="agent did not report the form questions .*LinkedIn"):
+        await adapter_with([first, []], {}).harvest_questions(ctx_for(world))
+
+
+async def test_prep_parks_account_wall_with_clear_reason(world):
+    """End to end through run_prep: the job goes straight to needs_you with the agent's reason
+    instead of queued (harvest_unavailable)."""
+    conn = world["conn"]
+    job, app = make_job(conn, "Scalio", "AI Engineer, Agents & Intelligence", ats=Ats.OTHER,
+                        apply_url="https://www.corehrx.com/jobs/ai-engineer-agents-and-intelligence/ydknauobpnautgv/")
+    script = [step("browser_navigate", {"url": job.apply_url}, "- button \"Create account\" [ref=e1]"),
+              step("ask_user", {"question": "Account required to apply at CoreHRx"})]
+    report = await run_prep(conn, llm=world["llm"], adapters=[adapter_with([script], {})], emit=world["emit"],
+                            application_ids=[app.id])
+    assert report.harvest_failed_jobs == [] and report.parked_jobs == [job.id]
+    a = db.get_application(conn, app.id)
+    assert a.state is AppState.NEEDS_YOU and "Account required to apply at CoreHRx" in (a.state_reason or "")
+    (c,) = db.list_open_clusters(conn)
+    assert "Account required" in c.canonical_question
 
 
 async def test_write_cover_letter_tool(world, tmp_path):

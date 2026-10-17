@@ -29,7 +29,7 @@ from autoapply.answers.guardrails import NeedsUser
 from autoapply.answers.memory import COUNTRY_SCOPED_KEYS, AnswerMemory, render_template
 from autoapply.answers.resolver import AnswerResolver, set_inbox_answers
 from autoapply.answers.textnorm import COUNTRY_ALIASES, extract_country, normalize_question, yes_no
-from autoapply.apply.base import Adapter, ApplyContext, EmitFn, PausedError, UnresolvedField, select_adapter
+from autoapply.apply.base import Adapter, ApplyContext, EmitFn, HarvestBlocked, PausedError, UnresolvedField, select_adapter
 from autoapply.config import NEVER_GUESS_KEYS
 from autoapply.enums import Actor, AnswerOrigin, AnswerSource, AppState, DaemonActivity, FieldType, QuestionReason, QuestionStatus
 from autoapply.llm.provider import LLMProvider
@@ -198,6 +198,11 @@ async def _noop_emit(_type: str, _payload: Any) -> None:
     return None
 
 
+def _short(text: str, limit: int = 120) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
 def build_context(
     conn: sqlite3.Connection,
     application_id: int,
@@ -271,12 +276,20 @@ async def run_prep(
 
         ctx = build_context(conn, app.id, llm=llm, emit=emit, is_paused=paused, run_id=run_id)
         questions = questions_from_raw(job)
+        blocked: list[UnresolvedField] = []
+        blocked_reason = ""
         if questions is None:
             adapter = select_adapter(job, adapters)
             try:
                 if adapter is None:
                     raise LookupError("no adapter can handle this job")
                 questions = await adapter.harvest_questions(ctx)
+            except HarvestBlocked as hb:
+                # account / login wall, CAPTCHA, no online form: the user must act before any
+                # fill can work, so park the job now (re-queueing would just repeat the wall)
+                log.info("prep: harvest for job %s needs the user: %s", job.id, hb.reason)
+                db.log_event(conn, "prep", f"question harvest needs you: {hb.reason}", job_id=job.id, application_id=app.id)
+                questions, blocked, blocked_reason = hb.questions, list(hb.unresolved), hb.reason
             except PausedError:
                 t = db.transition(conn, app.id, AppState.QUEUED, reason="paused", run_id=run_row_id)
                 await emit("application_state", t.to_payload())
@@ -302,12 +315,15 @@ async def run_prep(
         # Same rule as fill(): an optional field the agent can't answer is left blank, so it
         # must not park the job (e.g. Greenhouse's optional EEOC / demographic questions).
         batch.unresolved = [nu for nu in batch.unresolved if nu.question.required]
-        if batch.unresolved:
-            new_ids, clusters = park_unresolved(conn, job.id, batch.unresolved, memory=memory)
+        to_park: list[UnresolvedField] = blocked + [nu.to_unresolved() for nu in batch.unresolved]
+        if to_park:
+            new_ids, clusters = park_unresolved(conn, job.id, to_park, memory=memory)
             created_q.extend(new_ids)
             touched |= clusters
-            n = len(batch.unresolved)
-            t = db.transition(conn, app.id, AppState.NEEDS_YOU, reason=f"{n} question{'s' if n != 1 else ''} need you", run_id=run_row_id)
+            n = len(to_park)
+            reason = (_short(blocked_reason) if blocked and n == 1
+                      else f"{n} question{'s' if n != 1 else ''} need you")
+            t = db.transition(conn, app.id, AppState.NEEDS_YOU, reason=reason, run_id=run_row_id)
             report.parked_jobs.append(job.id)
         else:
             t = db.transition(conn, app.id, AppState.QUEUED, reason="prepped", run_id=run_row_id)
