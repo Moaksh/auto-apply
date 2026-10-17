@@ -230,6 +230,26 @@ final class GRDBRepository: AppRepository {
         }
     }
 
+    func companySuggestions() -> AsyncStream<[CompanySuggestionItem]> {
+        observe { db in
+            // The table arrives with schema v6; an older daemon's DB simply has no suggestions.
+            guard try db.tableExists("company_suggestions") else { return [] }
+            return try Row.fetchAll(db, sql: """
+                SELECT * FROM company_suggestions WHERE status IN ('pending', 'auto')
+                ORDER BY status = 'pending' DESC, matching_roles DESC, suggested_at DESC LIMIT 200
+                """).map { row in
+                CompanySuggestionItem(
+                    id: row["id"], companyName: row["company_name"] ?? "", url: row["url"] ?? "",
+                    ats: (row["ats"] as String?).flatMap(Ats.init(rawValue:)), boardToken: row["board_token"],
+                    source: row["source"] ?? "", foundVia: row["found_via"], sampleTitle: row["sample_title"],
+                    matchingRoles: row["matching_roles"] ?? 0, openRoles: row["open_roles"],
+                    verified: (row["verified"] as Int?) == 1,
+                    status: (row["status"] as String?).flatMap(CompanySuggestionItem.Status.init(rawValue:)) ?? .pending,
+                    suggestedAt: DBJSON.date(row["suggested_at"]) ?? .distantPast)
+            }
+        }
+    }
+
     func profile() -> AsyncStream<Profile> {
         observe { db in
             guard let row = try Row.fetchOne(db, sql: "SELECT * FROM profile WHERE id = 1") else { return Profile() }

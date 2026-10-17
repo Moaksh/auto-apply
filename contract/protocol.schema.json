@@ -40,6 +40,8 @@
     "onboarding_connect_source",
     "check_source_login",
     "reset_source_cap",
+    "accept_company_suggestion",
+    "dismiss_company_suggestion",
     "set_mail_account",
     "get_mail_account",
     "suggest_preferences",
@@ -190,6 +192,20 @@
     }
   ],
   "$defs": {
+    "AcceptCompanySuggestionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "suggestion_id": {
+          "title": "Suggestion Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "suggestion_id"
+      ],
+      "title": "AcceptCompanySuggestionPayload",
+      "type": "object"
+    },
     "AckPayload": {
       "additionalProperties": false,
       "description": "Success reply to a command (envelope carries ``reply_to``).",
@@ -767,6 +783,12 @@
           "default": 0,
           "title": "Submitted Total",
           "type": "integer"
+        },
+        "suggestions_pending": {
+          "default": 0,
+          "description": "Company suggestions waiting for Add / Dismiss (Settings > Sources badge).",
+          "title": "Suggestions Pending",
+          "type": "integer"
         }
       },
       "title": "Counts",
@@ -809,6 +831,20 @@
         "id"
       ],
       "title": "DeleteStoryPayload",
+      "type": "object"
+    },
+    "DismissCompanySuggestionPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "suggestion_id": {
+          "title": "Suggestion Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "suggestion_id"
+      ],
+      "title": "DismissCompanySuggestionPayload",
       "type": "object"
     },
     "DismissEasyApplyPayload": {
@@ -3742,7 +3778,8 @@
             "failed": 0,
             "submitted_today": 0,
             "discovered_today": 0,
-            "submitted_total": 0
+            "submitted_total": 0,
+            "suggestions_pending": 0
           }
         },
         "caps": {
@@ -5277,6 +5314,58 @@
       ],
       "additionalProperties": false
     },
+    "CommandAcceptCompanySuggestion": {
+      "type": "object",
+      "title": "Command: accept_company_suggestion",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "accept_company_suggestion"
+        },
+        "payload": {
+          "$ref": "#/$defs/AcceptCompanySuggestionPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandDismissCompanySuggestion": {
+      "type": "object",
+      "title": "Command: dismiss_company_suggestion",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "dismiss_company_suggestion"
+        },
+        "payload": {
+          "$ref": "#/$defs/DismissCompanySuggestionPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
     "CommandSetMailAccount": {
       "type": "object",
       "title": "Command: set_mail_account",
@@ -6050,6 +6139,12 @@
         },
         {
           "$ref": "#/$defs/CommandResetSourceCap"
+        },
+        {
+          "$ref": "#/$defs/CommandAcceptCompanySuggestion"
+        },
+        {
+          "$ref": "#/$defs/CommandDismissCompanySuggestion"
         },
         {
           "$ref": "#/$defs/CommandSetMailAccount"

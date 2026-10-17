@@ -25,6 +25,7 @@ struct SettingsView: View {
             ForEach(SettingsTab.allCases) { tab in
                 SettingsTabContent(tab: tab, model: model)
                     .tabItem { Label(tab.title, systemImage: tab.symbol) }
+                    .badge(tab == .sources ? store.library.pendingSuggestionCount : 0)  // suggested companies
                     .tag(tab)
             }
         }

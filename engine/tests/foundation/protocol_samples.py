@@ -109,6 +109,8 @@ def samples() -> list[Envelope]:
     c("onboarding_connect_source", {"source": "linkedin"})
     c("check_source_login", {"source": "glassdoor"})
     c("reset_source_cap", {"source": "linkedin"})
+    c("accept_company_suggestion", {"suggestion_id": 3})
+    c("dismiss_company_suggestion", {"suggestion_id": 4})
     c("set_mail_account", {"email": "jane@gmail.com", "app_password": "abcd efgh ijkl mnop"})
     c("get_mail_account", {"test": False})
     c("suggest_preferences", {})
@@ -124,7 +126,7 @@ def samples() -> list[Envelope]:
     e("snapshot", {
         "protocol_version": 1, "daemon_version": "0.1.0", "state": _state.model_dump(mode="json"), "mode": "auto",
         "next_run_at": "2026-10-10T13:00:00.000Z", "current_run": _run.model_dump(mode="json"), "last_run": None,
-        "counts": Counts(queued=12, needs_you_clusters=1, needs_you_jobs=2, submitted_today=9).model_dump(),
+        "counts": Counts(queued=12, needs_you_clusters=1, needs_you_jobs=2, submitted_today=9, suggestions_pending=2).model_dump(),
         "caps": CapsStatus(daily_used=9, daily_limit=15).model_dump(),
         "open_clusters": [_cluster.model_dump(mode="json")],
         "sources": [SourceStatus(source="linkedin", enabled=True, connected=True, checked_at=TS).model_dump(mode="json")],

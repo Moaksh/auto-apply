@@ -113,7 +113,7 @@ def test_v6_migration_adds_column(tmp_path: Path) -> None:
     c = db.connect(tmp_path / "v5.db")
     db.migrate(c)
     c.execute("ALTER TABLE preferences DROP COLUMN parallel_applications")
-    c.execute("DELETE FROM schema_version WHERE version = 6")
+    c.execute("DELETE FROM schema_version WHERE version >= 6")
     c.execute("INSERT OR IGNORE INTO preferences(id) VALUES (1)")
     assert db.current_schema_version(c) == 5
     assert db.migrate(c) == db.SCHEMA_VERSION

@@ -187,6 +187,15 @@ class CapKind(StrEnum):
     GOOGLE_BUDGET = "google_budget"
 
 
+class SuggestionStatus(StrEnum):
+    """``company_suggestions.status``."""
+
+    PENDING = "pending"      # waiting for the user's Add / Dismiss
+    ACCEPTED = "accepted"    # the user added it to the watchlist
+    DISMISSED = "dismissed"  # never suggest (or auto-watch) again
+    AUTO = "auto"            # a verified ATS board the agent watched by itself
+
+
 class SourceName(StrEnum):
     """Discovery sources whose connection status the UI shows."""
 

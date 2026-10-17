@@ -118,6 +118,8 @@ An `error` without `reply_to` is an unsolicited daemon problem (login expired, C
 | `suggest_preferences` | — | `SuggestedPreferences` `{roles, seniority, locations, years_experience}` | from the stored profile; nothing is saved |
 | `clear_mail_account` | — | `{email: null, connected: false}` | removes the Keychain item |
 | `reset_source_cap` | `source`: `linkedin`\|`glassdoor` | `{used: 0, limit}` | Settings: zero today's browsing-session counter; emits `cap_reached` (used 0) so the UI updates |
+| `accept_company_suggestion` | `suggestion_id` | `{company_id}` | Settings ▸ Sources ▸ Suggested companies "Add": watches the company (its ATS board when known, else its career page as `careers_url`); suggestion → `accepted` |
+| `dismiss_company_suggestion` | `suggestion_id` | `null` | "Dismiss": suggestion → `dismissed`; the company is never suggested or auto-watched again. A company the agent watched by itself (`auto`) is unwatched |
 | `check_source_login` | `source`: `linkedin`\|`glassdoor` | `{connected: bool}` | "Check now": looks at the saved agent-Chrome login in a headless window (no login prompt); updates `source_status` |
 | `onboarding_connect_source` | `source`: `linkedin`\|`glassdoor` | `null` | opens agent Chrome on the login page; progress via `source_status` events |
 | `onboarding_set_step` | `step` (0–7) | `null` | persisted so quitting resumes the same step |
@@ -160,7 +162,8 @@ An `error` without `reply_to` is an unsolicited daemon problem (login expired, C
                    "needs_you": 0, "awaiting_review": 0, "submitted": 9, "failed": 0}, "tokens_in": 0, "tokens_out": 0 },
   "last_run": null,
   "counts": { "queued": 12, "needs_you_clusters": 1, "needs_you_jobs": 2, "awaiting_review": 0, "easy_apply_open": 0,
-              "unknown_verify": 0, "failed": 0, "submitted_today": 9, "discovered_today": 41, "submitted_total": 98 },
+              "unknown_verify": 0, "failed": 0, "submitted_today": 9, "discovered_today": 41, "submitted_total": 98,
+              "suggestions_pending": 2 },
   "caps": { "daily_used": 9, "daily_limit": 15, "companies_cooling_down": 2, "linkedin_sessions_used": 1,
             "linkedin_sessions_limit": 3, "glassdoor_sessions_used": 0, "glassdoor_sessions_limit": 3 },
   "open_clusters": [ /* QuestionCluster, sorted by job_count desc */ ],
@@ -179,6 +182,14 @@ events) is read from SQLite by the app; the DB always wins over optimistic event
 - `QuestionCluster`: `cluster_id, canonical_question, field_type, options[], never_guess_key?, reason, question_ids[], variants[], job_ids[], job_count, companies[], created_at`
 - `RunInfo`: `run_id, kind, trigger, started_at, finished_at?, outcome?, stats{discovered, scored, skipped, queued, needs_you, awaiting_review, submitted, failed}, tokens_in, tokens_out`
 - `Preferences` / `NeverGuess` / `Profile`: see `protocol.schema.json` `$defs` (field names = DB columns).
+
+### 6.2.1 Company suggestions
+
+Companies the agent found while browsing (Google Jobs / LinkedIn / Glassdoor apply links, the
+company finder's Google searches for public ATS boards) live in the `company_suggestions` table
+(schema v6), read by the app directly. `status`: `pending` (shown with Add / Dismiss), `auto` (a
+verified ATS board the agent watched by itself; Dismiss unwatches it), `accepted`, `dismissed`.
+`counts.suggestions_pending` in the snapshot is the badge count.
 
 ### 6.3 Enumerations (identical to `schema.sql` CHECK constraints)
 

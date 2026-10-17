@@ -24,6 +24,8 @@ protocol AppRepository: AnyObject, Sendable {
     func stories() -> AsyncStream<[StoryItem]>
     func memoryAnswers() -> AsyncStream<[MemoryAnswerItem]>
     func easyApply() -> AsyncStream<[EasyApplyItem]>
+    /// Companies found while browsing (pending first, most matching roles first); empty on DBs older than v6.
+    func companySuggestions() -> AsyncStream<[CompanySuggestionItem]>
     func profile() -> AsyncStream<Profile>
     func neverGuess() -> AsyncStream<NeverGuess>
     func runs(limit: Int) -> AsyncStream<[RunItem]>

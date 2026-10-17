@@ -467,15 +467,16 @@ def _construct(cls: type, available: dict[str, Any]) -> Any | None:
 
 def default_sources(available: dict[str, Any]) -> list[Source]:
     from autoapply.discovery.ashby import AshbySource
-    from autoapply.discovery.careers import CareersSource
+    from autoapply.discovery.careers_agent import CareerPageAgent
+    from autoapply.discovery.company_finder import CompanyFinder
     from autoapply.discovery.glassdoor import GlassdoorSource
     from autoapply.discovery.google_jobs import GoogleJobsSource
     from autoapply.discovery.greenhouse import GreenhouseSource
     from autoapply.discovery.lever import LeverSource
     from autoapply.discovery.linkedin import LinkedinSource
 
-    out = [_construct(c, available) for c in (GreenhouseSource, LeverSource, AshbySource, CareersSource, LinkedinSource,
-                                              GlassdoorSource, GoogleJobsSource)]
+    out = [_construct(c, available) for c in (GreenhouseSource, LeverSource, AshbySource, CareerPageAgent, LinkedinSource,
+                                              GlassdoorSource, GoogleJobsSource, CompanyFinder)]
     return [s for s in out if s is not None]
 
 
@@ -1208,6 +1209,17 @@ class Daemon:
 
     async def _cmd_dismiss_easy_apply(self, p: Any) -> None:
         db.dismiss_easy_apply(self.conn, p.job_id)
+
+    async def _cmd_accept_company_suggestion(self, p: Any) -> dict[str, Any]:
+        """Settings > Sources > Suggested companies > Add: watch it (ATS board, else its career page)."""
+        company = db.accept_company_suggestion(self.conn, p.suggestion_id)
+        db.log_event(self.conn, "user", f"added {company.name} to the watched companies", actor=Actor.USER)
+        return {"company_id": company.id}
+
+    async def _cmd_dismiss_company_suggestion(self, p: Any) -> None:
+        """Dismiss: never suggest it again (one the agent added by itself is unwatched)."""
+        s = db.dismiss_company_suggestion(self.conn, p.suggestion_id)
+        db.log_event(self.conn, "user", f"dismissed the suggested company {s.company_name}", actor=Actor.USER)
 
     def _require_browser_free(self, what: str) -> asyncio.Lock:
         assert self.pipeline is not None

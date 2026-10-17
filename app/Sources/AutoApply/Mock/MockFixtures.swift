@@ -298,6 +298,17 @@ enum MockFixtures {
                 resumeVariantID: 1, opened: i >= 6, done: i == 8, dismissed: false,
                 doneAt: i == 8 ? now.addingTimeInterval(-3_600) : nil, createdAt: job.discoveredAt))
         }
+        data.companySuggestions = [
+            CompanySuggestionItem(id: 1, companyName: "Sarvam AI", url: "https://jobs.ashbyhq.com/sarvam", ats: .ashby,
+                                  boardToken: "sarvam", source: "linkedin", sampleTitle: "AI Engineer", matchingRoles: 3,
+                                  suggestedAt: now.addingTimeInterval(-7_200)),
+            CompanySuggestionItem(id: 2, companyName: "Zepto", url: "https://www.zeptonow.com/careers", source: "google",
+                                  sampleTitle: "Backend Engineer", matchingRoles: 2, suggestedAt: now.addingTimeInterval(-86_400)),
+            CompanySuggestionItem(id: 3, companyName: "Plivo", url: "https://job-boards.greenhouse.io/plivo", ats: .greenhouse,
+                                  boardToken: "plivo", source: "company_finder", sampleTitle: "Platform Engineer",
+                                  matchingRoles: 2, openRoles: 14, verified: true, status: .auto,
+                                  suggestedAt: now.addingTimeInterval(-3_600)),
+        ]
 
         // Runs: three a day for the last 30 days.
         var runID = 1

@@ -1,6 +1,6 @@
 -- =====================================================================================
 -- AutoApply SQLite schema — SINGLE SOURCE OF TRUTH for the database.
--- Contract version: schema_version = 6   (keep in sync with autoapply.db.SCHEMA_VERSION)
+-- Contract version: schema_version = 7   (keep in sync with autoapply.db.SCHEMA_VERSION)
 --
 -- Location: ~/Library/Application Support/AutoApply/autoapply.db (AUTOAPPLY_HOME overrides)
 --
@@ -197,6 +197,34 @@ CREATE TABLE IF NOT EXISTS companies (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS ux_companies_normalized_name ON companies(normalized_name);
 CREATE INDEX IF NOT EXISTS ix_companies_watch ON companies(watch) WHERE watch = 1;
+
+-- -------------------------------------------------------------------------------------
+-- company_suggestions (v7): companies the agent found while browsing (Google results, apply
+-- links, the company finder) that are not on the watchlist. One row per company; the user
+-- accepts (-> companies.watch = 1) or dismisses (never suggested again). 'auto' = a verified
+-- ATS board the agent added to the watchlist by itself (shown so it can be undone).
+-- -------------------------------------------------------------------------------------
+CREATE TABLE IF NOT EXISTS company_suggestions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_name    TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,                          -- autoapply.db.normalize_text(company_name)
+    url             TEXT NOT NULL,                          -- ATS board or career page
+    ats             TEXT CHECK (ats IS NULL OR ats IN ('greenhouse','lever','ashby','workday','linkedin_easy_apply','other')),
+    board_token     TEXT,
+    source          TEXT NOT NULL,                          -- where it was found: google | linkedin | glassdoor | company_finder | careers
+    found_via       TEXT,                                   -- human detail (search query, listing title)
+    sample_title    TEXT,                                   -- one matching job title
+    matching_roles  INTEGER NOT NULL DEFAULT 0 CHECK (matching_roles >= 0),
+    open_roles      INTEGER,                                -- all open roles on the board (verified boards)
+    verified        INTEGER NOT NULL DEFAULT 0 CHECK (verified IN (0, 1)),  -- board answered its public API
+    status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','dismissed','auto')),
+    company_id      INTEGER REFERENCES companies(id) ON DELETE SET NULL,
+    suggested_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    decided_at      TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_company_suggestions_name ON company_suggestions(normalized_name);
+CREATE INDEX IF NOT EXISTS ix_company_suggestions_status ON company_suggestions(status);
 
 -- -------------------------------------------------------------------------------------
 -- jobs: every discovered posting. dedupe_key = normalized "company|title|location".
@@ -422,3 +450,4 @@ INSERT OR IGNORE INTO schema_version (version) VALUES (3);
 INSERT OR IGNORE INTO schema_version (version) VALUES (4);
 INSERT OR IGNORE INTO schema_version (version) VALUES (5);
 INSERT OR IGNORE INTO schema_version (version) VALUES (6);
+INSERT OR IGNORE INTO schema_version (version) VALUES (7);

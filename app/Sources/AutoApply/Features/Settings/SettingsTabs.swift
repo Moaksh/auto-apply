@@ -418,6 +418,7 @@ struct SourcesSettingsTab: View {
             }
             .errorShake(trigger: urlShake)
         }
+        CompanySuggestionsRows()
         MailAccountRow()
         SettingsRow("Read budgets", help: "Short, human-paced read-only sessions per day. LinkedIn and Glassdoor are never used to apply.") {
             Stepper("LinkedIn: \(model.preferencesDraft.linkedinSessionsPerDay) sessions / day",
@@ -485,6 +486,80 @@ struct SourcesSettingsTab: View {
             return status.checkedAt.map { "\(health) · checked \(C3Format.relative($0))" } ?? health
         }
         return status.detail ?? "Public job boards · no login needed"
+    }
+}
+
+/// Settings ▸ Sources: companies the agent found while browsing (Google results, apply links, the
+/// company finder's searches for public job boards). Add = watch it; Dismiss = never suggest it again.
+struct CompanySuggestionsRows: View {
+    @Environment(AppStore.self) private var store
+
+    var body: some View {
+        let pending = store.library.pendingSuggestions
+        let auto = store.library.autoAddedCompanies
+        SettingsRow("Suggested companies",
+                    help: "Found while searching Google and job sites. Add puts the company on the watch list; its board or career page is then read every run.") {
+            if pending.isEmpty {
+                Text("No suggestions right now. New ones appear here as the agent searches.")
+                    .font(Typography.callout).foregroundStyle(Palette.textSecondary)
+            }
+            ForEach(pending) { item in
+                row(item) {
+                    Button("Add") { Task { await store.acceptCompanySuggestion(item) } }
+                        .buttonStyle(.glass)
+                        .accessibilityLabel("Add \(item.companyName) to watched companies")
+                    Button("Dismiss") { Task { await store.dismissCompanySuggestion(item) } }
+                        .buttonStyle(.borderless)
+                        .accessibilityLabel("Dismiss \(item.companyName)")
+                }
+            }
+        }
+        if !auto.isEmpty {
+            SettingsRow("Added by the agent",
+                        help: "Public job boards with roles that match yours, watched automatically. Remove stops watching and never adds them again.") {
+                ForEach(auto.prefix(30)) { item in
+                    row(item) {
+                        Button("Remove") { Task { await store.dismissCompanySuggestion(item) } }
+                            .buttonStyle(.borderless)
+                            .accessibilityLabel("Stop watching \(item.companyName)")
+                    }
+                }
+            }
+        }
+    }
+
+    private func row<Actions: View>(_ item: CompanySuggestionItem, @ViewBuilder actions: () -> Actions) -> some View {
+        HStack(alignment: .top, spacing: Space.m) {
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: Space.xs) {
+                    Text(item.companyName).font(Typography.bodyEmph)
+                    if item.verified {
+                        Image(systemName: "checkmark.seal").foregroundStyle(Palette.textSecondary)
+                            .help("The board answered its public API")
+                    }
+                }
+                Text(detail(item)).font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                if let url = URL(string: item.url) {
+                    Link(item.url, destination: url).font(Typography.callout).lineLimit(1).truncationMode(.middle)
+                }
+            }
+            Spacer()
+            actions()
+        }
+        .padding(Space.s)
+        .surfaceCard(cornerRadius: Radius.inner)
+    }
+
+    private func detail(_ item: CompanySuggestionItem) -> String {
+        var bits = ["\(item.kindLabel) · found via \(item.sourceLabel)"]
+        let roles = item.matchingRoles == 1 ? "1 matching role" : "\(item.matchingRoles) matching roles"
+        if let open = item.openRoles {
+            bits.append("\(roles) of \(open) open")
+        } else if item.matchingRoles > 0 {
+            bits.append(roles)
+        }
+        if let title = item.sampleTitle, !title.isEmpty { bits.append("e.g. \(title)") }
+        return bits.joined(separator: " · ")
     }
 }
 

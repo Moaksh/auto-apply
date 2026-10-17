@@ -68,6 +68,34 @@ struct IntegrationCommandsTests {
         #expect(store.toasts.current?.actionTitle == "Undo", "nil status reads as Applied, so Undo is offered")
     }
 
+    @Test func companySuggestionsAddAndDismiss() async throws {
+        let mock = MockDaemon(scenario: .idle)
+        _ = try await mock.connect()
+        let pending = mock.world.repository.read { $0.companySuggestions.filter { $0.status == .pending } }
+        #expect(pending.count == 2)
+        let library = await MainActor.run { () -> LibraryStore in
+            let l = LibraryStore()
+            l.companySuggestions = mock.world.repository.read { $0.companySuggestions }
+            return l
+        }
+        #expect(await MainActor.run { library.pendingSuggestionCount } == 2)
+        #expect(await MainActor.run { library.autoAddedCompanies.map(\.companyName) } == ["Plivo"])
+
+        let add = try await mock.request(.acceptCompanySuggestion(AcceptCompanySuggestionPayload(suggestionId: pending[0].id)), timeout: .seconds(2))
+        guard case .ack = add.event else { Issue.record("expected ack, got \(add.event)"); return }
+        let dismiss = try await mock.request(.dismissCompanySuggestion(DismissCompanySuggestionPayload(suggestionId: pending[1].id)), timeout: .seconds(2))
+        guard case .ack = dismiss.event else { Issue.record("expected ack, got \(dismiss.event)"); return }
+        let statuses = mock.world.repository.read { d in d.companySuggestions.map(\.status) }
+        #expect(statuses == [.accepted, .dismissed, .auto])
+        do {
+            _ = try await mock.request(.dismissCompanySuggestion(DismissCompanySuggestionPayload(suggestionId: 999)), timeout: .seconds(2))
+            Issue.record("expected not_found")
+        } catch let DaemonClientError.daemon(e) {
+            #expect(e.code == .notFound)
+        }
+        await mock.disconnect()
+    }
+
     @Test func mockDaemonHonoursNewCommands() async throws {
         let mock = MockDaemon(scenario: .idle)
         _ = try await mock.connect()

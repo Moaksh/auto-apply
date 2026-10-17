@@ -197,6 +197,7 @@ final class AppStore {
         pump(repo.stories()) { store, v in store.library.stories = v }
         pump(repo.memoryAnswers()) { store, v in store.library.memoryAnswers = v }
         pump(repo.easyApply()) { store, v in store.library.easyApply = v }
+        pump(repo.companySuggestions()) { store, v in store.library.companySuggestions = v }
         pump(repo.profile()) { store, v in store.library.profile = v }
         pump(repo.neverGuess()) { store, v in store.library.neverGuess = v }
         pump(repo.runs(limit: 50)) { store, v in store.library.runs = v }
