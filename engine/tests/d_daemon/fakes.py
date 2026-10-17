@@ -5,6 +5,7 @@ Nothing here touches the network, a real browser, or a real LLM.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import sqlite3
 from collections.abc import Callable
@@ -41,6 +42,7 @@ class FakePage:
         self._url = "about:blank"
         self._html = ""
         self.scrolled = 0
+        self.history: list[str] = []  # URLs this tab opened
 
     @property
     def url(self) -> str:
@@ -48,6 +50,7 @@ class FakePage:
 
     async def goto(self, url: str) -> None:
         self.browser.visited.append(url)
+        self.history.append(url)
         final = url
         for pattern, target in self.browser.redirects:
             if re.search(pattern, url):
@@ -96,7 +99,7 @@ class FakeBrowser:
 
 
 async def _no_sleep(_s: float) -> None:
-    return None
+    await asyncio.sleep(0)  # no real wait, but let other tabs run (as a real pause would)
 
 
 def instant_pacer(seed: int = 7) -> HumanPacer:

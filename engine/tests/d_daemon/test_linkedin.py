@@ -207,9 +207,11 @@ async def test_linkedin_captcha_on_detail_page(conn: sqlite3.Connection, prefs_s
     sink = EventSink()
     src = LinkedinSource(conn, emit=sink, browser_factory=browser.factory(), pacer=instant_pacer())
     jobs = await src.discover(ctx_for(conn))
-    assert jobs == []
-    assert sink.of("error")[0].details["reason"] == "captcha"
-    assert len([u for u in browser.visited if "/jobs/view/" in u]) == 1  # stopped immediately
+    assert not any(j.external_id == "4012345678" for j in jobs)
+    errors = sink.of("error")
+    assert len(errors) == 1 and errors[0].details["reason"] == "captcha"  # one report, however many tabs
+    # job pages are read side by side: tabs already mid-visit finish theirs, none starts a new one
+    assert len([u for u in browser.visited if "/jobs/view/" in u]) <= LinkedinSource.detail_tabs
 
 
 async def test_linkedin_connect_flow(conn: sqlite3.Connection) -> None:

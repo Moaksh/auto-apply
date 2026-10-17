@@ -57,6 +57,8 @@ from autoapply.models import (
 log = logging.getLogger("autoapply.discovery.linkedin")
 
 MAX_PER_COMPANY_PER_SESSION = 3
+#: Upper bound on either kind of tab (search / job page) one site opens at once.
+MAX_TABS_PER_SITE = 4
 
 EmitFn = Callable[[str, Any], Awaitable[None]]
 
@@ -752,6 +754,31 @@ def next_local_midnight(now: datetime | None = None) -> datetime:
 # =====================================================================================
 
 
+@dataclass(slots=True)
+class _SearchRun:
+    """One search's progress while its cards are being visited by the job-page tabs."""
+
+    search: Any
+    label: str
+    tab: int
+    cards: int = 0
+    new: int = 0
+    complete: bool = True
+    pending: int = 0        # visits queued but not done yet
+    scanned: bool = False   # every card on the result page was looked at (or the scan stopped)
+    recorded: bool = False
+
+
+@dataclass(slots=True)
+class _Visit:
+    """A card that needs a page visit: its job page (``detail`` is None) or its apply link."""
+
+    run: _SearchRun
+    card: ListingCard
+    detail: JobDetail | None
+    n: int                  # position in the session's job budget, for "k/N" log lines
+
+
 class BrowserListingBase:
     """Base for LinkedIn / Glassdoor: one human-paced, read-only browsing session per call.
 
@@ -777,8 +804,10 @@ class BrowserListingBase:
     date_windows: ClassVar[tuple[str, ...]] = ("",)
     #: Result pages read per date window before widening it.
     max_pages: ClassVar[int] = 1
-    #: Tabs this site browses with at once (each runs a different search).
-    tabs: ClassVar[int] = 2
+    #: Tabs this site searches with at once (each runs a different search / role).
+    tabs: ClassVar[int] = 3
+    #: Tabs that open job pages / apply links for the cards the searches found, side by side.
+    detail_tabs: ClassVar[int] = 3
     #: Skip result cards whose title matches none of the roles before spending a page visit.
     prefilter_titles: ClassVar[bool] = False
 
@@ -967,107 +996,179 @@ class BrowserListingBase:
         max_details = self.max_details or prefs.jobs_per_session
         budget = {"left": max_details, "already_seen": 0, "blocked": False}
         per_company: dict[str, int] = {}
-        queue: asyncio.Queue = asyncio.Queue()
+        search_queue: asyncio.Queue[Any] = asyncio.Queue()
         for s in searches:
-            queue.put_nowait(s)
+            search_queue.put_nowait(s)
+        #: Cards that need a page visit (job page and/or apply link), worked by the visit tabs.
+        visits: asyncio.Queue[_Visit | None] = asyncio.Queue()
+        n_search_tabs = max(1, min(self.tabs, MAX_TABS_PER_SITE, len(searches)))
+        n_visit_tabs = max(1, min(self.detail_tabs, MAX_TABS_PER_SITE))
+        searching = {"left": n_search_tabs}
+
+        def stopped() -> bool:
+            return bool(budget["blocked"]) or self.is_paused()
+
+        async def block(state: PageState) -> None:
+            self.last_state = state
+            if not budget["blocked"]:  # one report per session, however many tabs hit the wall
+                budget["blocked"] = True
+                await self._report_blocked(state)
+
+        async def finish(run: _SearchRun) -> None:
+            """Record a search once its page is scanned and every visit it queued is done."""
+            if run.recorded or not run.scanned or run.pending:
+                return
+            run.recorded = True
+            planner.record(run.search, cards=run.cards, new=run.new, complete=run.complete)
+            if run.cards:
+                await self._log(f"{self.display_name} [tab {run.tab}] · {run.label}: "
+                                f"{run.cards} listings on the page, {run.new} new")
+
+        def keep(run: _SearchRun, card: ListingCard, detail: JobDetail | None) -> None:
+            job = self.build_job(card, detail)
+            if job is not None:
+                job.raw = {**(job.raw or {}), "search_key": run.search.key}
+                jobs.append(job)
+                run.new += 1
 
         async def read_search(page: ListingPage, s: Any, tab: int) -> None:
             label = f"{s.role}" + (f" · {s.location}" if s.location else "")
+            run = _SearchRun(search=s, label=label, tab=tab)
             await self.emit("state", StatePayload(daemon="discovering", run_id=ctx.run_id,
                                                   message=f"{self.display_name} · {label}"))
+            await self._log(f"{self.display_name} [tab {tab}] · {label}: searching")
             await page.goto(self.search_url(prefs, s.role, s.location, s.window, s.page))
             await self.pacer.after_load()
             await self._show(page, ctx, f"searching {self.display_name}: {label}")
             state = self.page_state(await page.content(), page.url)
-            self.last_state = state
             if state is not PageState.OK:
-                await self._report_blocked(state)
-                budget["blocked"] = True
+                await block(state)
                 return
+            self.last_state = state
             await self.load_results(page)
             cards = self.parse_search(await page.content(), page.url)
-            new, complete = 0, True
-            for card in cards:
-                if self.is_paused() or budget["blocked"]:
-                    complete = False
-                    break
-                key = card.external_id or card.detail_url or f"{card.company}|{card.title}|{card.location}"
-                if key in seen:
-                    continue
-                seen.add(key)
-                if self.prefilter_titles and not title_matches_roles(card.title, prefs.roles):
-                    continue
-                if ctx.focus is not None and off_field(card.title, ctx.focus):
-                    continue  # another discipline's job (e.g. "Electrical Engineer" for a software resume)
-                per_company[card.company] = per_company.get(card.company, 0) + 1
-                if per_company[card.company] > MAX_PER_COMPANY_PER_SESSION:
-                    continue  # one prolific poster (e.g. a staffing/gig company) must not crowd out everyone else
-                if db.listing_already_stored(self.conn, self.source_key, card.external_id, card.detail_url):
-                    budget["already_seen"] += 1  # stored from an earlier run: no page visit, no re-scoring, no tokens
-                    continue
-                detail = card.detail
-                needs_visit = detail is None and bool(card.detail_url)
-                needs_resolve = False
-                if detail is not None:
-                    needs_resolve = (detail.apply_url is None and bool(detail.apply_redirect) and self.resolve_redirects
-                                     and not (card.easy_apply or detail.easy_apply))
-                if (needs_visit or needs_resolve) and budget["left"] <= 0:
-                    complete = False
-                    break
-                if needs_visit:
-                    budget["left"] -= 1
-                    await self._log(
-                        f"{self.display_name}: reading job {max_details - budget['left']}/{max_details}: "
-                        f"{card.title} · {card.company}")
-                    await self.pacer.between_job_pages()
-                    await page.goto(card.detail_url)
-                    await self.pacer.after_load()
-                    await self._show(page, ctx, f"reading {card.title}", detail=card.company)
-                    html = await page.content()
-                    state = self.page_state(html, page.url)
-                    if state is not PageState.OK:
-                        self.last_state = state
-                        await self._report_blocked(state)
-                        budget["blocked"] = True
-                        complete = False
+            run.cards = len(cards)
+            queued = 0
+            try:
+                for card in cards:
+                    if stopped():
+                        run.complete = False
                         break
-                    await self.pacer.scroll(page)
-                    detail = self.parse_detail(await page.content(), page.url)
-                    needs_resolve = (detail.apply_url is None and bool(detail.apply_redirect) and self.resolve_redirects
-                                     and not (card.easy_apply or detail.easy_apply))
-                elif needs_resolve:
+                    key = card.external_id or card.detail_url or f"{card.company}|{card.title}|{card.location}"
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    if self.prefilter_titles and not title_matches_roles(card.title, prefs.roles):
+                        continue
+                    if ctx.focus is not None and off_field(card.title, ctx.focus):
+                        continue  # another discipline's job (e.g. "Electrical Engineer" for a software resume)
+                    per_company[card.company] = per_company.get(card.company, 0) + 1
+                    if per_company[card.company] > MAX_PER_COMPANY_PER_SESSION:
+                        continue  # one prolific poster (e.g. a staffing/gig company) must not crowd out everyone else
+                    if db.listing_already_stored(self.conn, self.source_key, card.external_id, card.detail_url):
+                        budget["already_seen"] += 1  # stored from an earlier run: no page visit, no re-scoring, no tokens
+                        continue
+                    detail = card.detail
+                    needs_visit = detail is None and bool(card.detail_url)
+                    if not needs_visit and not self._needs_resolve(card, detail):
+                        keep(run, card, detail)  # the result page already holds everything
+                        continue
+                    if budget["left"] <= 0:
+                        run.complete = False
+                        break
                     budget["left"] -= 1
-                    await self._log(f"{self.display_name}: opening apply link {max_details - budget['left']}/{max_details}: "
-                                    f"{card.title} · {card.company}")
-                    await self.pacer.between_job_pages()
-                if needs_resolve and detail is not None and detail.apply_redirect:
-                    detail.apply_url = await self._resolve(page, detail.apply_redirect)
-                job = self.build_job(card, detail)
-                if job is not None:
-                    job.raw = {**(job.raw or {}), "search_key": s.key}
-                    jobs.append(job)
-                    new += 1
-            planner.record(s, cards=len(cards), new=new, complete=complete)
-            if cards:
-                await self._log(f"{self.display_name} · {label}: {len(cards)} listings on the page, {new} new")
+                    run.pending += 1
+                    queued += 1
+                    visits.put_nowait(_Visit(run, card, detail, max_details - budget["left"]))
+            finally:
+                run.scanned = True
+                if cards:
+                    await self._log(f"{self.display_name} [tab {tab}] · {label}: {len(cards)} listings on the page, "
+                                    f"{queued} handed to the job-page tabs")
+                await finish(run)
 
-        async def worker(tab: int) -> None:
-            page = await browser.new_page()
-            first = True
-            while not queue.empty() and not budget["blocked"] and not self.is_paused():
-                s = queue.get_nowait()
-                if not first:
-                    await self.pacer.between_search_pages()
-                first = False
-                await read_search(page, s, tab)
+        async def visit(page: ListingPage, v: _Visit, tab: int) -> None:
+            card, detail, run = v.card, v.detail, v.run
+            who = f"{card.title} · {card.company}"
+            verb = "reading job" if detail is None else "opening apply link"
+            await self._log(f"{self.display_name} [tab {tab}] · {run.label}: {verb} {v.n}/{max_details}: {who}")
+            await self.pacer.between_job_pages()
+            if stopped():
+                run.complete = False
+                return
+            if detail is None:
+                assert card.detail_url
+                await page.goto(card.detail_url)
+                await self.pacer.after_load()
+                await self._show(page, ctx, f"reading {card.title}", detail=card.company)
+                state = self.page_state(await page.content(), page.url)
+                if state is not PageState.OK:
+                    await block(state)
+                    run.complete = False
+                    return
+                await self.pacer.scroll(page)
+                detail = self.parse_detail(await page.content(), page.url)
+            if self._needs_resolve(card, detail) and detail.apply_redirect:
+                if stopped():
+                    run.complete = False
+                    return
+                detail.apply_url = await self._resolve(page, detail.apply_redirect)
+            keep(run, card, detail)
+
+        async def visit_worker(tab: int) -> None:
+            """Works the shared visit queue in its own tab (opened on its first job) until told to stop."""
+            page: ListingPage | None = None
+            while True:
+                v = await visits.get()
+                if v is None:
+                    return
+                try:
+                    if stopped():
+                        v.run.complete = False
+                        continue
+                    if page is None:
+                        page = await browser.new_page()
+                    try:
+                        await visit(page, v, tab)
+                    except Exception as e:  # noqa: BLE001 - one slow/broken job page never ends the session
+                        if any(m in str(e).lower() for m in _PAGE_CLOSED_MARKERS):
+                            budget["blocked"] = True  # the window was closed: stop every tab
+                            raise
+                        v.run.complete = False
+                        await self._log(f"{self.display_name} [tab {tab}]: couldn't read {v.card.title} · "
+                                        f"{v.card.company} ({e})", "warning")
+                finally:
+                    v.run.pending -= 1
+                    await finish(v.run)
+
+        async def search_worker(tab: int) -> None:
+            try:
+                page = await browser.new_page()
+                first = True
+                while not search_queue.empty() and not stopped():
+                    s = search_queue.get_nowait()
+                    if not first:
+                        await self.pacer.between_search_pages()
+                    first = False
+                    await read_search(page, s, tab)
+            finally:
+                searching["left"] -= 1
+                if searching["left"] == 0:  # last search done: the job-page tabs drain the queue, then stop
+                    for _ in range(n_visit_tabs):
+                        visits.put_nowait(None)
 
         # Only a session that actually opened a page spends the daily budget (a browser that
         # cannot launch, e.g. the profile is locked by another Chrome, costs nothing).
         browser = await self.browser_factory()
         try:
             db.increment_source_sessions(self.conn, self.source_key)
-            n_tabs = max(1, min(self.tabs, len(searches)))
-            outcomes = await asyncio.gather(*(worker(t) for t in range(n_tabs)), return_exceptions=True)
+            await self._log(f"{self.display_name}: {len(searches)} searches in {n_search_tabs} tabs at once, "
+                            f"job pages in up to {n_visit_tabs} more")
+            outcomes = await asyncio.gather(
+                *(search_worker(t + 1) for t in range(n_search_tabs)),
+                *(visit_worker(n_search_tabs + t + 1) for t in range(n_visit_tabs)),
+                return_exceptions=True,
+            )
             errors = [o for o in outcomes if isinstance(o, BaseException)]
             if errors:
                 raise errors[0]
@@ -1086,6 +1187,11 @@ class BrowserListingBase:
         extra = f"; {budget['already_seen']} already seen, skipped" if budget["already_seen"] else ""
         await self._log(f"{self.display_name}: read {len(jobs)} new listings ({sum(j.easy_apply for j in jobs)} Easy Apply){extra}")
         return jobs
+
+    def _needs_resolve(self, card: ListingCard, detail: JobDetail | None) -> bool:
+        """The posting has no company apply URL yet, only a same-site redirect worth following."""
+        return (detail is not None and detail.apply_url is None and bool(detail.apply_redirect)
+                and self.resolve_redirects and not (card.easy_apply or detail.easy_apply))
 
     async def check_session(self) -> SourceStatus:
         """Open the home page once and report whether the profile is logged in."""
@@ -1385,6 +1491,9 @@ class LinkedinSource(BrowserListingBase):
     auth_cookies = (("li_at", "linkedin.com"),)
     captcha_url_markers = LINKEDIN_CAPTCHA_URL_MARKERS
     captcha_title_markers = ("security verification", "security check")
+    # LinkedIn is the strictest about bot-like traffic from a logged-in account: fewer tabs at once.
+    tabs = 2
+    detail_tabs = 2
     easy_apply_ats = Ats.LINKEDIN_EASY_APPLY
 
     def sessions_limit(self, prefs: Preferences) -> int:
