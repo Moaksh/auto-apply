@@ -13,9 +13,11 @@ daemon can attribute tokens to runs/applications (``usage.snapshot()`` before/af
 
 from __future__ import annotations
 
+import contextvars
 import json
 import re
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
@@ -58,6 +60,31 @@ class TokenUsage:
     @property
     def total_tokens(self) -> int:
         return self.input_tokens + self.output_tokens
+
+
+#: Per-task usage accumulator (see :func:`usage_scope`).
+_USAGE_SCOPE: contextvars.ContextVar[TokenUsage | None] = contextvars.ContextVar("autoapply_usage_scope", default=None)
+
+
+@contextmanager
+def usage_scope() -> Iterator[TokenUsage]:
+    """Collect the usage of every provider call made by the current task (and tasks it
+    starts) while the block runs. Unlike ``provider.usage.since(snapshot)``, this stays
+    correct when several applications are worked on concurrently."""
+    acc = TokenUsage()
+    token = _USAGE_SCOPE.set(acc)
+    try:
+        yield acc
+    finally:
+        _USAGE_SCOPE.reset(token)
+
+
+def record_usage(total: TokenUsage, usage: TokenUsage) -> None:
+    """Add ``usage`` to a provider's running ``total`` and to the active :func:`usage_scope`."""
+    total.add(usage)
+    scope = _USAGE_SCOPE.get()
+    if scope is not None and scope is not total:
+        scope.add(usage)
 
 
 #: Model routing. Callers pass ``tier="fast"`` for cheap extraction/classification and leave it
@@ -240,7 +267,7 @@ class FakeLLMProvider:
             output_tokens=estimate_tokens(text),
             calls=1,
         )
-        self.usage.add(usage)
+        record_usage(self.usage, usage)
         data = None
         if schema is not None:
             data = validate_json(resp if not isinstance(resp, str) else extract_json(resp), schema)
@@ -351,7 +378,7 @@ class AgentSDKProvider:
         except Exception as e:  # transport / CLI errors
             raise LLMError(f"agent SDK query failed: {e}") from e
 
-        self.usage.add(usage)
+        record_usage(self.usage, usage)
         if error is not None:
             raise LLMError(error)
         text = "".join(texts).strip()

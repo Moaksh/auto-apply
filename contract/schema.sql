@@ -1,6 +1,6 @@
 -- =====================================================================================
 -- AutoApply SQLite schema — SINGLE SOURCE OF TRUTH for the database.
--- Contract version: schema_version = 5   (keep in sync with autoapply.db.SCHEMA_VERSION)
+-- Contract version: schema_version = 6   (keep in sync with autoapply.db.SCHEMA_VERSION)
 --
 -- Location: ~/Library/Application Support/AutoApply/autoapply.db (AUTOAPPLY_HOME overrides)
 --
@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS preferences (
     glassdoor_sessions_per_day  INTEGER NOT NULL DEFAULT 3 CHECK (glassdoor_sessions_per_day >= 0),
     searches_per_session        INTEGER NOT NULL DEFAULT 3 CHECK (searches_per_session BETWEEN 1 AND 10),   -- v2
     jobs_per_session            INTEGER NOT NULL DEFAULT 30 CHECK (jobs_per_session BETWEEN 1 AND 200),     -- v2
+    parallel_applications       INTEGER NOT NULL DEFAULT 3 CHECK (parallel_applications BETWEEN 1 AND 4),   -- v6
     sources_enabled             TEXT NOT NULL DEFAULT '{"greenhouse":true,"lever":true,"ashby":true,"careers":true,"linkedin":false,"glassdoor":false,"google":true}' CHECK (json_valid(sources_enabled)),
     career_page_urls            TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(career_page_urls)),
     always_ask_patterns         TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(always_ask_patterns)),
@@ -420,3 +421,4 @@ INSERT OR IGNORE INTO schema_version (version) VALUES (2);
 INSERT OR IGNORE INTO schema_version (version) VALUES (3);
 INSERT OR IGNORE INTO schema_version (version) VALUES (4);
 INSERT OR IGNORE INTO schema_version (version) VALUES (5);
+INSERT OR IGNORE INTO schema_version (version) VALUES (6);

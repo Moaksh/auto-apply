@@ -514,6 +514,12 @@ struct ScheduleSettingsTab: View {
                     .numericRoll(Double(model.preferencesDraft.dailyCap))
             }
         }
+        SettingsRow("Agents at once", help: "More at once uses your Claude plan's limits faster.",
+                    issue: model.issue(for: .parallelApplications)) {
+            Stepper("Apply to up to \(model.preferencesDraft.parallelApplications) \(model.preferencesDraft.parallelApplications == 1 ? "job" : "jobs") at once",
+                    value: $model.preferencesDraft.parallelApplications, in: 1...4)
+                .monospacedDigit()
+        }
         SettingsRow("Per-company cooldown", help: "At most one application per company in this window.",
                     issue: model.issue(for: .perCompanyCooldownDays)) {
             Stepper("\(model.preferencesDraft.perCompanyCooldownDays) days", value: $model.preferencesDraft.perCompanyCooldownDays, in: 0...365)

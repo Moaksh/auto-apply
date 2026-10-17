@@ -40,7 +40,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel
 
-from autoapply import db
+from autoapply import db, workers
 from autoapply.apply.base import Adapter, ApplyContext, EmitFn, FillResult, PausedError, UnresolvedField, close_session
 from autoapply.config import Preferences
 from autoapply.discovery.base import DiscoveredJob, DiscoveryContext, Source
@@ -59,7 +59,7 @@ from autoapply.enums import (
     RunOutcome,
     RunTrigger,
 )
-from autoapply.llm.provider import LLMProvider
+from autoapply.llm.provider import LLMProvider, usage_scope
 from autoapply.models import (
     Application,
     CapReachedPayload,
@@ -312,6 +312,9 @@ class Pipeline:
     # ---- emit helpers ------------------------------------------------------------------
 
     async def emit(self, type_: str, payload: BaseModel | dict[str, Any]) -> None:
+        if workers.tag() and isinstance(payload, (LogPayload, StatePayload)) and payload.message:
+            # Several applications are worked on at once: say which agent this line is from.
+            payload = payload.model_copy(update={"message": workers.tagged(payload.message)})
         try:
             await self._emit(type_, payload)
         except Exception:  # noqa: BLE001 - a broken client must never break a run
@@ -332,7 +335,7 @@ class Pipeline:
     async def _log(self, level: LogLevel, message: str, *, job_id: int | None = None, application_id: int | None = None) -> None:
         log.log(
             {LogLevel.DEBUG: logging.DEBUG, LogLevel.INFO: logging.INFO, LogLevel.WARNING: logging.WARNING}.get(level, logging.ERROR),
-            message,
+            workers.tagged(message),
         )
         await self.emit(
             "log",
@@ -888,20 +891,44 @@ class Pipeline:
     # ---- apply -------------------------------------------------------------------------
 
     async def apply_queued(self) -> None:
+        """Fill (and submit) every queued application, up to ``parallel_applications`` at once.
+
+        Never two at the same company at once; a new one starts only while
+        ``attempts today + in flight < daily_cap`` (so concurrent fills don't overshoot the
+        cap — the final word is still ``submit_gate`` right before ``begin_submit``).
+        """
         apps = db.list_applications(self.conn, states=[AppState.QUEUED])
         total = len(apps)
-        for i, app in enumerate(apps):
-            self._check_pause()
-            prefs = db.get_preferences(self.conn)
+        self._check_pause()
+        prefs = db.get_preferences(self.conn)
+        company_of = {a.id: db.get_job(self.conn, a.job_id).company_id for a in apps}
+        cap_hit: list[int] = []
+
+        def can_start(in_flight: int) -> bool:
+            cap = db.get_preferences(self.conn).daily_cap
             used = attempts_used_today(self.conn, self._now())
-            if used >= prefs.daily_cap:
-                await self.emit(
-                    "cap_reached",
-                    CapReachedPayload(cap=CapKind.DAILY, used=used, limit=prefs.daily_cap, resets_at=db.local_day_start(self._now()) + timedelta(days=1)),
-                )
-                await self._log(LogLevel.INFO, f"daily cap reached ({used}/{prefs.daily_cap}); {total - i} jobs stay queued")
-                raise CapReached()
-            await self.apply_one(app.id, progress=(i, total))
+            if used + in_flight < cap:
+                return True
+            if in_flight == 0:
+                cap_hit[:] = [used, cap]
+            return False
+
+        async def work(i: int, app: Application) -> AppState:
+            return await self.apply_one(app.id, progress=(i, total))
+
+        res = await workers.run_pool(
+            apps, work, limit=prefs.parallel_applications, key=lambda a: company_of[a.id],
+            should_stop=self.is_paused, can_start=can_start, raise_order=(PausedError, CapReached),
+        )
+        self._check_pause()
+        if cap_hit and res.left:
+            used, cap = cap_hit
+            await self.emit(
+                "cap_reached",
+                CapReachedPayload(cap=CapKind.DAILY, used=used, limit=cap, resets_at=db.local_day_start(self._now()) + timedelta(days=1)),
+            )
+            await self._log(LogLevel.INFO, f"daily cap reached ({used}/{cap}); {len(res.left)} jobs stay queued")
+            raise CapReached()
 
     def _cooldown_check(
         self, company: Company, prefs: Preferences, *, application_id: int | None = None,
@@ -1090,26 +1117,26 @@ class Pipeline:
     async def _fill_and_submit(
         self, app: Application, job: Job, company: Company, mode: Mode, adapter: Adapter, ctx: ApplyContext,
     ) -> AppState:
-        usage0 = self.llm.usage.snapshot()
-        try:
-            fill = await adapter.fill(ctx)
-        except PausedError:
-            await self._transition(app.id, AppState.QUEUED, reason="paused", expected_from=AppState.FILLING)
-            raise
-        except asyncio.CancelledError:
-            await self._transition(app.id, AppState.QUEUED, reason="interrupted", expected_from=AppState.FILLING)
-            raise
-        except NotImplementedError:
-            await self._transition(app.id, AppState.FAILED, reason="adapter_not_implemented", expected_from=AppState.FILLING)
-            return AppState.FAILED
-        except Exception as e:  # noqa: BLE001
-            log.exception("fill failed for application %s", app.id)
-            await self._transition(app.id, AppState.FAILED, reason=f"adapter_error: {e}"[:300], expected_from=AppState.FILLING)
-            return AppState.FAILED
-        finally:
-            used = self.llm.usage.since(usage0)
-            if used.total_tokens:
-                db.add_application_tokens(self.conn, app.id, used.input_tokens, used.output_tokens)
+        # Per-task usage (other workers' LLM calls in the meantime must not be billed here).
+        with usage_scope() as used:
+            try:
+                fill = await adapter.fill(ctx)
+            except PausedError:
+                await self._transition(app.id, AppState.QUEUED, reason="paused", expected_from=AppState.FILLING)
+                raise
+            except asyncio.CancelledError:
+                await self._transition(app.id, AppState.QUEUED, reason="interrupted", expected_from=AppState.FILLING)
+                raise
+            except NotImplementedError:
+                await self._transition(app.id, AppState.FAILED, reason="adapter_not_implemented", expected_from=AppState.FILLING)
+                return AppState.FAILED
+            except Exception as e:  # noqa: BLE001
+                log.exception("fill failed for application %s", app.id)
+                await self._transition(app.id, AppState.FAILED, reason=f"adapter_error: {e}"[:300], expected_from=AppState.FILLING)
+                return AppState.FAILED
+            finally:
+                if used.total_tokens:
+                    db.add_application_tokens(self.conn, app.id, used.input_tokens, used.output_tokens)
 
         if await self._captcha_handoff_wanted(fill, ctx):
             await self._log(LogLevel.INFO, f"CAPTCHA on {company.name}: reopening in a visible window for you", job_id=job.id, application_id=app.id)

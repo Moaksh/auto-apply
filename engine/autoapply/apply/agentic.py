@@ -1,7 +1,8 @@
 """Agentic fallback adapter (Workday / unknown forms): Claude Agent SDK + Playwright MCP.
 
 The agent drives a real browser through ``npx @playwright/mcp`` (persistent Chrome profile
-at ``<home>/chrome-profile``) and talks to the engine through custom in-process tools:
+at ``<home>/chrome-profile``; concurrent worker N>1 uses ``chrome-profile-N``, see
+:meth:`AgenticAdapter.profile_dir`) and talks to the engine through custom in-process tools:
 
 ``get_profile``      contact/links/work history (never the never-guess facts)
 ``lookup_answer``    :class:`~autoapply.answers.resolver.AnswerResolver` for one question
@@ -67,6 +68,7 @@ from autoapply.enums import AnswerOrigin, AppState, Ats, FieldType, Mode, Questi
 from autoapply.llm.provider import AgentSDKProvider, TokenUsage
 from autoapply.models import AgentStepPayload, ApplicationAnswer, FormQuestion, Job, now_ts
 from autoapply.paths import get_paths
+from autoapply.workers import current_slot
 
 log = logging.getLogger(__name__)
 
@@ -993,6 +995,8 @@ class AgenticAdapter:
         self.npx_command = npx_command
         self.keep_session_for_submit = keep_session_for_submit
         self._live: dict[int, tuple[AgentClient, AgentToolbox]] = {}
+        #: application id -> worker slot (Chrome profile) its kept-open session holds
+        self._live_slot: dict[int, int] = {}
         self.last_toolbox: AgentToolbox | None = None
 
     # ---- Adapter protocol ------------------------------------------------------------
@@ -1019,7 +1023,7 @@ class AgenticAdapter:
         * otherwise the questions read from the last page snapshot that showed form fields;
         * otherwise ``RuntimeError`` with the session's own error (max turns, crash, ...).
         """
-        await self.close()  # one browser per Chrome profile: release any kept-open session first
+        await self._close_slot()  # one browser per Chrome profile: release any kept-open session first
         toolbox = self._toolbox(ctx, "harvest")
         company = db.get_company(ctx.conn, ctx.job.company_id).name
         prompt = (
@@ -1079,7 +1083,7 @@ class AgenticAdapter:
         return toolbox.harvested
 
     async def fill(self, ctx: ApplyContext) -> FillResult:
-        await self.close()  # a leaked session would hold the shared Chrome profile
+        await self._close_slot()  # a leaked session would hold this worker's Chrome profile
         mode = self._mode(ctx)
         toolbox = self._toolbox(ctx, "fill", mode=mode)
         company = db.get_company(ctx.conn, ctx.job.company_id).name
@@ -1106,6 +1110,7 @@ class AgenticAdapter:
             keep = self.keep_session_for_submit and mode is Mode.AUTO
             if keep:
                 self._live[ctx.application.id] = (client, toolbox)
+                self._live_slot[ctx.application.id] = _slot()
             ctx.extra["agentic"] = {"mode": mode.value, "submit_ready": True, "session_open": keep}
             return FillResult(ok=True, screenshot_path=toolbox.screenshot_path, cover_letter_path=toolbox.cover_letter_path)
         finally:
@@ -1119,7 +1124,8 @@ class AgenticAdapter:
             return SubmitResult(verified=False, error=f"not_submitted: application state is {app.state.value}, expected submitting",
                                 clicked=False)
         live = self._live.pop(ctx.application.id, None)
-        await self.close()  # sessions kept for other applications must not hold the profile
+        self._live_slot.pop(ctx.application.id, None)
+        await self._close_slot()  # sessions kept for other applications must not hold the profile
         company = db.get_company(ctx.conn, ctx.job.company_id).name
         if live is not None:
             client, toolbox = live
@@ -1162,8 +1168,16 @@ class AgenticAdapter:
         ids = [application_id] if application_id is not None else list(self._live)
         for i in ids:
             live = self._live.pop(i, None)
+            self._live_slot.pop(i, None)
             if live is not None:
                 await self._disconnect(live[0])
+
+    async def _close_slot(self) -> None:
+        """Disconnect kept-open sessions on the current worker's Chrome profile only: other
+        workers' sessions use other profiles and are still in use."""
+        slot = _slot()
+        for i in [i for i in list(self._live) if self._live_slot.get(i, 1) == slot]:
+            await self.close(i)
 
     # ---- internals -------------------------------------------------------------------
 
@@ -1181,8 +1195,20 @@ class AgenticAdapter:
         self.last_toolbox = tb
         return tb
 
+    def profile_dir(self) -> Path:
+        """Chrome profile for the current worker. Chromium allows one process per profile, so
+        concurrent workers each get their own: slot 1 (and anything outside a worker pool) uses
+        the main profile, slot N uses ``<profile>-N`` next to it (kept between runs)."""
+        base = self.chrome_profile_dir or get_paths(create=True).chrome_profile
+        slot = _slot()
+        if slot == 1:
+            return base
+        p = base.with_name(f"{base.name}-{slot}")
+        p.mkdir(mode=0o700, parents=True, exist_ok=True)
+        return p
+
     def playwright_server_config(self, ctx: ApplyContext) -> dict[str, Any]:
-        profile = self.chrome_profile_dir or get_paths(create=True).chrome_profile
+        profile = self.profile_dir()
         args = [
             "-y", self.playwright_mcp_package,
             "--user-data-dir", str(profile),
@@ -1325,6 +1351,10 @@ class AgenticAdapter:
             await client.disconnect()
         except Exception:
             log.debug("disconnect failed", exc_info=True)
+
+
+def _slot() -> int:
+    return current_slot() or 1
 
 
 def _flatten(content: Any) -> str:

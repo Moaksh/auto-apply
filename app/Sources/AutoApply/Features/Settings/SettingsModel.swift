@@ -67,6 +67,7 @@ enum PreferencesValidator {
         if p.remotePolicy.isEmpty { issues.append(Issue(key: .remotePolicy, message: "Pick at least one of Remote, Hybrid or Onsite.")) }
         if let floor = p.salaryFloor, floor < 0 { issues.append(Issue(key: .salaryFloor, message: "Salary floor can't be negative.")) }
         if !(1...200).contains(p.dailyCap) { issues.append(Issue(key: .dailyCap, message: "Daily cap must be between 1 and 200.")) }
+        if !(1...4).contains(p.parallelApplications) { issues.append(Issue(key: .parallelApplications, message: "Agents at once must be 1–4.")) }
         if !(0...100).contains(p.matchThreshold) { issues.append(Issue(key: .matchThreshold, message: "Match threshold is 0–100.")) }
         if !(0...365).contains(p.perCompanyCooldownDays) { issues.append(Issue(key: .perCompanyCooldownDays, message: "Cooldown must be 0–365 days.")) }
         if !(1...180).contains(p.ghostAfterDays) { issues.append(Issue(key: .ghostAfterDays, message: "Auto-ghost must be 1–180 days.")) }

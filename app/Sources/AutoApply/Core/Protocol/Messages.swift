@@ -1284,6 +1284,7 @@ struct Preferences: Codable, Sendable, Hashable {
     var glassdoorSessionsPerDay: Int = 3
     var searchesPerSession: Int = 3
     var jobsPerSession: Int = 30
+    var parallelApplications: Int = 3
     var sourcesEnabled: [String: Bool] = ["greenhouse": true, "lever": true, "ashby": true, "careers": true, "linkedin": false, "glassdoor": false, "google": true]
     var careerPageUrls: [String] = []
     var alwaysAskPatterns: [String] = []
@@ -1314,6 +1315,7 @@ struct Preferences: Codable, Sendable, Hashable {
         case glassdoorSessionsPerDay = "glassdoor_sessions_per_day"
         case searchesPerSession = "searches_per_session"
         case jobsPerSession = "jobs_per_session"
+        case parallelApplications = "parallel_applications"
         case sourcesEnabled = "sources_enabled"
         case careerPageUrls = "career_page_urls"
         case alwaysAskPatterns = "always_ask_patterns"
@@ -1348,6 +1350,7 @@ extension Preferences {
         glassdoorSessionsPerDay = try c.decodeIfPresent(Int.self, forKey: .glassdoorSessionsPerDay) ?? 3
         searchesPerSession = try c.decodeIfPresent(Int.self, forKey: .searchesPerSession) ?? 3
         jobsPerSession = try c.decodeIfPresent(Int.self, forKey: .jobsPerSession) ?? 30
+        parallelApplications = try c.decodeIfPresent(Int.self, forKey: .parallelApplications) ?? 3
         sourcesEnabled = try c.decodeIfPresent([String: Bool].self, forKey: .sourcesEnabled) ?? ["greenhouse": true, "lever": true, "ashby": true, "careers": true, "linkedin": false, "glassdoor": false, "google": true]
         careerPageUrls = try c.decodeIfPresent([String].self, forKey: .careerPageUrls) ?? []
         alwaysAskPatterns = try c.decodeIfPresent([String].self, forKey: .alwaysAskPatterns) ?? []

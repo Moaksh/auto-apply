@@ -24,7 +24,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from autoapply import db
+from autoapply import db, workers
 from autoapply.answers.guardrails import NeedsUser
 from autoapply.answers.memory import COUNTRY_SCOPED_KEYS, AnswerMemory, render_template
 from autoapply.answers.resolver import AnswerResolver, set_inbox_answers
@@ -241,6 +241,9 @@ async def run_prep(
     Transitions: queued -> prepping -> (queued | needs_you). Emits ``application_state``
     for every transition, ``question_opened`` for new or grown clusters, and ``state``
     progress events. Stops between jobs when paused (``report.paused``).
+
+    Up to ``preferences.parallel_applications`` jobs are prepped at once (never two at the
+    same company); each runs in its own task / worker slot (:mod:`autoapply.workers`).
     """
     emit = emit or _noop_emit
     paused = is_paused or (lambda: False)
@@ -263,10 +266,9 @@ async def run_prep(
         ))
 
     await progress(0, f"Collecting questions from {total} queued jobs…")
-    for i, app in enumerate(apps):
-        if paused():
-            report.paused = True
-            break
+
+    async def prep_one(i: int, app: Any) -> None:
+        # (pause is checked by the pool right before each job is dispatched)
         job = db.get_job(conn, app.job_id)
         company = db.get_company(conn, job.company_id)
         t = db.transition(conn, app.id, AppState.PREPPING, reason="prep", expected_from=AppState.QUEUED, run_id=run_row_id)
@@ -294,14 +296,14 @@ async def run_prep(
                 t = db.transition(conn, app.id, AppState.QUEUED, reason="paused", run_id=run_row_id)
                 await emit("application_state", t.to_payload())
                 report.paused = True
-                break
+                return
             except Exception as e:  # harvest is best-effort: fill() will meet the questions anyway
                 log.warning("prep: harvest failed for job %s: %s", job.id, e)
                 db.log_event(conn, "prep", f"question harvest failed: {e}", level="warning", job_id=job.id, application_id=app.id)
                 t = db.transition(conn, app.id, AppState.QUEUED, reason="harvest_unavailable", run_id=run_row_id)
                 await emit("application_state", t.to_payload())
                 report.harvest_failed_jobs.append(job.id)
-                continue
+                return
 
         resolver = AnswerResolver.from_context(ctx, memory=memory)
         batch = await resolver.resolve_all(questions)
@@ -319,7 +321,7 @@ async def run_prep(
         if to_park:
             new_ids, clusters = park_unresolved(conn, job.id, to_park, memory=memory)
             created_q.extend(new_ids)
-            touched |= clusters
+            touched.update(clusters)
             n = len(to_park)
             reason = (_short(blocked_reason) if blocked and n == 1
                       else f"{n} question{'s' if n != 1 else ''} need you")
@@ -329,6 +331,14 @@ async def run_prep(
             t = db.transition(conn, app.id, AppState.QUEUED, reason="prepped", run_id=run_row_id)
             report.requeued_jobs.append(job.id)
         await emit("application_state", t.to_payload())
+
+    company_of = {a.id: db.get_job(conn, a.job_id).company_id for a in apps}
+    res = await workers.run_pool(
+        apps, prep_one, limit=db.get_preferences(conn).parallel_applications,
+        key=lambda a: company_of[a.id], should_stop=paused,
+    )
+    if res.left and paused():
+        report.paused = True
 
     # Re-cluster (merges paraphrases parked by different jobs) and announce.
     clusters = memory.cluster_open_questions(threshold=CLUSTER_THRESHOLD)
