@@ -366,3 +366,29 @@ async def test_reaper_skips_sessions_of_running_workers() -> None:
     finally:
         base._OPEN_SESSIONS.pop(991, None)
 
+
+
+def test_worker_profiles_are_seeded_with_the_main_logins(tmp_path: Path) -> None:
+    import os
+
+    from autoapply.apply.agentic import AgenticAdapter
+    from autoapply.workers import _WORKER, _Worker
+
+    base = tmp_path / "chrome-profile"
+    (base / "Default" / "Cache").mkdir(parents=True)
+    (base / "Default" / "Cookies").write_text("li_at=1")
+    (base / "Default" / "Cache" / "big").write_text("x")
+    (base / "SingletonLock").write_text("pid")
+    a = AgenticAdapter(chrome_profile_dir=base, client_factory=lambda *_: None)  # type: ignore[arg-type,return-value]
+    tok = _WORKER.set(_Worker(slot=2, tagged=True))
+    try:
+        p2 = a.profile_dir()
+        assert (p2 / "Default" / "Cookies").read_text() == "li_at=1"
+        assert not (p2 / "Default" / "Cache").exists() and not (p2 / "SingletonLock").exists()
+        # a newer sign-in in the main profile is copied over on the next launch
+        (base / "Default" / "Cookies").write_text("li_at=2")
+        later = (p2 / ".seeded-from-main").stat().st_mtime + 5
+        os.utime(base / "Default" / "Cookies", (later, later))
+        assert (a.profile_dir() / "Default" / "Cookies").read_text() == "li_at=2"
+    finally:
+        _WORKER.reset(tok)

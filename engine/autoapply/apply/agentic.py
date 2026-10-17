@@ -966,6 +966,39 @@ class SessionOutcome:
     crashed: bool = False
 
 
+#: Big, regenerable or per-process parts of a Chrome profile that a seeded copy doesn't need.
+_PROFILE_SKIP = {"Cache", "Code Cache", "GPUCache", "DawnCache", "DawnGraphiteCache", "DawnWebGPUCache", "GrShaderCache",
+                 "ShaderCache", "GraphiteDawnCache", "Crashpad", "component_crx_cache", "optimization_guide_model_store",
+                 "SingletonLock", "SingletonSocket", "SingletonCookie", "lockfile", "RunningChromeVersion"}
+
+
+def _seed_profile(base: Path, target: Path) -> None:
+    """Give a worker's own Chrome profile the main profile's logins (cookies, local storage), so
+    agents 2..N aren't signed out everywhere. Re-copied when the main profile's cookies are newer
+    than the last copy (e.g. after you sign in to a site in the agent's Chrome)."""
+    import shutil
+
+    marker = target / ".seeded-from-main"
+    src_cookies = base / "Default" / "Cookies"
+    if not src_cookies.exists():
+        return
+    try:
+        if marker.exists() and marker.stat().st_mtime >= src_cookies.stat().st_mtime:
+            return
+        for item in base.iterdir():
+            if item.name in _PROFILE_SKIP:
+                continue
+            dest = target / item.name
+            if item.is_dir():
+                shutil.copytree(item, dest, dirs_exist_ok=True, symlinks=True,
+                                ignore=shutil.ignore_patterns(*_PROFILE_SKIP))
+            else:
+                shutil.copy2(item, dest)
+        marker.touch()
+    except OSError as e:  # best-effort: an unseeded profile still works, it's just signed out
+        log.warning("could not copy the agent's logins into %s: %s", target, e)
+
+
 class AgenticAdapter:
     """Implements :class:`autoapply.apply.base.Adapter` (used for Workday and unknown ATS)."""
 
@@ -1205,6 +1238,7 @@ class AgenticAdapter:
             return base
         p = base.with_name(f"{base.name}-{slot}")
         p.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _seed_profile(base, p)
         return p
 
     def playwright_server_config(self, ctx: ApplyContext) -> dict[str, Any]:
