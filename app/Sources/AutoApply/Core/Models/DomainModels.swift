@@ -292,6 +292,58 @@ struct EasyApplyItem: Identifiable, Sendable, Hashable {
     var isOpen: Bool { !done && !dismissed }
 }
 
+/// A company the agent found while browsing that is not on the watchlist (`company_suggestions`).
+struct CompanySuggestionItem: Identifiable, Sendable, Hashable {
+    enum Status: String, Sendable, Hashable {
+        /// Waiting for Add / Dismiss.
+        case pending
+        /// The user added it.
+        case accepted
+        /// Never suggest again.
+        case dismissed
+        /// A verified ATS board the agent watched by itself (Dismiss unwatches it).
+        case auto
+    }
+
+    var id: Int
+    var companyName: String
+    var url: String
+    var ats: Ats?
+    var boardToken: String?
+    /// Where it was found: google | linkedin | glassdoor | company_finder | careers.
+    var source: String
+    var foundVia: String?
+    var sampleTitle: String?
+    var matchingRoles: Int = 0
+    var openRoles: Int?
+    var verified: Bool = false
+    var status: Status = .pending
+    var suggestedAt: Date
+
+    /// "Google Jobs", "LinkedIn", "Company finder"…
+    var sourceLabel: String {
+        switch source {
+        case "google": "Google Jobs"
+        case "linkedin": "LinkedIn"
+        case "glassdoor": "Glassdoor"
+        case "company_finder": "Company finder (Google)"
+        case "careers": "a career page"
+        default: source.capitalized
+        }
+    }
+
+    /// "Greenhouse board" / "Career page".
+    var kindLabel: String {
+        switch ats {
+        case .greenhouse: "Greenhouse board"
+        case .lever: "Lever board"
+        case .ashby: "Ashby board"
+        case .workday: "Workday site"
+        default: "Career page"
+        }
+    }
+}
+
 /// One row of the append-only activity log (`events`).
 struct ActivityEvent: Identifiable, Sendable, Hashable {
     var id: Int

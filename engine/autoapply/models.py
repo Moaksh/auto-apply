@@ -56,6 +56,7 @@ from autoapply.enums import (
     RunOutcome,
     RunTrigger,
     SourceName,
+    SuggestionStatus,
 )
 
 PROTOCOL_VERSION = 1
@@ -313,6 +314,30 @@ class Company(RowModel):
     last_applied_at: Timestamp | None = None
     created_at: Timestamp
     updated_at: Timestamp
+
+
+class CompanySuggestion(RowModel):
+    """A ``company_suggestions`` row: a company found while browsing that is not on the watchlist."""
+
+    _bool_fields = frozenset({"verified"})
+
+    id: int
+    company_name: str
+    normalized_name: str
+    url: str
+    ats: Ats | None = None
+    board_token: str | None = None
+    source: str
+    found_via: str | None = None
+    sample_title: str | None = None
+    matching_roles: int = 0
+    open_roles: int | None = None
+    verified: bool = False
+    status: SuggestionStatus = SuggestionStatus.PENDING
+    company_id: int | None = None
+    suggested_at: Timestamp
+    updated_at: Timestamp
+    decided_at: Timestamp | None = None
 
 
 class Job(RowModel):
@@ -594,6 +619,7 @@ class Counts(_P):
     submitted_today: int = 0
     discovered_today: int = 0
     submitted_total: int = 0
+    suggestions_pending: int = Field(default=0, description="Company suggestions waiting for Add / Dismiss (Settings > Sources badge).")
 
 
 class CapsStatus(_P):
@@ -857,6 +883,14 @@ class ResetSourceCapPayload(_P):
     source: Literal["linkedin", "glassdoor"]
 
 
+class AcceptCompanySuggestionPayload(_P):
+    suggestion_id: int
+
+
+class DismissCompanySuggestionPayload(_P):
+    suggestion_id: int
+
+
 class OnboardingSetStepPayload(_P):
     step: int = Field(ge=0, le=7)
 
@@ -901,6 +935,8 @@ COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "onboarding_connect_source": OnboardingConnectSourcePayload,
     "check_source_login": CheckSourceLoginPayload,
     "reset_source_cap": ResetSourceCapPayload,
+    "accept_company_suggestion": AcceptCompanySuggestionPayload,
+    "dismiss_company_suggestion": DismissCompanySuggestionPayload,
     "set_mail_account": SetMailAccountPayload,
     "get_mail_account": GetMailAccountPayload,
     "suggest_preferences": SuggestPreferencesPayload,

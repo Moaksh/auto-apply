@@ -535,6 +535,7 @@ class Pipeline:
         out = []
         for s in self.sources:
             name = str(getattr(s.name, "value", s.name))
+            name = str(getattr(s, "enabled_key", None) or name)  # e.g. the company finder follows "google"
             if prefs.sources_enabled.get(name, defaults.get(name, False)):
                 out.append(s)
         return out
@@ -604,15 +605,12 @@ class Pipeline:
         return len(db.list_companies(self.conn, watch_only=True)) < MAX_WATCHED_COMPANIES
 
     async def _persist(self, dj: DiscoveredJob) -> int | None:
+        from autoapply.discovery import suggestions
+
         try:
-            enrich: dict[str, Any] = {}
-            if dj.board_token and dj.ats in (Ats.GREENHOUSE, Ats.LEVER, Ats.ASHBY):
-                enrich = {"ats": dj.ats, "board_token": dj.board_token}
-            if enrich and dj.source in (JobSource.LINKEDIN, JobSource.GLASSDOOR, JobSource.GOOGLE, "linkedin", "glassdoor", "google"):
-                # A listing pointed at this company's public ATS board: watch it, so every later run reads
-                # all its openings straight from the board (free JSON, no browser, no daily budget).
-                if self._auto_watch_room():
-                    enrich["watch"] = True
+            # A listing pointed at this company's public ATS board: watch it (while under the cap and
+            # not dismissed), so every later run reads all its openings straight from the board.
+            enrich, auto_watched = suggestions.board_enrichment(self.conn, dj, room=self._auto_watch_room())
             company = db.upsert_company(self.conn, dj.company_name, domain=dj.company_domain, **enrich)
             job, created = db.insert_job(
                 self.conn, company_id=company.id, source=dj.source, title=dj.title, location=dj.location,
@@ -624,6 +622,8 @@ class Pipeline:
         except (ValueError, sqlite3.IntegrityError) as e:
             await self._log(LogLevel.WARNING, f"could not save {dj.company_name} · {dj.title}: {e}")
             return None
+        # Company suggestions (Settings > Sources): career sites / boards seen in browser listings.
+        suggestions.note_listing(self.conn, dj, company=company, created=created, auto_watched=auto_watched)
         if not created:
             return None
         if dj.easy_apply:

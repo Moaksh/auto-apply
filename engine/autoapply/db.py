@@ -54,6 +54,7 @@ from autoapply.enums import (
     RunKind,
     RunOutcome,
     RunTrigger,
+    SuggestionStatus,
 )
 from autoapply.models import (
     ACTIVE_STATES,
@@ -68,6 +69,7 @@ from autoapply.models import (
     ApplicationStatusPayload,
     CapsStatus,
     Company,
+    CompanySuggestion,
     Counts,
     DraftedAnswer,
     EasyApplyItem,
@@ -91,7 +93,7 @@ from autoapply.models import (
 )
 
 #: Must equal MAX(version) seeded by contract/schema.sql.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 #: Forward migrations: version -> SQL to go from (version-1) to version. Append-only.
 #: Version 1 is the baseline created by contract/schema.sql itself.
@@ -108,6 +110,30 @@ ALTER TABLE questions ADD COLUMN suggested_confidence REAL;
 ALTER TABLE questions ADD COLUMN suggested_note TEXT;
 """,
     5: "python:_migrate_v5",
+    # v6: company suggestions (companies found while browsing, awaiting the user's Add / Dismiss).
+    6: """
+CREATE TABLE IF NOT EXISTS company_suggestions (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_name    TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,
+    url             TEXT NOT NULL,
+    ats             TEXT CHECK (ats IS NULL OR ats IN ('greenhouse','lever','ashby','workday','linkedin_easy_apply','other')),
+    board_token     TEXT,
+    source          TEXT NOT NULL,
+    found_via       TEXT,
+    sample_title    TEXT,
+    matching_roles  INTEGER NOT NULL DEFAULT 0 CHECK (matching_roles >= 0),
+    open_roles      INTEGER,
+    verified        INTEGER NOT NULL DEFAULT 0 CHECK (verified IN (0, 1)),
+    status          TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','dismissed','auto')),
+    company_id      INTEGER REFERENCES companies(id) ON DELETE SET NULL,
+    suggested_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    decided_at      TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_company_suggestions_name ON company_suggestions(normalized_name);
+CREATE INDEX IF NOT EXISTS ix_company_suggestions_status ON company_suggestions(status);
+""",
 }
 
 
@@ -857,6 +883,146 @@ def company_in_cooldown(conn: sqlite3.Connection, company_id: int, cooldown_days
         return False
     last = parse_ts(row["last_applied_at"])
     return (now or utcnow()) - last < timedelta(days=cooldown_days)
+
+
+# =====================================================================================
+# company_suggestions (v6)
+# =====================================================================================
+
+
+def get_company_suggestion(conn: sqlite3.Connection, suggestion_id: int) -> CompanySuggestion:
+    row = _require(_one(conn, "SELECT * FROM company_suggestions WHERE id = ?", (suggestion_id,)), "company suggestion", suggestion_id)
+    return CompanySuggestion.from_row(row)  # type: ignore[return-value]
+
+
+def get_company_suggestion_by_name(conn: sqlite3.Connection, name: str) -> CompanySuggestion | None:
+    row = _one(conn, "SELECT * FROM company_suggestions WHERE normalized_name = ?", (normalize_text(name),))
+    return CompanySuggestion.from_row(row) if row else None  # type: ignore[return-value]
+
+
+def list_company_suggestions(
+    conn: sqlite3.Connection, statuses: Iterable[SuggestionStatus | str] | None = (SuggestionStatus.PENDING,)
+) -> list[CompanySuggestion]:
+    """Suggestions, most matching roles first (all statuses when ``statuses`` is None)."""
+    sql, params = "SELECT * FROM company_suggestions", []
+    if statuses is not None:
+        vals = [SuggestionStatus(s).value for s in statuses]
+        sql += f" WHERE status IN ({','.join('?' * len(vals))})"
+        params = vals
+    sql += " ORDER BY matching_roles DESC, suggested_at DESC"
+    return [CompanySuggestion.from_row(r) for r in conn.execute(sql, params)]  # type: ignore[misc]
+
+
+def company_dismissed(conn: sqlite3.Connection, name: str) -> bool:
+    """The user dismissed this company: never suggest it or watch it automatically again."""
+    row = _one(conn, "SELECT status FROM company_suggestions WHERE normalized_name = ?", (normalize_text(name),))
+    return bool(row and row["status"] == SuggestionStatus.DISMISSED.value)
+
+
+def suggest_company(
+    conn: sqlite3.Connection,
+    name: str,
+    *,
+    url: str,
+    source: str,
+    ats: Ats | str | None = None,
+    board_token: str | None = None,
+    found_via: str | None = None,
+    sample_title: str | None = None,
+    add_matching: int = 0,
+    matching_roles: int | None = None,
+    open_roles: int | None = None,
+    verified: bool | None = None,
+    status: SuggestionStatus | str = SuggestionStatus.PENDING,
+    company_id: int | None = None,
+) -> CompanySuggestion | None:
+    """Record (or refresh) a suggestion for ``name``. Returns None when nothing was recorded:
+    the user dismissed the company, or it is already on the watchlist (unless ``status`` is
+    ``auto``, which records that the agent itself just watched it).
+
+    ``add_matching`` increments the matching-roles count; ``matching_roles`` sets it outright.
+    A decided row (accepted / dismissed) never goes back to pending."""
+    norm = normalize_text(name)
+    if not norm:
+        raise ValueError("company name is empty")
+    status = SuggestionStatus(status)
+    ts = now_ts()
+    with transaction(conn):
+        company = _one(conn, "SELECT id, watch FROM companies WHERE normalized_name = ?", (norm,))
+        if status is SuggestionStatus.PENDING and company is not None and company["watch"]:
+            return None
+        row = _one(conn, "SELECT * FROM company_suggestions WHERE normalized_name = ?", (norm,))
+        cid = company_id if company_id is not None else (int(company["id"]) if company is not None else None)
+        if row is None:
+            cur = conn.execute(
+                "INSERT INTO company_suggestions(company_name, normalized_name, url, ats, board_token, source, found_via, "
+                "sample_title, matching_roles, open_roles, verified, status, company_id, suggested_at, updated_at, decided_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (name.strip(), norm, url, Ats(ats).value if ats else None, board_token, source, found_via, sample_title,
+                 max(0, matching_roles if matching_roles is not None else add_matching), open_roles, int(bool(verified)),
+                 status.value, cid, ts, ts, ts if status is SuggestionStatus.AUTO else None),
+            )
+            return get_company_suggestion(conn, int(cur.lastrowid))
+        current = SuggestionStatus(row["status"])
+        if current is SuggestionStatus.DISMISSED:
+            return None
+        fields: dict[str, Any] = {"updated_at": ts}
+        if matching_roles is not None:
+            fields["matching_roles"] = max(0, matching_roles)
+        elif add_matching:
+            fields["matching_roles"] = int(row["matching_roles"]) + add_matching
+        if open_roles is not None:
+            fields["open_roles"] = open_roles
+        if sample_title and not row["sample_title"]:
+            fields["sample_title"] = sample_title
+        if cid is not None and row["company_id"] is None:
+            fields["company_id"] = cid
+        # A verified ATS board beats an unverified careers URL found earlier.
+        upgrade = (verified and not row["verified"]) or (board_token and not row["board_token"])
+        if upgrade:
+            fields.update(url=url, ats=Ats(ats).value if ats else None, board_token=board_token, source=source,
+                          found_via=found_via or row["found_via"])
+        if verified:
+            fields["verified"] = 1
+        if current is SuggestionStatus.PENDING and status is SuggestionStatus.AUTO:
+            fields.update(status=status.value, decided_at=ts)
+        sql, params = _update_sql("company_suggestions", fields, "id = ?")
+        conn.execute(sql, [*params, int(row["id"])])
+        return get_company_suggestion(conn, int(row["id"]))
+
+
+def accept_company_suggestion(conn: sqlite3.Connection, suggestion_id: int) -> Company:
+    """"Add": watch the company (ATS board when known, else its career page)."""
+    with transaction(conn):
+        s = get_company_suggestion(conn, suggestion_id)
+        if s.ats in (Ats.GREENHOUSE, Ats.LEVER, Ats.ASHBY) and s.board_token:
+            company = upsert_company(conn, s.company_name, ats=s.ats, board_token=s.board_token, watch=True)
+        else:
+            company = upsert_company(conn, s.company_name, careers_url=s.url, watch=True)
+        ts = now_ts()
+        conn.execute(
+            "UPDATE company_suggestions SET status = ?, company_id = ?, decided_at = ?, updated_at = ? WHERE id = ?",
+            (SuggestionStatus.ACCEPTED.value, company.id, ts, ts, suggestion_id),
+        )
+    return company
+
+
+def dismiss_company_suggestion(conn: sqlite3.Connection, suggestion_id: int) -> CompanySuggestion:
+    """"Dismiss": never suggest this company again; one the agent watched by itself is unwatched."""
+    with transaction(conn):
+        s = get_company_suggestion(conn, suggestion_id)
+        if s.status is SuggestionStatus.AUTO:
+            conn.execute("UPDATE companies SET watch = 0, updated_at = ? WHERE normalized_name = ?", (now_ts(), s.normalized_name))
+        ts = now_ts()
+        conn.execute(
+            "UPDATE company_suggestions SET status = ?, decided_at = ?, updated_at = ? WHERE id = ?",
+            (SuggestionStatus.DISMISSED.value, ts, ts, suggestion_id),
+        )
+    return get_company_suggestion(conn, suggestion_id)
+
+
+def count_pending_suggestions(conn: sqlite3.Connection) -> int:
+    return int(conn.execute("SELECT COUNT(*) FROM company_suggestions WHERE status = 'pending'").fetchone()[0])
 
 
 # =====================================================================================
@@ -1863,6 +2029,7 @@ def compute_counts(conn: sqlite3.Connection, now: datetime | None = None) -> Cou
         submitted_today=int(conn.execute("SELECT COUNT(*) FROM applications WHERE submitted_at >= ?", (day,)).fetchone()[0]),
         discovered_today=int(conn.execute("SELECT COUNT(*) FROM jobs WHERE discovered_at >= ?", (day,)).fetchone()[0]),
         submitted_total=by_state.get("submitted", 0),
+        suggestions_pending=count_pending_suggestions(conn),
     )
 
 

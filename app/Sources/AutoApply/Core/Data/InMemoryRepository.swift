@@ -14,6 +14,7 @@ struct RepositoryData: Sendable {
     var stories: [StoryItem] = []
     var memoryAnswers: [MemoryAnswerItem] = []
     var easyApply: [EasyApplyItem] = []
+    var companySuggestions: [CompanySuggestionItem] = []
     var profile = Profile()
     var neverGuess = NeverGuess()
     var runs: [RunItem] = []
@@ -119,6 +120,9 @@ final class InMemoryRepository: AppRepository {
     func stories() -> AsyncStream<[StoryItem]> { observe { $0.stories.sorted { $0.updatedAt > $1.updatedAt } } }
     func memoryAnswers() -> AsyncStream<[MemoryAnswerItem]> { observe { $0.memoryAnswers.sorted { $0.uses > $1.uses } } }
     func easyApply() -> AsyncStream<[EasyApplyItem]> { observe { $0.easyApply } }
+    func companySuggestions() -> AsyncStream<[CompanySuggestionItem]> {
+        observe { $0.companySuggestions.filter { $0.status == .pending || $0.status == .auto } }
+    }
     func profile() -> AsyncStream<Profile> { observe { $0.profile } }
     func neverGuess() -> AsyncStream<NeverGuess> { observe { $0.neverGuess } }
     func runs(limit: Int) -> AsyncStream<[RunItem]> {

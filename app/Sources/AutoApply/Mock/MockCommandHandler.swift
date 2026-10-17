@@ -313,6 +313,25 @@ enum MockCommandHandler {
             }
             return Handled(reply: ack())
 
+        case .acceptCompanySuggestion(let p):
+            let name: String? = world.repository.update { data in
+                guard let i = data.companySuggestions.firstIndex(where: { $0.id == p.suggestionId }) else { return nil }
+                data.companySuggestions[i].status = .accepted
+                data.log("user", "added \(data.companySuggestions[i].companyName) to the watched companies", actor: .user)
+                return data.companySuggestions[i].companyName
+            }
+            guard name != nil else { return Handled(reply: error(.notFound, "company suggestion \(p.suggestionId) not found")) }
+            return Handled(reply: ack(["company_id": .int(1000 + p.suggestionId)]))
+
+        case .dismissCompanySuggestion(let p):
+            let found: Bool = world.repository.update { data in
+                guard let i = data.companySuggestions.firstIndex(where: { $0.id == p.suggestionId }) else { return false }
+                data.companySuggestions[i].status = .dismissed
+                return true
+            }
+            guard found else { return Handled(reply: error(.notFound, "company suggestion \(p.suggestionId) not found")) }
+            return Handled(reply: ack())
+
         case .openAgentChrome:
             return Handled(reply: ack())
 

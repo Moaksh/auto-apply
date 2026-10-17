@@ -401,6 +401,33 @@ extension AppStore {
         return false
     }
 
+    /// Settings ▸ Sources ▸ Suggested companies: "Add" watches the company (its ATS board, else its career page).
+    @discardableResult
+    func acceptCompanySuggestion(_ item: CompanySuggestionItem) async -> Bool {
+        let before = library.companySuggestions
+        let result = await perform(.acceptCompanySuggestion(AcceptCompanySuggestionPayload(suggestionId: item.id)),
+                                   optimistic: { [weak self] in self?.library.companySuggestions.removeAll { $0.id == item.id } },
+                                   rollback: { [weak self] in self?.library.companySuggestions = before },
+                                   timeout: .seconds(10))
+        if case .success = result {
+            toasts.show("Watching \(item.companyName).", symbol: "building.2", style: .info, duration: .seconds(2))
+            return true
+        }
+        return false
+    }
+
+    /// "Dismiss": never suggest this company again (one the agent added by itself is unwatched).
+    @discardableResult
+    func dismissCompanySuggestion(_ item: CompanySuggestionItem) async -> Bool {
+        let before = library.companySuggestions
+        let result = await perform(.dismissCompanySuggestion(DismissCompanySuggestionPayload(suggestionId: item.id)),
+                                   optimistic: { [weak self] in self?.library.companySuggestions.removeAll { $0.id == item.id } },
+                                   rollback: { [weak self] in self?.library.companySuggestions = before },
+                                   timeout: .seconds(10))
+        if case .success = result { return true }
+        return false
+    }
+
     /// "Check now": asks the daemon to look at the saved Chrome login in a background window.
     /// The result arrives as a `source_status` event; the return value is just success of the command.
     func checkSourceLogin(_ source: CheckSourceLoginPayload.Source) async -> Bool {

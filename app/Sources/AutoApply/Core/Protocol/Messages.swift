@@ -305,6 +305,21 @@ enum SourceName: String, Codable, Sendable, CaseIterable, Hashable {
 
 // MARK: - Payload and shared types
 
+struct AcceptCompanySuggestionPayload: Codable, Sendable, Hashable {
+    var suggestionId: Int
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case suggestionId = "suggestion_id"
+    }
+}
+
+extension AcceptCompanySuggestionPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        suggestionId = try c.decode(Int.self, forKey: .suggestionId)
+    }
+}
+
 /// Success reply to a command (envelope carries ``reply_to``).
 struct AckPayload: Codable, Sendable, Hashable {
     var ok: Bool = true
@@ -611,6 +626,7 @@ struct Counts: Codable, Sendable, Hashable {
     var submittedToday: Int = 0
     var discoveredToday: Int = 0
     var submittedTotal: Int = 0
+    var suggestionsPending: Int = 0
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case queued
@@ -623,6 +639,7 @@ struct Counts: Codable, Sendable, Hashable {
         case submittedToday = "submitted_today"
         case discoveredToday = "discovered_today"
         case submittedTotal = "submitted_total"
+        case suggestionsPending = "suggestions_pending"
     }
 }
 
@@ -639,6 +656,7 @@ extension Counts {
         submittedToday = try c.decodeIfPresent(Int.self, forKey: .submittedToday) ?? 0
         discoveredToday = try c.decodeIfPresent(Int.self, forKey: .discoveredToday) ?? 0
         submittedTotal = try c.decodeIfPresent(Int.self, forKey: .submittedTotal) ?? 0
+        suggestionsPending = try c.decodeIfPresent(Int.self, forKey: .suggestionsPending) ?? 0
     }
 }
 
@@ -669,6 +687,21 @@ extension DeleteStoryPayload {
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(Int.self, forKey: .id)
+    }
+}
+
+struct DismissCompanySuggestionPayload: Codable, Sendable, Hashable {
+    var suggestionId: Int
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case suggestionId = "suggestion_id"
+    }
+}
+
+extension DismissCompanySuggestionPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        suggestionId = try c.decode(Int.self, forKey: .suggestionId)
     }
 }
 
@@ -2356,6 +2389,8 @@ enum Command: Sendable, Hashable {
     case onboardingConnectSource(OnboardingConnectSourcePayload)
     case checkSourceLogin(CheckSourceLoginPayload)
     case resetSourceCap(ResetSourceCapPayload)
+    case acceptCompanySuggestion(AcceptCompanySuggestionPayload)
+    case dismissCompanySuggestion(DismissCompanySuggestionPayload)
     case setMailAccount(SetMailAccountPayload)
     case getMailAccount(GetMailAccountPayload)
     case suggestPreferences(SuggestPreferencesPayload)
@@ -2401,6 +2436,8 @@ enum Command: Sendable, Hashable {
         case .onboardingConnectSource: "onboarding_connect_source"
         case .checkSourceLogin: "check_source_login"
         case .resetSourceCap: "reset_source_cap"
+        case .acceptCompanySuggestion: "accept_company_suggestion"
+        case .dismissCompanySuggestion: "dismiss_company_suggestion"
         case .setMailAccount: "set_mail_account"
         case .getMailAccount: "get_mail_account"
         case .suggestPreferences: "suggest_preferences"
@@ -2446,6 +2483,8 @@ enum Command: Sendable, Hashable {
         "onboarding_connect_source",
         "check_source_login",
         "reset_source_cap",
+        "accept_company_suggestion",
+        "dismiss_company_suggestion",
         "set_mail_account",
         "get_mail_account",
         "suggest_preferences",
@@ -2582,6 +2621,8 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case "onboarding_connect_source": command = .onboardingConnectSource(try c.decode(OnboardingConnectSourcePayload.self, forKey: .payload))
         case "check_source_login": command = .checkSourceLogin(try c.decode(CheckSourceLoginPayload.self, forKey: .payload))
         case "reset_source_cap": command = .resetSourceCap(try c.decode(ResetSourceCapPayload.self, forKey: .payload))
+        case "accept_company_suggestion": command = .acceptCompanySuggestion(try c.decode(AcceptCompanySuggestionPayload.self, forKey: .payload))
+        case "dismiss_company_suggestion": command = .dismissCompanySuggestion(try c.decode(DismissCompanySuggestionPayload.self, forKey: .payload))
         case "set_mail_account": command = .setMailAccount(try c.decode(SetMailAccountPayload.self, forKey: .payload))
         case "get_mail_account": command = .getMailAccount(try c.decode(GetMailAccountPayload.self, forKey: .payload))
         case "suggest_preferences": command = .suggestPreferences(try c.decode(SuggestPreferencesPayload.self, forKey: .payload))
@@ -2634,6 +2675,8 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case .onboardingConnectSource(let p): try c.encode(p, forKey: .payload)
         case .checkSourceLogin(let p): try c.encode(p, forKey: .payload)
         case .resetSourceCap(let p): try c.encode(p, forKey: .payload)
+        case .acceptCompanySuggestion(let p): try c.encode(p, forKey: .payload)
+        case .dismissCompanySuggestion(let p): try c.encode(p, forKey: .payload)
         case .setMailAccount(let p): try c.encode(p, forKey: .payload)
         case .getMailAccount(let p): try c.encode(p, forKey: .payload)
         case .suggestPreferences(let p): try c.encode(p, forKey: .payload)
