@@ -48,7 +48,7 @@ cat > "$OUT/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key><string>AutoApply</string>
   <key>CFBundleExecutable</key><string>AutoApply</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>0.1.1</string>
   <key>CFBundleVersion</key><string>${BUILD_STAMP}</string>
   <key>LSMinimumSystemVersion</key><string>${MIN:-26}.0</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>
