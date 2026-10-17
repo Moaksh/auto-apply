@@ -1,6 +1,7 @@
 // DashboardModel.swift — pure presentation logic for the Dashboard (docs/UI_UX_PLAN.md §4):
 // greeting, next-run label, hero state/verb, KPI captions, count-up policy. Views stay thin
 // and every rule here is unit-tested (Tests/AutoApplyTests/C2).
+import CryptoKit
 import Foundation
 
 enum DashboardFormat {
@@ -288,5 +289,66 @@ struct CelebrationGate: Sendable {
         if let last = lastFiredAt, now.timeIntervalSince(last) < window { return false }
         lastFiredAt = now
         return true
+    }
+}
+
+/// A small profile-keyed flourish beside the greeting and in the Settings footer. Entries are
+/// keyed by a salted digest of the normalized name and sealed with a stream derived from it.
+enum GreetingAccent {
+    struct Lines: Equatable {
+        var header: String
+        var footer: String
+    }
+
+    private static let table: [(String, String, String)] = [
+        ("3e5387cbb33aab367a640498", "2u42YCu+jHf0BRZle1tdfFk4xtVfUZMSdInwhdaRRaNDsp9A3DmQluXile7ddIchE7NQYZYVmHlWKCCTDnyYxv6UJzD+wAPBydAEUxtN47CSw747gQr+OXN4IR7z5w+XwTXgWLVv", "dRP0JUiwiGfmGQNpPlABfE8nm5QIa54BIMz2zM6NAPdcs4MM3HeXi/j1zKE="),
+        ("df9c757ddee96ec82a7e8948", "xNH4Z3droerFl9ZDiXEhhNy6sz5AMGPUQgylAvEfVHJTK5huETg7H9PYoPqsmiqAWhWBUqIEOkKZj9W73uDiRbBx9ZhP/skJ09gyq/y1Qd7Z8GNyD5Xam7FSSoX6nPpwPvMr51UI", "ayw6IhRlpfrXi8NPzHp9hMql7n8XCm7HFkmjS+kDESZMKoQiEXY8As7P+bU="),
+        ("7ad84154db034ce7c480ff4e", "i0ERFkyc6HhCIJXiV1VB3HIPOZBTW+5pEEHtp2iQAQZ49rrY9Ef6y6BeqUsTv/+qZ/2u3P1nO52k0r4nIenDaVOxceLsi06TFvIbvmRdzCZ82TZVYbCoz/1q46eDpCdsHlyn3WGlYYld3fbUBqAjKBrh8KqQwK+BXf4=", "JLzTUy+H4H9ZaZX5W1QVmHpBKNlRTe59GFntoWCQARY2/eOWxV28zKdb7E0C+ryxYOGnyqk0KYC/zv4="),
+    ]
+
+    static func lines(fullName: String?, firstName: String?, lastName: String?) -> Lines? {
+        let full = (fullName ?? "").trimmingCharacters(in: .whitespaces)
+        let first = (firstName ?? "").trimmingCharacters(in: .whitespaces)
+        let last = (lastName ?? "").trimmingCharacters(in: .whitespaces)
+        let shown = (full.isEmpty ? "\(first) \(last)" : full).split(whereSeparator: \.isWhitespace).joined(separator: " ")
+        let given = first.isEmpty ? String(shown.split(separator: " ").first ?? "") : first
+        for key in candidates(full: full, first: first, last: last) {
+            guard let row = table.first(where: { $0.0 == tag(key) }),
+                  let a = open(row.1, key), let b = open(row.2, key) else { continue }
+            func fill(_ t: String) -> String { t.replacingOccurrences(of: "{n}", with: shown).replacingOccurrences(of: "{f}", with: given) }
+            return Lines(header: fill(a), footer: fill(b))
+        }
+        return nil
+    }
+
+    static func normalize(_ s: String) -> String {
+        let folded = s.folding(options: [.diacriticInsensitive, .caseInsensitive, .widthInsensitive], locale: .init(identifier: "en_US")).lowercased()
+        let letters = folded.unicodeScalars.map { ("a"..."z").contains(Character($0)) ? Character($0) : " " }
+        return String(letters).split(separator: " ").joined(separator: " ")
+    }
+
+    private static func candidates(full: String, first: String, last: String) -> [String] {
+        var out: [String] = []
+        let f = normalize(full).split(separator: " ")
+        if !f.isEmpty { out.append(f.joined(separator: " ")) }
+        if f.count > 2 { out.append("\(f.first!) \(f.last!)") }
+        let fl = normalize("\(first) \(last)")
+        if fl.contains(" ") { out.append(fl) }
+        return out
+    }
+
+    private static func tag(_ n: String) -> String {
+        SHA256.hash(data: Data("aa1:\(n)".utf8)).map { String(format: "%02x", $0) }.joined().prefix(24).description
+    }
+
+    private static func open(_ sealed: String, _ n: String) -> String? {
+        guard let data = Data(base64Encoded: sealed) else { return nil }
+        var stream = Data()
+        var i: UInt8 = 0
+        while stream.count < data.count {
+            stream.append(contentsOf: SHA256.hash(data: Data("aa1:k:\(n)".utf8) + [i]))
+            i &+= 1
+        }
+        return String(data: Data(zip(data, stream).map { $0 ^ $1 }), encoding: .utf8)
     }
 }

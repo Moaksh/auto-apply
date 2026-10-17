@@ -164,6 +164,10 @@ struct MadeWithLoveFooter: View {
             .buttonStyle(.plain)
             .accessibilityLabel("love")
             Text("by Moaksh Kakkar")
+            let p = store.library.profile
+            if let lines = GreetingAccent.lines(fullName: p.fullName, firstName: p.firstName, lastName: p.lastName) {
+                AccentMark(text: lines.footer, seenKey: "settings.accent.seen")
+            }
             Spacer()
         }
         .font(Typography.callout)

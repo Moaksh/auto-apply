@@ -120,8 +120,14 @@ private struct DashboardHeader: View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: Space.xs) {
                 Text(DashboardFormat.dateEyebrow(Date())).eyebrowStyle()
-                Text(greeting ?? DashboardFormat.greeting(at: Date(), name: store.library.firstName))
-                    .font(Typography.title1)
+                HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                    Text(greeting ?? DashboardFormat.greeting(at: Date(), name: store.library.firstName))
+                        .font(Typography.title1)
+                    let p = store.library.profile
+                    if let lines = GreetingAccent.lines(fullName: p.fullName, firstName: p.firstName, lastName: p.lastName) {
+                        AccentMark(text: lines.header, seenKey: "dashboard.accent.seen")
+                    }
+                }
             }
             Spacer()
             trailing
@@ -178,5 +184,41 @@ private extension View {
     /// `cardIn` with the 30 ms stagger (max 8 staggered).
     func entrance(index: Int, appeared: Bool, reduced: Bool) -> some View {
         modifier(EntranceModifier(index: index, appeared: appeared, reduced: reduced))
+    }
+}
+
+/// A faint ✦ that opens a short note; shimmers once the first time it appears.
+struct AccentMark: View {
+    var text: String
+    var seenKey: String
+    @Environment(\.motionReduced) private var reduced
+    @State private var open = false
+    @State private var glow = false
+
+    var body: some View {
+        Button { open.toggle() } label: {
+            Text("✦")
+                .font(Typography.callout)
+                .foregroundStyle(Palette.accent.opacity(glow ? 1 : 0.45))
+                .scaleEffect(glow ? 1.35 : 1)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Note")
+        .popover(isPresented: $open, arrowEdge: .bottom) {
+            Text(text)
+                .font(Typography.body)
+                .multilineTextAlignment(.leading)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 300, alignment: .leading)
+                .padding(Space.l)
+        }
+        .task {
+            guard !UserDefaults.standard.bool(forKey: seenKey), !reduced else { return }
+            UserDefaults.standard.set(true, forKey: seenKey)
+            try? await Task.sleep(for: .seconds(1.2))
+            withAnimation(.easeInOut(duration: 0.6).repeatCount(3, autoreverses: true)) { glow = true }
+            try? await Task.sleep(for: .seconds(2))
+            withAnimation(.easeOut(duration: 0.4)) { glow = false }
+        }
     }
 }
