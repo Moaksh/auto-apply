@@ -93,6 +93,7 @@ struct PaletteSettingEntry: Sendable, Hashable {
         .init(title: "Career page URLs", keywords: "careers websites", tab: .sources, key: "career_page_urls"),
         .init(title: "Run schedule", keywords: "times hours when runs", tab: .schedule, key: "schedule"),
         .init(title: "Daily cap", keywords: "limit applications per day", tab: .schedule, key: "daily_cap"),
+        .init(title: "Agents at once", keywords: "parallel concurrent applications simultaneous agents", tab: .schedule, key: "parallel_applications"),
         .init(title: "Per-company cooldown", keywords: "days company", tab: .schedule, key: "per_company_cooldown_days"),
         .init(title: "Auto-ghost & nudges", keywords: "ghosted heard back follow up days", tab: .schedule, key: "ghost_after_days"),
         .init(title: "Notifications", keywords: "alerts notify", tab: .general, key: "notifications"),

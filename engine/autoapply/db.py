@@ -91,7 +91,7 @@ from autoapply.models import (
 )
 
 #: Must equal MAX(version) seeded by contract/schema.sql.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 #: Forward migrations: version -> SQL to go from (version-1) to version. Append-only.
 #: Version 1 is the baseline created by contract/schema.sql itself.
@@ -108,6 +108,7 @@ ALTER TABLE questions ADD COLUMN suggested_confidence REAL;
 ALTER TABLE questions ADD COLUMN suggested_note TEXT;
 """,
     5: "python:_migrate_v5",
+    6: "python:_migrate_v6",
 }
 
 
@@ -145,6 +146,24 @@ def _migrate_v5(conn: sqlite3.Connection) -> None:
         raise
     finally:
         conn.execute("PRAGMA foreign_keys = ON")
+
+
+def _migrate_v6(conn: sqlite3.Connection) -> None:
+    """v6: preferences.parallel_applications (how many applications are worked on at once).
+    Idempotent: a DB built from a schema.sql that already has the column only gets the version row."""
+    conn.execute("BEGIN")
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(preferences)")}
+        if "parallel_applications" not in cols:
+            conn.execute(
+                "ALTER TABLE preferences ADD COLUMN parallel_applications INTEGER NOT NULL DEFAULT 3 "
+                "CHECK (parallel_applications BETWEEN 1 AND 4)"
+            )
+        conn.execute("INSERT INTO schema_version(version) VALUES (6)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
 
 
 # =====================================================================================

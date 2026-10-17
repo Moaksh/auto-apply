@@ -429,6 +429,8 @@ class BrowserSession:
     #: Form-POST navigations are aborted unless ``submit()`` armed this (fill can never submit).
     allow_submit: bool = False
     blocked_submits: int = 0
+    #: task that opened the session; while it runs (another worker), the session is in use
+    owner: asyncio.Task[Any] | None = field(default_factory=lambda: _current_task())
 
     def touch(self) -> None:
         self.last_used = time.monotonic()
@@ -444,11 +446,25 @@ class BrowserSession:
         _OPEN_SESSIONS.pop(self.application_id, None)
 
 
+def _current_task() -> asyncio.Task[Any] | None:
+    try:
+        return asyncio.current_task()
+    except RuntimeError:  # no running loop
+        return None
+
+
+def _held_by_other_worker(s: BrowserSession) -> bool:
+    """The session belongs to another still-running task (a concurrent worker that may be in
+    a long step: CAPTCHA wait, email code, slow upload) — never reap it from under it."""
+    owner = s.owner
+    return owner is not None and owner is not _current_task() and not owner.done()
+
+
 async def reap_idle_sessions(max_idle: float = SESSION_MAX_IDLE) -> int:
     """Close sessions nobody used for ``max_idle`` seconds (e.g. fill happened but the
     submit gate blocked, so ``submit`` was never called). Returns how many were closed."""
     now = time.monotonic()
-    stale = [s for s in list(_OPEN_SESSIONS.values()) if now - s.last_used > max_idle]
+    stale = [s for s in list(_OPEN_SESSIONS.values()) if now - s.last_used > max_idle and not _held_by_other_worker(s)]
     for s in stale:
         await s.close()
     return len(stale)

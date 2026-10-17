@@ -2239,6 +2239,14 @@
           "title": "Jobs Per Session",
           "type": "integer"
         },
+        "parallel_applications": {
+          "default": 3,
+          "description": "Applications prepped / filled at the same time (one agent + browser each).",
+          "maximum": 4,
+          "minimum": 1,
+          "title": "Parallel Applications",
+          "type": "integer"
+        },
         "sources_enabled": {
           "additionalProperties": {
             "type": "boolean"
@@ -2621,6 +2629,19 @@
           "default": null,
           "description": "Job detail pages read per LinkedIn/Glassdoor session.",
           "title": "Jobs Per Session"
+        },
+        "parallel_applications": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Applications prepped / filled at the same time (one agent + browser each).",
+          "title": "Parallel Applications"
         },
         "sources_enabled": {
           "anyOf": [

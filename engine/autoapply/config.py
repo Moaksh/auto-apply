@@ -79,6 +79,9 @@ class Preferences(BaseModel):
     glassdoor_sessions_per_day: int = Field(default=3, ge=0)
     searches_per_session: int = Field(default=3, ge=1, le=10, description="Search result pages read per LinkedIn/Glassdoor session.")
     jobs_per_session: int = Field(default=30, ge=1, le=200, description="Job detail pages read per LinkedIn/Glassdoor session.")
+    parallel_applications: int = Field(
+        default=3, ge=1, le=4, description="Applications prepped / filled at the same time (one agent + browser each)."
+    )
     sources_enabled: dict[str, bool] = Field(default_factory=_default_sources)
     career_page_urls: list[str] = Field(default_factory=list)
     always_ask_patterns: list[str] = Field(
