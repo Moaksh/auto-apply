@@ -52,63 +52,106 @@ struct ActivityLogView: View {
     // MARK: Header
 
     private func header(filter: Binding<ActivityFilter>) -> some View {
-        HStack(spacing: Space.m) {
-            Text("Activity").font(Typography.title1)
-            Picker("Scope", selection: filter.scope) {
-                Text("All").tag(ActivityFilter.Scope.all)
-                Text("Agent").tag(ActivityFilter.Scope.agent)
-                Text("You").tag(ActivityFilter.Scope.you)
-                Text("Errors").tag(ActivityFilter.Scope.errors)
+        // One line when it fits, two when the column is narrow (inspector open, small window): a
+        // rigid one-line header made the column wider than the window and pushed the inspector
+        // off-screen. The window title already says "Activity".
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: Space.m) {
+                scopePicker(filter)
+                searchField(filter)
+                runMenu
+                chips(filter)
+                Spacer(minLength: 0)
+                eventCount
+                followButton
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 240)
-
-            HStack(spacing: Space.xs) {
-                Image(systemName: "magnifyingglass").foregroundStyle(Palette.textSecondary)
-                TextField("filter…", text: filter.searchText)
-                    .textFieldStyle(.plain)
-                    .font(Typography.mono)
-                    .focused($searchFocused)
-                    .frame(width: 180)
-            }
-            .padding(.horizontal, Space.s).padding(.vertical, Space.xs)
-            .sunkenWell()
-
-            Menu(runTitle) {
-                Button("All runs") { model.runID = nil }
-                Divider()
-                ForEach(store.library.runs.prefix(20)) { run in
-                    Button(runLabel(run)) { model.runID = run.id }
+            VStack(alignment: .leading, spacing: Space.s) {
+                HStack(spacing: Space.m) {
+                    scopePicker(filter)
+                    Spacer(minLength: 0)
+                    followButton
+                }
+                HStack(spacing: Space.m) {
+                    searchField(filter)
+                    runMenu
+                    chips(filter)
+                    Spacer(minLength: 0)
+                    eventCount
                 }
             }
-            .fixedSize()
-
-            if let day = filter.wrappedValue.day {
-                chip("Day: \(day.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))") { filter.wrappedValue.day = nil }
-            }
-            if let jobID = filter.wrappedValue.jobID {
-                chip("Job: \(store.jobs.job(id: jobID)?.company ?? "#\(jobID)")") { filter.wrappedValue.jobID = nil }
-            }
-            Spacer()
-            Text("\(model.rows.count.formatted()) events").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
-            Button {
-                model.toggleFollow()
-            } label: {
-                HStack(spacing: Space.xs) {
-                    Image(systemName: model.isFollowing ? "pause.fill" : "play.fill").contentTransition(.symbolEffect(.replace))
-                    Text("Follow")
-                    Circle().fill(model.isFollowing ? Palette.applied : Palette.textTertiary).frame(width: 7, height: 7)
-                }
-            }
-            .buttonStyle(.glass)
-            .help(model.isFollowing ? "Pause follow mode" : "Resume follow mode")
+        }
+        .background {
             Button("") { searchFocused = true }
                 .keyboardShortcut(.filter)
                 .hidden()
-                .frame(width: 0, height: 0)
                 .accessibilityHidden(true)
         }
+    }
+
+    private func scopePicker(_ filter: Binding<ActivityFilter>) -> some View {
+        Picker("Scope", selection: filter.scope) {
+            Text("All").tag(ActivityFilter.Scope.all)
+            Text("Agent").tag(ActivityFilter.Scope.agent)
+            Text("You").tag(ActivityFilter.Scope.you)
+            Text("Errors").tag(ActivityFilter.Scope.errors)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+    }
+
+    private func searchField(_ filter: Binding<ActivityFilter>) -> some View {
+        HStack(spacing: Space.xs) {
+            Image(systemName: "magnifyingglass").foregroundStyle(Palette.textSecondary)
+            TextField("filter…", text: filter.searchText)
+                .textFieldStyle(.plain)
+                .font(Typography.mono)
+                .focused($searchFocused)
+                .frame(minWidth: 80, maxWidth: 220)
+        }
+        .padding(.horizontal, Space.s).padding(.vertical, Space.xs)
+        .sunkenWell()
+    }
+
+    private var runMenu: some View {
+        Menu(runTitle) {
+            Button("All runs") { model.runID = nil }
+            Divider()
+            ForEach(store.library.runs.prefix(20)) { run in
+                Button(runLabel(run)) { model.runID = run.id }
+            }
+        }
+        .fixedSize()
+    }
+
+    @ViewBuilder
+    private func chips(_ filter: Binding<ActivityFilter>) -> some View {
+        if let day = filter.wrappedValue.day {
+            chip("Day: \(day.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))") { filter.wrappedValue.day = nil }
+        }
+        if let jobID = filter.wrappedValue.jobID {
+            chip("Job: \(store.jobs.job(id: jobID)?.company ?? "#\(jobID)")") { filter.wrappedValue.jobID = nil }
+        }
+    }
+
+    private var eventCount: some View {
+        Text("\(model.rows.count.formatted()) events").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
+            .lineLimit(1)
+            .fixedSize()
+    }
+
+    private var followButton: some View {
+        Button {
+            model.toggleFollow()
+        } label: {
+            HStack(spacing: Space.xs) {
+                Image(systemName: model.isFollowing ? "pause.fill" : "play.fill").contentTransition(.symbolEffect(.replace))
+                Text("Follow").fixedSize()
+                Circle().fill(model.isFollowing ? Palette.applied : Palette.textTertiary).frame(width: 7, height: 7)
+            }
+        }
+        .buttonStyle(.glass)
+        .help(model.isFollowing ? "Pause follow mode" : "Resume follow mode")
     }
 
     private func chip(_ text: String, clear: @escaping () -> Void) -> some View {
