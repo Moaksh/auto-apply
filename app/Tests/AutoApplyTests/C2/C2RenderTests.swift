@@ -97,6 +97,17 @@ struct C2RenderTests {
         #expect(render("detail-submitted", width: 1100, height: 1000, store: store) { JobDetailView(jobID: submitted.id) } != nil)
         #expect(render("detail-skipped", width: 760, height: 1000, store: store, scheme: .dark) { JobDetailView(jobID: skipped.id) } != nil)
         #expect(render("detail-missing", width: 760, height: 400, store: store) { JobDetailView(jobID: 999_999) } != nil)
+
+        // Mock mode ships reviewable jobs with a Q&A audit and a real pre-submit screenshot.
+        let reviewable = MockScripts.reviewSampleJobIDs.compactMap { store.jobs.job(id: $0) }
+        #expect(reviewable.count == 2 && reviewable.allSatisfy { $0.state == .awaitingReview })
+        #expect(reviewable.allSatisfy { LocalFiles.existing($0.screenshotPath) != nil })
+        for job in reviewable {
+            #expect(render("detail-review-\(job.id)", width: 1200, height: 1100, store: store) { JobDetailView(jobID: job.id) } != nil)
+        }
+        if let parked = store.jobs.all.first(where: { $0.state == .needsYou }) {
+            #expect(render("detail-needs-you", width: 1100, height: 700, store: store, scheme: .dark) { JobDetailView(jobID: parked.id) } != nil)
+        }
         #expect(render("inspector", width: 360, height: 700, store: store) { JobInspector(jobID: submitted.id) } != nil)
         await store.stop()
     }

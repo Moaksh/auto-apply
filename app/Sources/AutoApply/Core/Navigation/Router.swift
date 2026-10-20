@@ -121,6 +121,9 @@ final class Router {
     var columnVisibility: NavigationSplitViewVisibility = .all
     var isInspectorPresented = false
     var isPalettePresented = false
+    /// The "Add job by link" sheet, optionally seeded with a URL (e.g. pasted into ⌘K).
+    var isAddJobPresented = false
+    var addJobSeed = ""
     /// Initial query to seed the palette with (e.g. a scope prefix like ">").
     var paletteSeed = ""
     /// The job currently focused in Pipeline / lists (drives the inspector and job shortcuts).
@@ -133,13 +136,31 @@ final class Router {
     private(set) var mainWindowRequest = 0
     /// Job ids requested to open in their own window.
     private(set) var jobWindowRequest: JobWindowRequest?
+    /// Bumped to ask the on-screen Job detail to approve its job (⌘K "Approve & submit"); the
+    /// detail runs it through the same low-confidence safeguard as its button and ⌘↵.
+    private(set) var jobApproveRequest: JobActionRequest?
 
     struct JobWindowRequest: Equatable, Sendable {
         var id: Int
         var serial: Int
     }
 
+    struct JobActionRequest: Equatable, Sendable {
+        var jobID: Int
+        var serial: Int
+    }
+
     init() {}
+
+    /// The job whose detail page is on top of the detail column, if any.
+    var openJobDetailID: Int? {
+        if case .job(let id) = path.last { return id }
+        return nil
+    }
+
+    func requestApprove(jobID: Int) {
+        jobApproveRequest = JobActionRequest(jobID: jobID, serial: (jobApproveRequest?.serial ?? 0) + 1)
+    }
 
     /// True while a job is on screen as the focus: Pipeline with a focused job, or a pushed
     /// job detail. Gates the Job-menu key equivalents.
@@ -181,6 +202,12 @@ final class Router {
     func togglePalette(seed: String = "") {
         paletteSeed = seed
         isPalettePresented.toggle()
+    }
+
+    func requestAddJob(url: String = "") {
+        addJobSeed = url
+        isPalettePresented = false
+        isAddJobPresented = true
     }
 
     func toggleInspector() { isInspectorPresented.toggle() }

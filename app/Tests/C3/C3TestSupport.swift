@@ -79,7 +79,9 @@ enum C3Fixtures {
     }
 
     static func job(id: Int, company: String = "Stripe", title: String = "Backend Engineer", state: AppState = .queued,
-                    score: Int? = 80, ats: Ats = .greenhouse, companyID: Int = 1) -> JobItem {
+                    score: Int? = 80, ats: Ats = .greenhouse, companyID: Int? = nil) -> JobItem {
+        // One id per company name (stable across runs), unless a test pins it.
+        let companyID = companyID ?? company.unicodeScalars.reduce(7) { ($0 &* 31 &+ Int($1.value)) & 0xFFFFFF }
         var j = JobItem(id: id, applicationID: id, companyID: companyID, company: company, title: title, location: "Remote",
                         source: .greenhouse, ats: ats, applyURL: "https://jobs.example.com/\(id)", discoveredAt: now.addingTimeInterval(Double(id)))
         j.state = state

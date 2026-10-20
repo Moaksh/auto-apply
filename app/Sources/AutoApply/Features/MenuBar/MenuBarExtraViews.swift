@@ -97,8 +97,8 @@ struct MenuBarPanel: View {
                 Divider()
                 if store.inbox.openCount > 0 {
                     PanelRow(symbol: "hand.raised.fill", tint: Palette.needsYou,
-                             text: "\(store.inbox.openCount) question\(store.inbox.openCount == 1 ? "" : "s") need you",
-                             action: "Answer") { openMain(.needsYou) }
+                             text: "Needs you · \(store.inbox.summary)",
+                             action: store.inbox.actionCount > 0 ? "Open" : "Answer") { openMain(.needsYou) }
                         .background(Palette.needsYou.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
                 }
                 if store.counts.awaitingReview > 0 {

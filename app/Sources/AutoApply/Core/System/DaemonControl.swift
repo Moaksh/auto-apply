@@ -54,6 +54,40 @@ enum DaemonControl {
         return stamp?.trimmingCharacters(in: .whitespacesAndNewlines) != bundleStamp
     }
 
+    /// A dev checkout runs the repo's engine in place, so an update only needs a restart; this file
+    /// remembers which app build last (re)started it.
+    static var devStampFile: URL { runtimeDirectory.appendingPathComponent(".dev-bundle-version") }
+
+    static var devDaemonOutdated: Bool {
+        guard devCheckout != nil else { return false }
+        let stamp = try? String(contentsOf: devStampFile, encoding: .utf8)
+        return stamp?.trimmingCharacters(in: .whitespacesAndNewlines) != bundleStamp
+    }
+
+    static var launchAgentInstalled: Bool {
+        FileManager.default.fileExists(atPath: FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/LaunchAgents/\(launchAgentLabel).plist").path)
+    }
+
+    /// After an update, bring the daemon onto this build: a shared build re-installs its engine copy
+    /// (which restarts the LaunchAgent); a dev checkout restarts the daemon so it loads the current code.
+    /// Without this an updated app keeps talking to the daemon process started by the previous version.
+    @discardableResult
+    static func refreshAfterUpdate(force: Bool = false) async -> Bool {
+        guard launchAgentInstalled else { return false }
+        if devCheckout != nil {
+            guard force || devDaemonOutdated else { return false }
+            let ok = await restart()
+            if ok {
+                try? FileManager.default.createDirectory(at: runtimeDirectory, withIntermediateDirectories: true)
+                try? bundleStamp.write(to: devStampFile, atomically: true, encoding: .utf8)
+            }
+            return ok
+        }
+        guard force || runtimeOutdated else { return false }
+        return await ensureRunning(timeout: .seconds(60), reinstall: true)
+    }
+
     /// A source checkout next to the app (development): app/build/AutoApply.app -> repo/engine.
     static var devCheckout: URL? {
         let fm = FileManager.default
@@ -87,12 +121,12 @@ enum DaemonControl {
     /// Installs it when missing (or when `kickstart` can't find it), otherwise just starts it.
     /// Returns true once the daemon's socket is accepting connections.
     @discardableResult
-    static func ensureRunning(timeout: Duration = .seconds(20)) async -> Bool {
+    static func ensureRunning(timeout: Duration = .seconds(20), reinstall: Bool = false) async -> Bool {
         let target = "gui/\(getuid())/\(launchAgentLabel)"
         let plist = FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/LaunchAgents/\(launchAgentLabel).plist").path
         var started = false
-        if FileManager.default.fileExists(atPath: plist) && !runtimeOutdated {
+        if FileManager.default.fileExists(atPath: plist) && !runtimeOutdated && !reinstall {
             // Not -k: a healthy daemon is left alone.
             started = await ProcessRunner.run("/bin/launchctl", ["kickstart", target], timeout: .seconds(10)).status == 0
         }

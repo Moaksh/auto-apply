@@ -97,6 +97,7 @@ def samples() -> list[Envelope]:
     c("set_job_mode", {"job_id": 11, "mode": None})
     c("retry_application", {"application_id": 14})
     c("apply_anyway", {"application_id": 15})
+    c("add_job_url", {"url": "https://jobs.lever.co/acme/0b5c-uuid", "title": None, "company": None, "apply_now": True})
     c("update_job_notes", {"job_id": 11, "notes": "Referred by Sam"})
     c("set_application_resume", {"application_id": 12, "resume_variant_id": 2})
     c("resolve_unknown", {"application_id": 15, "submitted": True})

@@ -178,7 +178,10 @@ struct InboxModelTests {
         let model = InboxModel(store: store)
         model.undoWindow = .milliseconds(50)
         model.ensureSelection()
+        // The baseline also parks agent blockers (listed first); answer a form question here.
+        model.select(model.questionClusters.first?.clusterId)
         let cluster = try #require(model.selectedCluster)
+        #expect(!cluster.isAction)
         let kind = model.kind(for: cluster)
         model.updateDraft(for: cluster) { d in
             switch kind {

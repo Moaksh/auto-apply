@@ -301,12 +301,14 @@ final class MockWorld: Sendable {
             return id
         }
         let answers = MockFixtures.applicationAnswers(applicationID: applicationID, company: company, lowConfidence: lowConfidence, startID: startID)
+        let shot = MockFrames.preSubmitScreenshot(company: company, answers: answers, name: MockScripts.screenshotName(applicationID, company))
+            ?? "/mock/screenshots/\(applicationID)-pre.png"
         repository.update { data in
             data.applicationAnswers[applicationID] = answers
             if let i = data.jobIndex(applicationID: applicationID) {
                 data.jobs[i].resumeVariantID = data.jobs[i].resumeVariantID ?? 1
                 data.jobs[i].resumePickScore = 0.91
-                data.jobs[i].screenshotPath = "/mock/screenshots/\(applicationID)-pre.png"
+                data.jobs[i].screenshotPath = shot
             }
         }
     }

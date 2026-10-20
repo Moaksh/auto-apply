@@ -86,6 +86,7 @@ final class AppStore {
     @ObservationIgnored private var unreachableTask: Task<Void, Never>?
     @ObservationIgnored private var isHealingDaemon = false
     @ObservationIgnored private var lastHealAttempt = Date.distantPast
+    @ObservationIgnored private var didReconcileDaemonVersion = false
     @ObservationIgnored private var statsTask: Task<Void, Never>?
     @ObservationIgnored private var pruneTask: Task<Void, Never>?
     @ObservationIgnored private(set) var isStarted = false
@@ -268,6 +269,7 @@ final class AppStore {
         inbox.reset(snap.openClusters)
         hasSnapshot = true
         daemonVersion = snap.daemonVersion
+        reconcileDaemonVersion(snap.daemonVersion)
         preferences = snap.preferences
         preferences.mode = snap.mode
         onboarding = snap.onboarding
@@ -298,6 +300,18 @@ final class AppStore {
                     await self.selfHealDaemon()
                 }
             }
+        }
+    }
+
+    /// A daemon on a different version than this app is left over from before an update (or its
+    /// re-install failed): move it onto this build, once per launch. Real .app builds only.
+    private func reconcileDaemonVersion(_ version: String) {
+        guard mockScenarioName == nil, !didReconcileDaemonVersion, Bundle.main.bundleURL.pathExtension == "app",
+              version != AppInfo.version else { return }
+        didReconcileDaemonVersion = true
+        Task { [weak self] in
+            self?.toasts.show("Updating the agent to v\(AppInfo.version)…", symbol: "arrow.triangle.2.circlepath", style: .info, duration: .seconds(3))
+            await DaemonControl.refreshAfterUpdate(force: true)
         }
     }
 
@@ -411,7 +425,7 @@ final class AppStore {
                 return AgentStatus(kind: .error, title: "Needs attention", detail: live.lastError?.message)
             }
             if inbox.openCount > 0 {
-                return AgentStatus(kind: .needsYou, title: "Needs you", detail: "\(inbox.openCount) question\(inbox.openCount == 1 ? "" : "s")")
+                return AgentStatus(kind: .needsYou, title: "Needs you", detail: inbox.summary)
             }
             return AgentStatus(kind: .idle, title: "Idle", detail: nextRunAt.map { "next run \($0.formatted(date: .omitted, time: .shortened))" })
         }

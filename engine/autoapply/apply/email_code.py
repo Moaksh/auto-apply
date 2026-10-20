@@ -88,7 +88,8 @@ async def wait_for_code(ctx: Any, *, ats: str, email: str | None, length: int | 
             return code
     size = f"{length}-character " if length else ""
     label = f"{CODE_LABEL_PREFIX} {ats} emailed to {email or 'your email'} for {company} · {job.title} ({size}code, expires soon)"
-    q, _ = db.add_question(conn, canonical_question=label, job_id=job.id, field_type="text", reason=QuestionReason.ALWAYS_ASK)
+    q, _ = db.add_question(conn, canonical_question=label, job_id=job.id, field_type="text", reason=QuestionReason.ALWAYS_ASK,
+                          kind="question")  # the user types the code while the session waits: a real answer
     cluster = db.get_cluster(conn, q.cluster_id)
     if cluster is not None:
         try:

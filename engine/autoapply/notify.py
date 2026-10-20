@@ -60,7 +60,9 @@ class Notifier:
         d = payload if isinstance(payload, dict) else payload.model_dump(mode="json")
         if event_type == "question_opened":
             c = d["cluster"]
-            if c.get("reason") == "captcha":
+            if c.get("kind") == "action" and c.get("reason") != "captcha":
+                await self.notify("Agent is blocked", f"{c.get('canonical_question') or 'A step needs you'} · do it, then retry.")
+            elif c.get("reason") == "captcha":
                 await self.notify("CAPTCHA needs you", f"Solve it in the AutoApply browser window ({', '.join(c.get('companies') or [])}).")
             else:
                 await self.notify("Needs your input", c.get("canonical_question") or "A question needs an answer")

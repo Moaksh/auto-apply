@@ -60,7 +60,9 @@ from autoapply.enums import (
     CapKind,
     DaemonActivity,
     ErrorCode,
+    JobSource,
     LogLevel,
+    QuestionKind,
     QuestionStatus,
     RunKind,
     RunTrigger,
@@ -998,17 +1000,18 @@ class Daemon:
         if cluster is None:
             raise db.NotFound(f"open cluster {p.cluster_id!r} not found")
         answer_id: int | None = None
+        is_action = cluster.kind == QuestionKind.ACTION.value  # "done, retry": never memory / profile / form answers
         with db.transaction(self.conn):
             saved_profile = False
-            if p.save_to_profile and cluster.never_guess_key:
+            if p.save_to_profile and cluster.never_guess_key and not is_action:
                 self._save_never_guess(cluster.never_guess_key, p.answer)
                 saved_profile = True
-            if p.save_to_memory and not saved_profile and p.answer.strip():
+            if p.save_to_memory and not saved_profile and not is_action and p.answer.strip():
                 answer_id = self._save_memory(cluster.canonical_question, p.answer, cluster.field_type.value)
             job_ids = db.resolve_cluster(self.conn, p.cluster_id, status=QuestionStatus.ANSWERED, answer_text=p.answer, answer_id=answer_id)
             for job_id in job_ids:
                 text = per_job.get(job_id)
-                if text is None and (saved_profile or answer_id is not None):
+                if is_action or (text is None and (saved_profile or answer_id is not None)):
                     continue
                 app = db.get_application_by_job(self.conn, job_id)
                 db.add_application_answer(
@@ -1172,6 +1175,41 @@ class Daemon:
 
     async def _cmd_apply_anyway(self, p: Any) -> None:
         await self._transition(p.application_id, AppState.QUEUED, reason="user_apply_anyway", expected_from=AppState.SKIPPED)
+
+    async def _cmd_add_job_url(self, p: Any) -> dict[str, Any]:
+        """Add a job from a pasted link and queue it as the user's choice (``user_added_link``
+        exempts it from the hard filters, like "apply anyway"); fills right away unless paused."""
+        from autoapply.manual_job import InvalidJobUrl, fetch_job_meta, normalize_job_url
+
+        assert self.pipeline is not None
+        try:
+            url = normalize_job_url(p.url)
+        except InvalidJobUrl as exc:
+            raise CommandError(ErrorCode.INVALID_PAYLOAD, str(exc)) from exc
+        existing = db.find_job_by_apply_url(self.conn, url)
+        if existing is None:
+            meta = await fetch_job_meta(url)
+            company = db.upsert_company(self.conn, (p.company or "").strip() or meta.company)
+            job, created = db.insert_job(
+                self.conn, company_id=company.id, source=JobSource.MANUAL, title=(p.title or "").strip() or meta.title,
+                location=meta.location, apply_url=url, source_url=url, ats=meta.ats, external_id=meta.external_id,
+                description=meta.description, posted_at=meta.posted_at, raw={"added_by_link": True},
+            )
+        else:
+            job, created = existing, False
+        app = db.get_application_by_job(self.conn, job.id)
+        reason = "user_added_link"
+        if app.state is AppState.DISCOVERED:
+            await self._transition(app.id, AppState.SCORED, reason=reason)
+            await self._transition(app.id, AppState.QUEUED, reason=reason)
+        elif app.state in (AppState.SCORED, AppState.SKIPPED, AppState.FAILED):
+            await self._transition(app.id, AppState.QUEUED, reason=reason)
+        app = db.get_application(self.conn, app.id)
+        starting = bool(p.apply_now) and app.state is AppState.QUEUED and not self.is_paused()
+        if starting:
+            self._spawn(self.pipeline.apply_detached(app.id), name=f"apply-link-{app.id}")
+        return {"job_id": job.id, "application_id": app.id, "created": created, "state": app.state.value,
+                "title": job.title, "company": db.get_company(self.conn, job.company_id).name, "started": starting}
 
     async def _cmd_update_job_notes(self, p: Any) -> None:
         notes = (p.notes or "").strip() or None

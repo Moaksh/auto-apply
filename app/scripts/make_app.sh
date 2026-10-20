@@ -22,6 +22,14 @@ rsync -a --delete --exclude ".venv" --exclude "__pycache__" --exclude ".pytest_c
   "$REPO/engine/README.md" "$OUT/Contents/Resources/engine/"
 mkdir -p "$OUT/Contents/Resources/contract" && cp "$REPO/contract/schema.sql" "$OUT/Contents/Resources/contract/"
 BUILD_STAMP="$(date +%Y%m%d%H%M%S)"
+# One version for the app and the engine it ships: engine/pyproject.toml is the source of truth, and
+# the daemon reports autoapply.__version__ (the app restarts a daemon whose version differs from its own).
+VERSION="$(sed -nE 's/^version = "([^"]+)"/\1/p' "$REPO/engine/pyproject.toml" | head -1)"
+ENGINE_VERSION="$(sed -nE 's/^__version__ = "([^"]+)"/\1/p' "$REPO/engine/autoapply/__init__.py")"
+if [ -z "$VERSION" ] || [ "$VERSION" != "$ENGINE_VERSION" ]; then
+  echo "Version mismatch: pyproject.toml says '$VERSION', autoapply/__init__.py says '$ENGINE_VERSION'" >&2
+  exit 1
+fi
 
 # Icon (best effort)
 ICON_KEY=""
@@ -48,7 +56,7 @@ cat > "$OUT/Contents/Info.plist" <<PLIST
   <key>CFBundleDisplayName</key><string>AutoApply</string>
   <key>CFBundleExecutable</key><string>AutoApply</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.1</string>
+  <key>CFBundleShortVersionString</key><string>${VERSION}</string>
   <key>CFBundleVersion</key><string>${BUILD_STAMP}</string>
   <key>LSMinimumSystemVersion</key><string>${MIN:-26}.0</string>
   <key>NSPrincipalClass</key><string>NSApplication</string>

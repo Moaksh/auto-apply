@@ -93,7 +93,7 @@ final class ReviewModel {
 
     /// Answers needing a look (medium or low confidence).
     func flaggedAnswers(for job: JobItem) -> [ApplicationAnswerItem] {
-        answers(for: job).filter { $0.confidenceLevel == .medium || $0.confidenceLevel == .low }
+        ReviewSafeguard.flaggedAnswers(answers(for: job))
     }
 
     func isFlagged(_ job: JobItem) -> Bool { flagRank(job) > 0 }
@@ -119,10 +119,7 @@ final class ReviewModel {
 
     /// 2 = has a low-confidence answer, 1 = medium, 0 = clean.
     private func flagRank(_ job: JobItem) -> Int {
-        let list = answers(for: job)
-        if list.contains(where: { $0.confidenceLevel == .low }) { return 2 }
-        if list.contains(where: { $0.confidenceLevel == .medium }) { return 1 }
-        return 0
+        ReviewSafeguard.flagRank(answers(for: job))
     }
 
     /// "Mode: Review (Greenhouse override: Auto)".
@@ -215,9 +212,11 @@ final class ReviewModel {
 
     // MARK: Approve (with the low-confidence safeguard)
 
-    /// A / the bar's Approve button. Asks inline (no modal) when flagged items are included.
-    func requestApprove() async {
-        let t = targets
+    /// A / the bar's Approve button (the selection, else the focused row), or the detail pane's
+    /// button (`only` that job, whatever else is selected). Asks inline (no modal) when flagged
+    /// items are included.
+    func requestApprove(only: [Int]? = nil) async {
+        let t = only.map { ids in ids.filter { departing[$0] == nil && !approving.contains($0) } } ?? targets
         guard !t.isEmpty else { return }
         let flagged = t.filter(needsLook(jobID:))
         if flagged.isEmpty {
@@ -248,7 +247,24 @@ final class ReviewModel {
     func approve(_ requested: [Int]) async {
         // In-flight guard: a double press (or a bar button during the departure animation)
         // must not send a second `approve` for rows already on their way.
-        let jobIDs = requested.filter { !approving.contains($0) && departing[$0] == nil }
+        var jobIDs = requested.filter { !approving.contains($0) && departing[$0] == nil }
+        // The daemon allows one application per company per cooldown window and refuses the whole
+        // batch otherwise. Send the first job per company; the rest stay here for later.
+        var held: [String] = []
+        if store.preferences.perCompanyCooldownDays > 0 {
+            var seen: Set<Int> = []
+            jobIDs = jobIDs.filter { id in
+                guard let job = store.jobs.job(id: id) else { return true }
+                if seen.insert(job.companyID).inserted { return true }
+                held.append(job.company)
+                return false
+            }
+        }
+        if !held.isEmpty {
+            let names = Array(Set(held)).sorted().joined(separator: ", ")
+            store.toasts.show("Kept \(held.count) in Review: one application per company every \(store.preferences.perCompanyCooldownDays) days (\(names))",
+                              symbol: "hand.raised", style: .info)
+        }
         let appIDs = jobIDs.compactMap { store.jobs.job(id: $0)?.applicationID }
         guard !appIDs.isEmpty else { return }
         approving.formUnion(jobIDs)
@@ -272,9 +288,9 @@ final class ReviewModel {
 
     // MARK: Skip
 
-    /// S: open the reason picker in the bar.
-    func requestSkip() {
-        let t = targets
+    /// S / Skip: open the reason picker in the bar.
+    func requestSkip(only: [Int]? = nil) {
+        let t = only.map { ids in ids.filter { departing[$0] == nil && !approving.contains($0) } } ?? targets
         guard !t.isEmpty else { return }
         barMode = .skipReason(targets: t)
     }

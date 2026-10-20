@@ -70,6 +70,12 @@ struct ReviewQueueView: View {
             .foregroundStyle(Palette.textSecondary)
             .lineLimit(1)
             Spacer()
+            if count > 1 {
+                Text(model.selection.isEmpty ? "Tick jobs to approve several at once" : "\(model.selection.count) of \(count) selected")
+                    .font(Typography.callout)
+                    .foregroundStyle(Palette.textTertiary)
+                    .lineLimit(1)
+            }
             if count > 0 {
                 Button {
                     if model.selection.count == count { model.clearSelection() } else { model.selectAll() }
@@ -147,7 +153,7 @@ struct ReviewQueueView: View {
         let showing = !model.selection.isEmpty || model.barMode != .actions
         ZStack {
             if showing {
-                BulkActionBar(selectionCount: max(model.selection.count, model.targets.count), actions: barActions(model),
+                BulkActionBar(selectionCount: barCount(model), actions: barActions(model),
                               onClear: { model.clearSelection() }) {
                     barAccessory(model)
                 }
@@ -157,6 +163,14 @@ struct ReviewQueueView: View {
         .padding(.bottom, Space.xl)
         .animation(Motion.resolve(Motion.snappy, reduceMotion: reduced), value: showing)
         .animation(Motion.resolve(Motion.snappy, reduceMotion: reduced), value: model.barMode)
+    }
+
+    /// The jobs the bar is about: the ones a confirm / skip prompt is asking about, else the selection.
+    private func barCount(_ model: ReviewModel) -> Int {
+        switch model.barMode {
+        case .confirmFlagged(let t), .confirmAllFlagged(let t), .skipReason(let t): t.count
+        case .actions: max(model.selection.count, model.targets.count)
+        }
     }
 
     private func barActions(_ model: ReviewModel) -> [BulkAction] {
@@ -282,11 +296,8 @@ private struct ReviewDetail: View {
     var job: JobItem
     @Binding var quickLookURL: URL?
     @Environment(AppStore.self) private var store
-    @State private var hoveredAnswerID: Int?
 
     var body: some View {
-        let answers = model.answers(for: job)
-        let flagged = model.flaggedAnswers(for: job)
         VStack(alignment: .leading, spacing: Space.m) {
             HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -310,237 +321,57 @@ private struct ReviewDetail: View {
                         .help("Open the posting")
                 }
             }
-            HStack(alignment: .top, spacing: Space.l) {
-                ReviewScreenshotPane(path: job.screenshotPath, highlight: answers.first { $0.id == hoveredAnswerID }?.bbox) { url in
-                    quickLookURL = url
-                }
-                .frame(minWidth: 260, idealWidth: 340, maxWidth: 420)
-                VStack(alignment: .leading, spacing: Space.s) {
-                    HStack {
-                        Text("Q&A (\(answers.count))").eyebrowStyle()
-                        Spacer()
-                        if !flagged.isEmpty {
-                            Label("\(flagged.count) need\(flagged.count == 1 ? "s" : "") a look", systemImage: "exclamationmark.triangle.fill")
-                                .font(Typography.callout)
-                                .foregroundStyle(Palette.needsYou)
-                        }
-                    }
-                    ScrollView {
-                        VStack(spacing: 0) {
-                            if answers.isEmpty {
-                                SkeletonBlock(lines: 5).padding(.vertical, Space.m)
-                            }
-                            ForEach(answers) { answer in
-                                ReviewAnswerRow(model: model, answer: answer, isHovered: hoveredAnswerID == answer.id)
-                                    .onHover { inside in hoveredAnswerID = inside ? answer.id : (hoveredAnswerID == answer.id ? nil : hoveredAnswerID) }
-                                Divider()
-                            }
-                            ReviewAttachmentRows(job: job)
-                        }
-                        .padding(.bottom, 90)
-                    }
-                }
-                .frame(maxWidth: .infinity)
-            }
+            actions
+            ReviewQAPanel(job: job, answers: model.answers(for: job), answersLoaded: model.answersLoaded(job),
+                          onEdit: { answer, text in await model.editAnswer(answer, to: text) },
+                          onQuickLook: { quickLookURL = $0 })
         }
         .padding(Space.contentPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// This job's own Approve / Skip: always visible, independent of the multi-selection (the
+    /// floating bar handles batches).
+    private var actions: some View {
+        let busy = model.departing[job.id] != nil || model.isApproving
+        let flagged = model.needsLook(job)
+        // The A / S keys act on the selection when there is one, so only hint them when they mean this job.
+        let keysMeanThisJob = model.selection.isEmpty
+        return HStack(spacing: Space.s) {
+            if flagged {
+                Label(model.answersLoaded(job) ? "Some answers need a look before you submit" : "Answers are still loading",
+                      systemImage: "exclamationmark.triangle.fill")
+                    .font(Typography.callout)
+                    .foregroundStyle(Palette.needsYou)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button {
+                model.requestSkip(only: [job.id])
+            } label: {
+                HStack(spacing: Space.xs) { Text("Skip"); if keysMeanThisJob { KeyCap("S") } }
+            }
+            .buttonStyle(.glass)
+            .disabled(busy)
+            Button {
+                Task { await model.requestApprove(only: [job.id]) }
+            } label: {
+                HStack(spacing: Space.xs) {
+                    Image(systemName: "paperplane.fill")
+                    Text(flagged ? "Approve (needs a look)" : "Approve & submit")
+                    if keysMeanThisJob { KeyCap("A") }
+                }
+            }
+            .buttonStyle(.glassProminent)
+            .disabled(busy || !store.isConnected)
+            .help(store.isConnected ? "Submit this application now" : "The agent isn't connected")
+        }
     }
 
     private func withoutOverride(_ job: JobItem) -> JobItem {
         var j = job
         j.modeOverride = nil
         return j
-    }
-}
-
-/// One audited answer: question, answer, provenance, confidence, inline ✎ edit.
-private struct ReviewAnswerRow: View {
-    var model: ReviewModel
-    var answer: ApplicationAnswerItem
-    var isHovered: Bool
-    @State private var editing = false
-    @State private var draft = ""
-    @FocusState private var fieldFocused: Bool
-
-    var body: some View {
-        HStack(alignment: .top, spacing: Space.s) {
-            HStack(spacing: 3) {
-                Text(answer.question).font(Typography.body).lineLimit(2)
-                if answer.isLocked { Image(systemName: "lock.fill").imageScale(.small).foregroundStyle(Palette.textSecondary) }
-            }
-            .frame(width: 170, alignment: .leading)
-            VStack(alignment: .leading, spacing: Space.xs) {
-                if editing {
-                    if answer.fieldType == .textarea || answer.answer.count > 80 {
-                        TextEditor(text: $draft)
-                            .font(Typography.body)
-                            .scrollContentBackground(.hidden)
-                            .frame(minHeight: 80)
-                            .padding(Space.xs)
-                            .sunkenWell()
-                            .focused($fieldFocused)
-                    } else {
-                        TextField("Answer", text: $draft)
-                            .textFieldStyle(.roundedBorder)
-                            .focused($fieldFocused)
-                            .onSubmit(save)
-                    }
-                    HStack {
-                        Button("Save", action: save).buttonStyle(.borderedProminent).controlSize(.small)
-                        Button("Cancel") { editing = false }.buttonStyle(.bordered).controlSize(.small)
-                    }
-                } else {
-                    Text(answer.answer)
-                        .font(Typography.body)
-                        .lineLimit(3)
-                        .textSelection(.enabled)
-                    HStack(spacing: Space.xs) {
-                        ProvenanceTag(origin: answer.origin)
-                        if let c = answer.confidence {
-                            Text(String(format: "%.2f", c)).font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
-                        }
-                    }
-                }
-            }
-            Spacer(minLength: 0)
-            ConfidenceDot(level: answer.confidenceLevel).padding(.top, 4)
-            if !answer.isLocked && answer.fieldType != .file && !editing {
-                Button {
-                    draft = answer.answer
-                    editing = true
-                    fieldFocused = true
-                } label: {
-                    Image(systemName: "pencil")
-                }
-                .buttonStyle(.borderless)
-                .help("Edit this answer")
-                .accessibilityLabel("Edit \(answer.question)")
-            }
-        }
-        .padding(.vertical, Space.s)
-        .padding(.horizontal, Space.xs)
-        .background(isHovered ? Palette.accent.opacity(0.06) : Color.clear)
-        .background(answer.confidenceLevel == .low || answer.confidenceLevel == .medium ? Palette.needsYou.opacity(0.06) : Color.clear)
-    }
-
-    private func save() {
-        let text = draft
-        editing = false
-        Task { await model.editAnswer(answer, to: text) }
-    }
-}
-
-/// Resume + cover letter rows under the Q&A.
-private struct ReviewAttachmentRows: View {
-    var job: JobItem
-    @Environment(AppStore.self) private var store
-
-    var body: some View {
-        VStack(spacing: 0) {
-            if let resume = store.library.resume(id: job.resumeVariantID) ?? store.library.defaultResume {
-                HStack(spacing: Space.s) {
-                    Text("Resume").font(Typography.body).frame(width: 170, alignment: .leading)
-                    Image(systemName: "doc.richtext")
-                    Text("\(resume.label).pdf").font(Typography.body)
-                    if let pick = job.resumePickScore {
-                        Text(String(format: "pick %.2f", pick)).font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
-                    }
-                    Spacer()
-                    let alternatives = store.library.resumeVariants.filter { $0.enabled && $0.id != resume.id }
-                    if !alternatives.isEmpty, let appID = job.applicationID {
-                        Menu {
-                            ForEach(alternatives) { variant in
-                                Button(variant.label) {
-                                    Task { await store.setApplicationResume(applicationID: appID, resumeVariantID: variant.id) }
-                                }
-                            }
-                        } label: {
-                            Label("Swap", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                        .menuStyle(.borderlessButton)
-                        .fixedSize()
-                        .help("Use a different resume (the form is re-filled before it can be approved)")
-                        .disabled(!store.isConnected)
-                    }
-                    if let url = LocalFiles.existing(resume.filePath) {
-                        Button("Reveal") { LocalFiles.reveal(url) }.buttonStyle(.link)
-                    }
-                }
-                .padding(.vertical, Space.s)
-                Divider()
-            }
-            if let path = job.coverLetterPath {
-                HStack(spacing: Space.s) {
-                    Text("Cover letter").font(Typography.body).frame(width: 170, alignment: .leading)
-                    Image(systemName: "envelope.open")
-                    Text(URL(fileURLWithPath: path).lastPathComponent).font(Typography.body).lineLimit(1)
-                    Spacer()
-                    if let url = LocalFiles.existing(path) {
-                        Button("Open") { NSWorkspace.shared.open(url) }.buttonStyle(.link)
-                    }
-                }
-                .padding(.vertical, Space.s)
-            }
-        }
-    }
-}
-
-/// Full-page pre-submit screenshot: scrollable, solid well (never glass), highlights the field
-/// of the hovered answer. Decoded off-main. Click / Space opens Quick Look.
-struct ReviewScreenshotPane: View {
-    var path: String?
-    var highlight: CGRect?
-    var onQuickLook: (URL) -> Void
-    @State private var image: DecodedImage?
-    @State private var originalSize: CGSize?
-    @State private var loaded = false
-
-    var body: some View {
-        Group {
-            if let image {
-                ScrollView {
-                    let scaleBase = originalSize ?? image.size
-                    Image(decorative: image.cgImage, scale: 1)
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .overlay {
-                            GeometryReader { geo in
-                                if let highlight, scaleBase.width > 0 {
-                                    let s = geo.size.width / scaleBase.width
-                                    RoundedRectangle(cornerRadius: 3, style: .continuous)
-                                        .stroke(Palette.accent, lineWidth: 2)
-                                        .background(Palette.accent.opacity(0.12))
-                                        .frame(width: highlight.width * s, height: highlight.height * s)
-                                        .offset(x: highlight.minX * s, y: highlight.minY * s)
-                                        .transition(.opacity)
-                                }
-                            }
-                        }
-                        .onTapGesture { if let url = LocalFiles.existing(path) { onQuickLook(url) } }
-                }
-                .clipShape(.thumb)
-            } else {
-                VStack(spacing: Space.s) {
-                    Image(systemName: loaded ? "photo.on.rectangle.angled" : "photo")
-                        .font(.system(size: 28)).foregroundStyle(Palette.textTertiary)
-                    Text(loaded ? "No screenshot recorded" : "Loading screenshot…")
-                        .font(Typography.callout).foregroundStyle(Palette.textSecondary)
-                }
-                .frame(maxWidth: .infinity, minHeight: 280)
-            }
-        }
-        .padding(Space.xs)
-        .sunkenWell()
-        .accessibilityLabel("Pre-submit screenshot")
-        .task(id: path) {
-            loaded = false
-            image = nil
-            guard let url = LocalFiles.existing(path) else { loaded = true; return }
-            image = await C3Thumbnails.shared.image(url, maxPixel: 1600)
-            originalSize = await C3Thumbnails.shared.originalSize(url)
-            loaded = true
-        }
     }
 }
 

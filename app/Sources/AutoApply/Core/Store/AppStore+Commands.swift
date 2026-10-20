@@ -181,8 +181,27 @@ extension AppStore {
             return false
         case .failure(let error):
             jobs.performBatch { for (id, state) in previous { jobs.mutate(applicationID: id) { $0.state = state } } }
-            toasts.error(error.errorDescription ?? "Couldn't approve")
+            toasts.error(approveErrorMessage(error) ?? error.errorDescription ?? "Couldn't approve")
             return false
+        }
+    }
+
+    /// Plain-English text for a `cap_reached` refusal (the daemon's message is "<reason>: cannot submit application N now").
+    private func approveErrorMessage(_ error: DaemonClientError) -> String? {
+        guard case .daemon(let p) = error, p.code == .capReached else { return nil }
+        let job = p.applicationId.flatMap { jobs.job(applicationID: $0) }
+        let company = job?.company ?? "this company"
+        let title = job.map { " · \($0.title)" } ?? ""
+        let reason = p.message.split(separator: ":").first.map(String.init) ?? ""
+        switch reason {
+        case "company_cooldown":
+            return "Not sent: you applied to \(company) in the last \(preferences.perCompanyCooldownDays) days (or picked two \(company) jobs). \(company)\(title) stays in Review."
+        case "company_attempt_unconfirmed":
+            return "Not sent: another \(company) application is still being confirmed. \(company)\(title) stays in Review."
+        case "daily_cap":
+            return "Not sent: today's limit of \(preferences.dailyCap) applications is reached. Nothing was submitted; try again tomorrow."
+        default:
+            return nil
         }
     }
 
@@ -235,8 +254,10 @@ extension AppStore {
                       rollback: { [jobs] in jobs.mutate(jobID: jobID) { $0.modeOverride = previous } })
     }
 
-    func retryApplication(applicationID: Int) async {
-        await perform(.retryApplication(RetryApplicationPayload(applicationId: applicationID)))
+    @discardableResult
+    func retryApplication(applicationID: Int) async -> Bool {
+        if case .success = await perform(.retryApplication(RetryApplicationPayload(applicationId: applicationID))) { return true }
+        return false
     }
 
     /// Override a skip: skipped → queued (user only). Returns true on ack.
@@ -252,6 +273,38 @@ extension AppStore {
         guard case .success = result else { return false }
         toasts.show("Queued — the agent will apply on the next run", symbol: "arrow.uturn.forward", style: .success)
         return true
+    }
+
+    struct AddedJob: Decodable, Sendable, Equatable {
+        var jobId: Int
+        var applicationId: Int
+        var created: Bool
+        var state: AppState
+        var title: String
+        var company: String
+        var started: Bool
+
+        enum CodingKeys: String, CodingKey {
+            case jobId = "job_id", applicationId = "application_id", created, state, title, company, started
+        }
+    }
+
+    /// Add a job from any apply link; the daemon reads the page, queues it and (unless paused)
+    /// starts filling right away. Reading the page can take a few seconds, hence the long timeout.
+    func addJob(url: String, title: String? = nil, company: String? = nil, applyNow: Bool = true) async -> AddedJob? {
+        let clean = { (s: String?) in s.flatMap { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.flatMap { $0.isEmpty ? nil : $0 } }
+        let payload = AddJobUrlPayload(url: url.trimmingCharacters(in: .whitespacesAndNewlines), title: clean(title),
+                                       company: clean(company), applyNow: applyNow)
+        guard let added = await performResult(.addJobUrl(payload), as: AddedJob.self, timeout: .seconds(45)) else { return nil }
+        let name = "\(added.company) · \(added.title)"
+        switch (added.created, added.started) {
+        case (_, true): toasts.show("Added \(name) · filling now", symbol: "link.badge.plus", style: .success)
+        case (true, false) where isPaused: toasts.show("Added \(name) · applies when you resume", symbol: "pause.fill", style: .info)
+        case (true, false): toasts.show("Added \(name) · applies on the next run", symbol: "link.badge.plus", style: .success)
+        case (false, false): toasts.show("Already tracked: \(name) (\(added.state.rawValue.replacingOccurrences(of: "_", with: " ")))",
+                                         symbol: "info.circle", style: .info)
+        }
+        return added
     }
 
     /// Save free-form notes on a job (null/empty clears them).
@@ -281,8 +334,10 @@ extension AppStore {
         return false
     }
 
-    func resolveUnknown(applicationID: Int, submitted: Bool) async {
-        await perform(.resolveUnknown(ResolveUnknownPayload(applicationId: applicationID, submitted: submitted)))
+    @discardableResult
+    func resolveUnknown(applicationID: Int, submitted: Bool) async -> Bool {
+        if case .success = await perform(.resolveUnknown(ResolveUnknownPayload(applicationId: applicationID, submitted: submitted))) { return true }
+        return false
     }
 
     // MARK: Easy Apply

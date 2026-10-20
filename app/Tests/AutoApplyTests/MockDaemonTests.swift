@@ -71,11 +71,12 @@ struct MockDaemonTests {
         await daemon.disconnect()
     }
 
-    @Test func needsYouStormCollapsesToSixClusters() async throws {
+    @Test func needsYouStormCollapsesToSixQuestionsAndTwoActions() async throws {
         let daemon = try await runScript(.needsYouStorm, speed: 400)
         #expect(await waitForIdleAfterRun(daemon))
         let stormClusters = daemon.world.read { $0.openClusters }.filter { c in c.jobIds.contains { MockScripts.stormJobIDs.contains($0) } }
-        #expect(stormClusters.count == 6)
+        #expect(stormClusters.count == 8)
+        #expect(stormClusters.filter(\.isAction).count == 2)
         let stormJobsInClusters = stormClusters.flatMap(\.jobIds).filter { MockScripts.stormJobIDs.contains($0) }
         #expect(stormJobsInClusters.count == 14)
         #expect(daemon.repository.read { d in d.jobs.filter { MockScripts.stormJobIDs.contains($0.id) }.allSatisfy { $0.state == .needsYou } })

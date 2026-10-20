@@ -42,6 +42,9 @@ struct RootView: View {
         }
         .navigationTitle(store.isPaused ? "Paused" : router.selection.title)
         .overlay { CommandPaletteHost() }
+        .sheet(isPresented: Binding(get: { router.isAddJobPresented }, set: { router.isAddJobPresented = $0 })) {
+            AddJobSheet(seed: router.addJobSeed)
+        }
         .overlay { ConfettiOverlay() }
         .onAppear { EasterEggs.installKonami() }
         .toastHost(store.toasts)
@@ -98,6 +101,14 @@ struct MainToolbar: ToolbarContent {
 
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
+            Button {
+                router.requestAddJob()
+            } label: {
+                Label("Add job by link", systemImage: "link.badge.plus")
+            }
+            .labelStyle(.iconOnly)
+            .help("Add a job by pasting its link (\(AppShortcut.addJobByLink.displayString))")
+
             Button {
                 Task { await store.runNow() }
             } label: {

@@ -49,6 +49,7 @@ from autoapply.enums import (
     JobSource,
     LogLevel,
     Mode,
+    QuestionKind,
     QuestionReason,
     QuestionStatus,
     RunKind,
@@ -57,6 +58,7 @@ from autoapply.enums import (
     SuggestionStatus,
 )
 from autoapply.models import (
+    choice_field_type,
     ACTIVE_STATES,
     ALLOWED_TRANSITIONS,
     MANUAL_SUBMIT_FROM,
@@ -93,7 +95,7 @@ from autoapply.models import (
 )
 
 #: Must equal MAX(version) seeded by contract/schema.sql.
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 #: Forward migrations: version -> SQL to go from (version-1) to version. Append-only.
 #: Version 1 is the baseline created by contract/schema.sql itself.
@@ -135,6 +137,7 @@ CREATE TABLE IF NOT EXISTS company_suggestions (
 CREATE UNIQUE INDEX IF NOT EXISTS ux_company_suggestions_name ON company_suggestions(normalized_name);
 CREATE INDEX IF NOT EXISTS ix_company_suggestions_status ON company_suggestions(status);
 """,
+    8: "python:_migrate_v8",
 }
 
 
@@ -190,6 +193,60 @@ def _migrate_v6(conn: sqlite3.Connection) -> None:
     except BaseException:
         conn.execute("ROLLBACK")
         raise
+
+
+def _migrate_v8(conn: sqlite3.Connection) -> None:
+    """v8: questions.kind ('question' | 'action'). Open rows are classified with the
+    deterministic classifier (account / password / CAPTCHA / verification -> action); action
+    rows leave any cluster they shared with form questions and are regrouped per
+    (action type, companies) so "Choose Password" + "Retype Password" at one company become a
+    single "create an account" item. Idempotent."""
+    conn.execute("BEGIN")
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(questions)")}
+        if "kind" not in cols:
+            conn.execute(
+                "ALTER TABLE questions ADD COLUMN kind TEXT NOT NULL DEFAULT 'question' CHECK (kind IN ('question','action'))"
+            )
+        reclassify_open_questions(conn)
+        conn.execute("INSERT INTO schema_version(version) VALUES (8)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def action_group_key(conn: sqlite3.Connection, canonical_question: str, reason: str | None, job_ids: Iterable[int]) -> tuple[str, str]:
+    """Cluster key shared by action items that one "do it, then retry" resolves: same action
+    type at the same companies."""
+    from autoapply.question_kind import action_subtype
+
+    ids = list(job_ids)
+    companies: list[int] = []
+    if ids:
+        qmarks = ",".join("?" * len(ids))
+        companies = sorted({int(r[0]) for r in conn.execute(f"SELECT company_id FROM jobs WHERE id IN ({qmarks})", ids)})
+    return f"action:{action_subtype(canonical_question, reason)}", ",".join(map(str, companies))
+
+
+def reclassify_open_questions(conn: sqlite3.Connection) -> int:
+    """Mark open questions that read as agent actions as ``kind = 'action'`` and give them
+    their own clusters (never shared with form questions). Returns how many rows changed.
+    Runs inside the caller's transaction."""
+    from autoapply.question_kind import classify
+
+    rows = conn.execute("SELECT id, canonical_question, cluster_id, reason, kind, job_ids FROM questions WHERE status = 'open' ORDER BY id").fetchall()
+    changed = 0
+    groups: dict[tuple[str, str], str] = {}
+    for r in rows:
+        already = r["kind"] == QuestionKind.ACTION.value
+        if already or classify(r["canonical_question"], r["reason"]) is QuestionKind.ACTION:
+            key = action_group_key(conn, r["canonical_question"], r["reason"], json.loads(r["job_ids"]))
+            cid = groups.setdefault(key, r["cluster_id"] if already else new_id())
+            if not already or cid != r["cluster_id"]:
+                changed += 1
+                conn.execute("UPDATE questions SET kind = 'action', cluster_id = ? WHERE id = ?", (cid, r["id"]))
+    return changed
 
 
 # =====================================================================================
@@ -1675,11 +1732,20 @@ def add_question(
     suggested_answer: str | None = None,
     suggested_confidence: float | None = None,
     suggested_note: str | None = None,
+    kind: QuestionKind | str | None = None,
 ) -> tuple[Question, bool]:
     """Park ``job_id`` on a question. If an OPEN question with the same text exists, the job
     is added to it (options unioned) and ``created`` is False. Otherwise a new row is created
-    in ``cluster_id`` (a fresh cluster when None). Returns ``(question, created)``."""
-    opts = list(dict.fromkeys(options))
+    in ``cluster_id`` (a fresh cluster when None). Returns ``(question, created)``.
+
+    ``kind``: ``question`` / ``action``; None classifies the wording (autoapply.question_kind).
+    An explicit ``action`` always wins; an explicit ``question`` is kept (callers that pass it
+    know the user must type a value, e.g. a live email security code)."""
+    from autoapply.question_kind import classify
+
+    qkind = QuestionKind(kind) if kind is not None else classify(canonical_question, reason)
+    opts = list(dict.fromkeys(str(o) for o in options if str(o).strip()))
+    field_type = choice_field_type(field_type, opts) if qkind is QuestionKind.QUESTION else FieldType(field_type)
     with transaction(conn):
         row = _one(conn, "SELECT * FROM questions WHERE canonical_question = ? COLLATE NOCASE AND status = 'open'", (canonical_question,))
         if row is not None:
@@ -1687,17 +1753,22 @@ def add_question(
             if job_id not in jobs:
                 jobs.append(job_id)
             merged = list(dict.fromkeys([*json.loads(row["options"]), *opts]))
-            conn.execute("UPDATE questions SET job_ids = ?, options = ? WHERE id = ?", (_j(jobs), _j(merged), row["id"]))
-            if suggested_answer and not row["suggested_answer"]:
+            ft = choice_field_type(row["field_type"], merged) if row["kind"] != QuestionKind.ACTION.value else FieldType(row["field_type"])
+            conn.execute("UPDATE questions SET job_ids = ?, options = ?, field_type = ? WHERE id = ?",
+                         (_j(jobs), _j(merged), ft.value, row["id"]))
+            if qkind is QuestionKind.ACTION and row["kind"] != QuestionKind.ACTION.value:
+                conn.execute("UPDATE questions SET kind = 'action', suggested_answer = NULL WHERE id = ?", (row["id"],))
+            elif suggested_answer and not row["suggested_answer"] and row["kind"] != QuestionKind.ACTION.value:
                 conn.execute("UPDATE questions SET suggested_answer = ?, suggested_confidence = ?, suggested_note = ? WHERE id = ?",
                              (suggested_answer, suggested_confidence, suggested_note or None, row["id"]))
             return get_question(conn, int(row["id"])), False
         cur = conn.execute(
             "INSERT INTO questions(canonical_question, cluster_id, job_ids, field_type, options, never_guess_key, reason, embedding, embedding_model, "
-            "suggested_answer, suggested_confidence, suggested_note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "suggested_answer, suggested_confidence, suggested_note, kind, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (canonical_question, cluster_id or new_id(), _j([job_id]), FieldType(field_type).value, _j(opts), never_guess_key,
              QuestionReason(reason).value, pack_embedding(embedding) if embedding is not None else None, embedding_model,
-             suggested_answer or None, suggested_confidence, suggested_note or None, now_ts()),
+             None if qkind is QuestionKind.ACTION else (suggested_answer or None), suggested_confidence,
+             suggested_note or None, qkind.value, now_ts()),
         )
     return get_question(conn, int(cur.lastrowid)), True
 
@@ -1754,7 +1825,17 @@ def _cluster_from_rows(conn: sqlite3.Connection, rows: list[Question]) -> Questi
         ]
     ng_key = next((q.never_guess_key for q in rows if q.never_guess_key), None)
     reason = QuestionReason.NEVER_GUESS if ng_key else first.reason
+    is_action = all(q.kind is QuestionKind.ACTION for q in rows)
+    if is_action:
+        from autoapply.question_kind import action_subtype
+
+        # the most specific wording decides the task ("Account required…" over "Retype Password")
+        types = [action_subtype(q.canonical_question, q.reason) for q in rows]
+        atype: str | None = next((t for t in ("captcha", "account", "verification") if t in types), types[0])
+    else:
+        atype = None
     return QuestionCluster(
+        kind=QuestionKind.ACTION.value if is_action else QuestionKind.QUESTION.value, action_type=atype,
         cluster_id=first.cluster_id, canonical_question=first.canonical_question, field_type=first.field_type,
         options=options, never_guess_key=ng_key, reason=reason, question_ids=[q.id for q in rows],
         variants=list(dict.fromkeys(q.canonical_question for q in rows)), job_ids=job_ids,
@@ -2040,6 +2121,7 @@ def compute_counts(conn: sqlite3.Connection, now: datetime | None = None) -> Cou
     return Counts(
         queued=by_state.get("queued", 0),
         needs_you_clusters=len(clusters),
+        needs_you_actions=sum(1 for c in clusters if c.kind == QuestionKind.ACTION.value),
         needs_you_jobs=len({j for c in clusters for j in c.job_ids}),
         awaiting_review=by_state.get("awaiting_review", 0),
         easy_apply_open=int(conn.execute("SELECT COUNT(*) FROM easy_apply WHERE done = 0 AND dismissed = 0").fetchone()[0]),

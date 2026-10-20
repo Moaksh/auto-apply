@@ -67,6 +67,16 @@ struct ReviewModelTests {
         #expect(model.selection == [2, 3])
     }
 
+    @Test func approveSendsOneJobPerCompanyAndKeepsTheRest() async {
+        let (store, daemon, model) = await setup()
+        let stripeID = store.jobs.job(id: 1)!.companyID
+        store.jobs.mutate(applicationID: 2) { $0.companyID = stripeID; $0.company = "Stripe" }
+        await model.approve([1, 2, 3])
+        #expect(Set(approvedIDs(daemon)) == [1, 3])
+        #expect(store.jobs.job(id: 2)?.state == .awaitingReview)
+        #expect(store.toasts.current?.message.contains("Kept 1 in Review") == true)
+    }
+
     @Test func includeFlaggedApprovesEverything() async {
         let (_, daemon, model) = await setup()
         model.toggleSelection(1)

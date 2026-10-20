@@ -75,6 +75,92 @@ enum JobDetailRules {
         }
     }
 
+    // MARK: Header actions
+
+    /// State-aware buttons in the header (what the user can do about this job right now).
+    enum HeaderAction: Hashable, Sendable {
+        case approve
+        case skip
+        case retry
+        case applyAnyway
+        case resolveSent
+        case resolveNotSent
+
+        var title: String {
+            switch self {
+            case .approve: "Approve & submit"
+            case .skip: "Skip"
+            case .retry: "Retry"
+            case .applyAnyway: "Apply anyway"
+            case .resolveSent: "It was sent"
+            case .resolveNotSent: "It wasn't sent"
+            }
+        }
+
+        var symbol: String? {
+            switch self {
+            case .approve: "paperplane.fill"
+            case .retry: "arrow.clockwise"
+            case .applyAnyway: "arrow.uturn.forward"
+            case .skip, .resolveSent, .resolveNotSent: nil
+            }
+        }
+
+        /// At most one accent-filled button per state; "was it sent?" has no default answer.
+        var isPrimary: Bool {
+            switch self {
+            case .approve, .retry, .applyAnyway: true
+            case .skip, .resolveSent, .resolveNotSent: false
+            }
+        }
+
+        var shortcut: AppShortcut? { self == .approve ? .submit : nil }
+
+        /// Sends a daemon command (disabled while disconnected).
+        var needsDaemon: Bool { true }
+
+        var help: String {
+            switch self {
+            case .approve: "Submit this application as filled (\(AppShortcut.submit.displayString))"
+            case .skip: "Don't submit; pick a reason"
+            case .retry: "Queue this application to be filled again"
+            case .applyAnyway: "Override the skip and queue this job for the next run"
+            case .resolveSent: "The form was submitted; mark it as applied"
+            case .resolveNotSent: "The form wasn't submitted; mark it as failed"
+            }
+        }
+    }
+
+    /// awaiting_review → Approve & submit + Skip; failed → Retry; skipped → Apply anyway;
+    /// unknown_verify → It was sent / It wasn't sent. Actions that need an application row are
+    /// omitted when there is none. needs_you has none: its questions are answered in the
+    /// Questions tab.
+    static func headerActions(for job: JobItem) -> [HeaderAction] {
+        let hasApp = job.applicationID != nil
+        switch job.state {
+        case .awaitingReview: return hasApp ? [.approve, .skip] : []
+        case .failed: return hasApp ? [.retry] : []
+        case .skipped: return hasApp ? [.applyAnyway] : []
+        case .unknownVerify: return hasApp ? [.resolveSent, .resolveNotSent] : []
+        default: return []
+        }
+    }
+
+    /// Quiet status text shown where a button would be ("Queued · next run").
+    static func headerNote(for job: JobItem) -> String? {
+        job.state == .queued ? "Queued · next run" : nil
+    }
+
+    /// Open Needs You clusters that block this job, in inbox (impact) order.
+    static func openClusters(forJob jobID: Int, in clusters: [QuestionCluster]) -> [QuestionCluster] {
+        clusters.filter { $0.jobIds.contains(jobID) }
+    }
+
+    /// The status menu only offers board moves; state actions are header buttons.
+    static func menuActions(for job: JobItem) -> [StatusAction] {
+        statusActions(for: job).filter { if case .setStatus = $0 { true } else { false } }
+    }
+
     // MARK: Copy all
 
     /// ⌘⇧C: all answers as formatted text.
@@ -213,9 +299,131 @@ final class JobDetailLoader {
         }
     }
 
+    /// Inline ✎ edit (awaiting review). Optimistic, like the Review queue: the edit shows with
+    /// "you" provenance at once; the DB stream reconciles, and a failure rolls back.
+    func editAnswer(_ answer: ApplicationAnswerItem, to text: String, store: AppStore) async {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != answer.answer else { return }
+        let before = answers
+        if let i = answers.firstIndex(where: { $0.id == answer.id }) {
+            answers[i].answer = trimmed
+            answers[i].origin = .user
+            answers[i].confidence = 1
+        }
+        let result = await store.perform(.editApplicationAnswer(EditApplicationAnswerPayload(applicationAnswerId: answer.id, answer: trimmed)))
+        if case .failure = result { answers = before }
+    }
+
     func copyAll(job: JobItem) {
         let text = JobDetailRules.copyAllText(job: job, answers: answers)
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+    }
+}
+
+/// Runs the header's state actions for one job and owns their inline prompts (the Review
+/// queue's low-confidence safeguard and skip-reason picker). The user stays on the page: the
+/// state chip updates and a toast confirms.
+@MainActor
+@Observable
+final class JobDetailActions {
+    enum Prompt: Equatable, Sendable {
+        case none
+        /// "This one has 2 answers that need a look. Approve anyway?" (`loading`: Q&A not in yet).
+        case confirmFlagged(flagged: Int, loading: Bool)
+        case skipReason
+    }
+
+    var prompt: Prompt = .none
+    /// An action is waiting on the daemon (buttons disable; a second ⌘↵ is ignored).
+    private(set) var inFlight = false
+    /// Inline editors open on the page (answer ✎, notes). ⌘↵ approve is held while typing.
+    private(set) var openEditors = 0
+
+    var isEditing: Bool { openEditors > 0 }
+
+    init() {}
+
+    func editingChanged(_ editing: Bool) {
+        openEditors = max(0, openEditors + (editing ? 1 : -1))
+    }
+
+    /// The job left the state the prompt was about (approved elsewhere, re-filled, …).
+    func reset() { prompt = .none }
+
+    func cancelPrompt() { prompt = .none }
+
+    // MARK: Approve (with the safeguard)
+
+    /// Button / ⌘↵ / palette. Asks inline when an answer needs a look or the Q&A hasn't loaded.
+    func requestApprove(job: JobItem, answers: [ApplicationAnswerItem], answersLoaded: Bool, store: AppStore) async {
+        guard !inFlight, !isEditing, job.state == .awaitingReview, job.applicationID != nil else { return }
+        if ReviewSafeguard.needsLook(answers: answers, loaded: answersLoaded) {
+            prompt = .confirmFlagged(flagged: ReviewSafeguard.flaggedAnswers(answers).count, loading: !answersLoaded)
+        } else {
+            await approve(job: job, store: store)
+        }
+    }
+
+    /// "Approve anyway" in the safeguard prompt.
+    func confirmApprove(job: JobItem, store: AppStore) async {
+        guard case .confirmFlagged = prompt else { return }
+        prompt = .none
+        await approve(job: job, store: store)
+    }
+
+    private func approve(job: JobItem, store: AppStore) async {
+        // Re-read: another window (or the Review queue) may have approved it meanwhile.
+        guard !inFlight, let current = store.jobs.job(id: job.id), current.state == .awaitingReview,
+              let appID = current.applicationID else { return }
+        inFlight = true
+        defer { inFlight = false }
+        if await store.approve(applicationIDs: [appID]) {
+            store.toasts.show("Approved · submitting", symbol: "paperplane.fill", style: .success)
+        }
+    }
+
+    // MARK: Skip
+
+    func requestSkip(job: JobItem) {
+        guard !inFlight, job.state == .awaitingReview, job.applicationID != nil else { return }
+        prompt = .skipReason
+    }
+
+    func skip(job: JobItem, reason: ReviewSkipReason, store: AppStore) async {
+        guard case .skipReason = prompt, let appID = job.applicationID else { return }
+        prompt = .none
+        inFlight = true
+        defer { inFlight = false }
+        if await store.reject(applicationID: appID, reason: reason.rawValue) {
+            store.toasts.show("Skipped · \(reason.title)", symbol: "arrow.uturn.right", style: .info)
+        }
+    }
+
+    // MARK: Other states
+
+    func retry(job: JobItem, store: AppStore) async {
+        guard !inFlight, let appID = job.applicationID else { return }
+        inFlight = true
+        defer { inFlight = false }
+        if await store.retryApplication(applicationID: appID) {
+            store.toasts.show("Retrying · queued for the next run", symbol: "arrow.clockwise", style: .success)
+        }
+    }
+
+    func applyAnyway(job: JobItem, store: AppStore) async {
+        guard !inFlight, let appID = job.applicationID else { return }
+        inFlight = true
+        defer { inFlight = false }
+        await store.applyAnyway(applicationID: appID) // shows its own toast
+    }
+
+    func resolve(job: JobItem, sent: Bool, store: AppStore) async {
+        guard !inFlight, let appID = job.applicationID else { return }
+        inFlight = true
+        defer { inFlight = false }
+        if await store.resolveUnknown(applicationID: appID, submitted: sent) {
+            store.toasts.show(sent ? "Marked as sent" : "Marked as not sent", symbol: "checkmark", style: .success)
+        }
     }
 }

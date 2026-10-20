@@ -131,6 +131,18 @@ class QuestionReason(StrEnum):
     ALWAYS_ASK = "always_ask"
 
 
+class QuestionKind(StrEnum):
+    """What a Needs-You item asks of the user (``questions.kind``).
+
+    ``question``: a value to write into an application field (answered with text, may be saved
+    to memory). ``action``: the agent is blocked and the user must DO something (create an
+    account / sign in, solve a CAPTCHA, finish a verification) and then retry or skip the jobs.
+    Actions are never saved to answer memory and never clustered with questions."""
+
+    QUESTION = "question"
+    ACTION = "action"
+
+
 class AskConfidence(StrEnum):
     STRICT = "strict"
     BALANCED = "balanced"

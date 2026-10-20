@@ -53,7 +53,8 @@ enum MockCommandHandler {
                 return Handled(reply: error(.notFound, "cluster \(p.clusterId) is not open"))
             }
             var answerID: Int?
-            if p.saveToMemory && !p.saveToProfile {
+            // Agent actions ("Done, retry") never reach answer memory or the profile.
+            if p.saveToMemory && !p.saveToProfile && !cluster.isAction {
                 answerID = world.read { $0.nextMemoryID }
                 world.mutate { $0.nextMemoryID += 1 }
                 let id = answerID!
@@ -63,7 +64,7 @@ enum MockCommandHandler {
                                                                source: "user", updatedAt: Date()))
                 }
             }
-            if p.saveToProfile, let key = cluster.neverGuessKey {
+            if p.saveToProfile, !cluster.isAction, let key = cluster.neverGuessKey {
                 world.repository.update { data in
                     data.neverGuess = (try? merge(data.neverGuess, patch: [key: .string(p.answer)])) ?? data.neverGuess
                 }
@@ -249,6 +250,27 @@ enum MockCommandHandler {
                 return Handled(reply: error(.illegalTransition, "application \(p.applicationId) is not skipped", applicationID: p.applicationId))
             }
             return Handled(reply: ack()) { $0.transition(applicationID: p.applicationId, to: .queued, reason: "user_apply_anyway", actor: .user) }
+
+        case .addJobUrl(let p):
+            if let problem = AddJobLink.problem(p.url) { return Handled(reply: error(.invalidPayload, problem)) }
+            let url = AddJobLink.url(p.url)?.absoluteString ?? p.url
+            if let existing = world.repository.read({ $0.jobs.first { $0.applyURL == url } }) {
+                return Handled(reply: ack(["job_id": .int(existing.id), "application_id": .int(existing.applicationID ?? existing.id),
+                                           "created": .bool(false), "state": .string(existing.state.rawValue),
+                                           "title": .string(existing.title), "company": .string(existing.company), "started": .bool(false)]))
+            }
+            let id = world.nextJobID()
+            let host = AddJobLink.url(p.url)?.host() ?? "example.com"
+            let company = p.company ?? host.split(separator: ".").first.map { $0.capitalized } ?? "Company"
+            let title = p.title ?? "Software Engineer"
+            let job = JobItem(id: id, applicationID: id, companyID: id, company: company, title: title, location: nil, remote: nil,
+                              source: .manual, ats: .other, applyURL: url, sourceURL: url, discoveredAt: Date())
+            return Handled(reply: ack(["job_id": .int(id), "application_id": .int(id), "created": .bool(true), "state": .string("queued"),
+                                       "title": .string(title), "company": .string(company), "started": .bool(false)])) { world in
+                world.discover(job)
+                _ = world.transition(applicationID: id, to: .scored, reason: "user_added_link", actor: .user)
+                _ = world.transition(applicationID: id, to: .queued, reason: "user_added_link", actor: .user)
+            }
 
         case .updateJobNotes(let p):
             let found: Bool = world.repository.update { data in

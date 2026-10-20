@@ -82,6 +82,58 @@ enum MockFrames {
         return out as Data
     }
 
+    /// A full-page "pre-submit" PNG whose fields sit at the answers' bboxes (so Review / Job
+    /// detail hover-highlights line up), written once under the temp dir. Returns its path, or
+    /// nil if it couldn't be written.
+    static func preSubmitScreenshot(company: String, answers: [ApplicationAnswerItem], name: String) -> String? {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("AutoApplyMock/screenshots", isDirectory: true)
+        let url = dir.appendingPathComponent("\(name).png")
+        if FileManager.default.fileExists(atPath: url.path) { return url.path }
+        let boxes = answers.compactMap(\.bbox)
+        let width = 720
+        let height = Int((boxes.map(\.maxY).max() ?? 600) + 96)
+        let space = CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: space, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+        let w = CGFloat(width), h = CGFloat(height)
+        ctx.translateBy(x: 0, y: h)
+        ctx.scaleBy(x: 1, y: -1)
+        ctx.setFillColor(CGColor(gray: 0.98, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: w, height: h))
+        let hue = hueFor(company)
+        ctx.setFillColor(CGColor(srgbRed: hue.0, green: hue.1, blue: hue.2, alpha: 1))
+        ctx.fill(CGRect(x: 0, y: 0, width: w, height: 84))
+        ctx.setFillColor(CGColor(gray: 1, alpha: 0.9))
+        ctx.fill(CGRect(x: 40, y: 34, width: 200, height: 16))
+        for (i, box) in boxes.enumerated() {
+            ctx.setFillColor(CGColor(gray: 0.55, alpha: 1))
+            ctx.fill(CGRect(x: box.minX, y: box.minY - 16, width: CGFloat(110 + (i * 37) % 120), height: 8))
+            ctx.setFillColor(CGColor(gray: 1, alpha: 1))
+            ctx.fill(box)
+            ctx.setStrokeColor(CGColor(gray: 0.82, alpha: 1))
+            ctx.setLineWidth(1)
+            ctx.stroke(box)
+            ctx.setFillColor(CGColor(gray: 0.25, alpha: 1))
+            ctx.fill(CGRect(x: box.minX + 12, y: box.midY - 4, width: CGFloat(90 + (i * 61) % 320), height: 8))
+        }
+        // Submit button
+        ctx.setFillColor(CGColor(srgbRed: hue.0, green: hue.1, blue: hue.2, alpha: 1))
+        ctx.fill(CGRect(x: 40, y: h - 64, width: 140, height: 36))
+
+        guard let image = ctx.makeImage() else { return nil }
+        let out = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(out as CFMutableData, UTType.png.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(dest, image, nil)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        do {
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try (out as Data).write(to: url, options: .atomic)
+            return url.path
+        } catch {
+            return nil
+        }
+    }
+
     private static func hueFor(_ name: String) -> (CGFloat, CGFloat, CGFloat) {
         let palette: [(CGFloat, CGFloat, CGFloat)] = [(0.39, 0.36, 0.95), (0.18, 0.62, 0.72), (0.12, 0.13, 0.2), (0.85, 0.36, 0.5), (0.2, 0.5, 0.35)]
         var hash: UInt64 = 1469598103934665603

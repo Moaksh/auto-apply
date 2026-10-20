@@ -127,6 +127,7 @@ struct PaletteItem: Identifiable, Hashable, Sendable {
         case setting(SettingsTab, String)
         case action(AppAction)
         case easterEgg(String)
+        case addJobLink(String)
     }
 
     var id: String
@@ -168,6 +169,11 @@ final class PaletteModel {
         if scope == .all { items += storyItems(text) }
         if scope == .all || scope == .settings { items += settingItems(text) }
         if scope == .all || scope == .actions { items += actionItems(text) }
+        if AddJobLink.isLink(text) {
+            let host = AddJobLink.url(text)?.host() ?? text
+            items.append(PaletteItem(id: "addjob", section: .actions, kind: .addJobLink(text), title: "Add this job",
+                                     subtitle: host, symbol: "link.badge.plus", trailing: AppShortcut.addJobByLink.displayString, score: 20_000))
+        }
         if let egg = EasterEggs.phrase(for: text) {
             items.append(PaletteItem(id: "egg.\(egg.trigger)", section: .actions, kind: .easterEgg(egg.trigger), title: egg.title,
                                      subtitle: "Psst…", symbol: egg.symbol, trailing: nil, score: 10_000))
@@ -224,11 +230,16 @@ final class PaletteModel {
 
     private func questionItems(_ text: String) -> [PaletteItem] {
         store.inbox.clusters.compactMap { c in
-            let s = text.isEmpty ? 0 : (FuzzyMatcher.score(text, c.canonicalQuestion) ?? c.variants.compactMap { FuzzyMatcher.score(text, $0) }.max())
+            let base = text.isEmpty ? 0 : (FuzzyMatcher.score(text, c.canonicalQuestion) ?? c.variants.compactMap { FuzzyMatcher.score(text, $0) }.max())
+            let title = c.isAction ? InboxActionCopy.title(c) : c.canonicalQuestion
+            let s = base ?? (c.isAction && !text.isEmpty ? FuzzyMatcher.score(text, title) : nil)
             guard let s else { return nil }
-            return PaletteItem(id: "q.\(c.clusterId)", section: .questions, kind: .question(c.clusterId), title: c.canonicalQuestion,
-                               subtitle: nil, symbol: "hand.raised.fill", trailing: C3Format.plural(c.jobCount, "job"),
-                               statusKind: .needsYou, score: s + c.jobCount)
+            // Agent blockers rank above questions and read as tasks ("To do").
+            return PaletteItem(id: "q.\(c.clusterId)", section: .questions, kind: .question(c.clusterId), title: title,
+                               subtitle: c.isAction ? "To do · agent is blocked" : nil,
+                               symbol: c.isAction ? InboxActionCopy.symbol(c) : "text.bubble",
+                               trailing: C3Format.plural(c.jobCount, "job"),
+                               statusKind: .needsYou, score: s + c.jobCount + (c.isAction ? 100 : 0))
         }
     }
 
@@ -254,6 +265,7 @@ final class PaletteModel {
 
     private func actionItems(_ text: String) -> [PaletteItem] {
         AppAction.paletteActions.compactMap { action in
+            guard action.isAvailable(in: store) else { return nil }
             let title = action.title(in: store)
             let s = text.isEmpty ? 0 : FuzzyMatcher.score(text, title)
             guard let s else { return nil }
@@ -295,6 +307,9 @@ final class PaletteModel {
         case .action(let action):
             router.isPalettePresented = false
             await store.perform(action)
+            return true
+        case .addJobLink(let url):
+            router.requestAddJob(url: url)
             return true
         case .easterEgg(let trigger):
             if let egg = EasterEggs.phrases.first(where: { $0.trigger == trigger }) { EasterEggs.play(egg, toasts: store.toasts) }

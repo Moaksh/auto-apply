@@ -29,6 +29,10 @@ struct AppCommands: Commands {
             Button(AppShortcut.commandPalette.title) { store.router.togglePalette() }.keyboardShortcut(.commandPalette)
         }
 
+        CommandGroup(replacing: .newItem) {
+            Button(AppShortcut.addJobByLink.title) { store.router.requestAddJob() }.keyboardShortcut(.addJobByLink)
+        }
+
         CommandMenu("Agent") {
             Button(store.isPaused ? "Resume Agent" : "Pause Agent") {
                 Haptics.levelChange()

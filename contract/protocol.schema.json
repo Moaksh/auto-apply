@@ -29,6 +29,7 @@
     "retry_application",
     "resolve_unknown",
     "apply_anyway",
+    "add_job_url",
     "update_job_notes",
     "set_application_resume",
     "mark_easy_apply_done",
@@ -242,6 +243,54 @@
       ],
       "title": "Actor",
       "type": "string"
+    },
+    "AddJobUrlPayload": {
+      "additionalProperties": false,
+      "description": "Add a job from any apply link (manual source) and queue it as a user choice.",
+      "properties": {
+        "url": {
+          "description": "Job / apply page URL (http or https; scheme optional).",
+          "title": "Url",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Override the title read from the page.",
+          "title": "Title"
+        },
+        "company": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Override the company read from the page.",
+          "title": "Company"
+        },
+        "apply_now": {
+          "default": true,
+          "description": "Start filling right away (else it waits for the next run).",
+          "title": "Apply Now",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "title": "AddJobUrlPayload",
+      "type": "object"
     },
     "AddResumeVariantPayload": {
       "additionalProperties": false,
@@ -742,6 +791,12 @@
         "needs_you_clusters": {
           "default": 0,
           "title": "Needs You Clusters",
+          "type": "integer"
+        },
+        "needs_you_actions": {
+          "default": 0,
+          "description": "How many of needs_you_clusters are agent actions (kind 'action').",
+          "title": "Needs You Actions",
           "type": "integer"
         },
         "needs_you_jobs": {
@@ -3237,6 +3292,25 @@
           "default": null,
           "description": "What the draft could not cover from the user's facts (shown beside it, never inside it).",
           "title": "Suggested Note"
+        },
+        "kind": {
+          "default": "question",
+          "description": "'question': type a value for an application field. 'action': the agent is blocked and the user must do something (create an account / sign in, solve a CAPTCHA, finish a verification), then retry or skip the jobs; answer it with answer_question (save_to_memory false; the text is ignored). Unknown values must be treated as 'question'.",
+          "title": "Kind",
+          "type": "string"
+        },
+        "action_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "For kind 'action': 'account' | 'captcha' | 'verification' | 'other' (unknown values -> 'other').",
+          "title": "Action Type"
         }
       },
       "required": [
@@ -3771,6 +3845,7 @@
           "default": {
             "queued": 0,
             "needs_you_clusters": 0,
+            "needs_you_actions": 0,
             "needs_you_jobs": 0,
             "awaiting_review": 0,
             "easy_apply_open": 0,
@@ -5028,6 +5103,32 @@
       ],
       "additionalProperties": false
     },
+    "CommandAddJobUrl": {
+      "type": "object",
+      "title": "Command: add_job_url",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "add_job_url"
+        },
+        "payload": {
+          "$ref": "#/$defs/AddJobUrlPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
     "CommandUpdateJobNotes": {
       "type": "object",
       "title": "Command: update_job_notes",
@@ -6106,6 +6207,9 @@
         },
         {
           "$ref": "#/$defs/CommandApplyAnyway"
+        },
+        {
+          "$ref": "#/$defs/CommandAddJobUrl"
         },
         {
           "$ref": "#/$defs/CommandUpdateJobNotes"

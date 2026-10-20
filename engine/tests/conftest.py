@@ -20,6 +20,14 @@ from autoapply.llm.provider import FakeLLMProvider
 from autoapply.paths import Paths, get_paths
 
 
+@pytest.fixture(autouse=True)
+def _no_starter_watchlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pipelines start on the fixtures' own watchlist, not the shipped starter boards."""
+    from autoapply.discovery import starter
+
+    monkeypatch.setattr(starter, "AUTO_SEED", False)
+
+
 @pytest.fixture
 def autoapply_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Paths:
     home = tmp_path / "AutoApplyHome"

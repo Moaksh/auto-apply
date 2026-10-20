@@ -31,7 +31,17 @@ from autoapply.answers.resolver import AnswerResolver, set_inbox_answers
 from autoapply.answers.textnorm import COUNTRY_ALIASES, extract_country, normalize_question, yes_no
 from autoapply.apply.base import Adapter, ApplyContext, EmitFn, HarvestBlocked, PausedError, UnresolvedField, select_adapter
 from autoapply.config import NEVER_GUESS_KEYS
-from autoapply.enums import Actor, AnswerOrigin, AnswerSource, AppState, DaemonActivity, FieldType, QuestionReason, QuestionStatus
+from autoapply.enums import (
+    Actor,
+    AnswerOrigin,
+    AnswerSource,
+    AppState,
+    DaemonActivity,
+    FieldType,
+    QuestionKind,
+    QuestionReason,
+    QuestionStatus,
+)
 from autoapply.llm.provider import LLMProvider
 from autoapply.models import (
     FormQuestion,
@@ -42,6 +52,7 @@ from autoapply.models import (
     StatePayload,
 )
 from autoapply.paths import get_paths
+from autoapply.question_kind import resolve_kind
 
 log = logging.getLogger(__name__)
 
@@ -174,14 +185,24 @@ def park_unresolved(
     job_country = extract_country(job.location, location_mode=True) if job.location else None
     for item in unresolved:
         uf = item.to_unresolved() if isinstance(item, NeedsUser) else item
-        label = inbox_label(uf.question.label, uf.never_guess_key, job, company_name, uf.question.description)
-        cluster_id = memory.find_cluster_for(label, uf.never_guess_key, threshold=CLUSTER_THRESHOLD, country=job_country)
+        kind = resolve_kind(uf.question.label, uf.reason, getattr(uf, "kind", None))
+        if kind is QuestionKind.ACTION:
+            # An agent blocker: grouped only with the same blocker at the same company, never with
+            # form questions, no never-guess key and no draft answer.
+            label = uf.question.label.strip()
+            cluster_id = memory.find_action_cluster_for(label, uf.reason, job_id)
+            ng_key, suggested, confidence = None, None, None
+        else:
+            label = inbox_label(uf.question.label, uf.never_guess_key, job, company_name, uf.question.description)
+            cluster_id = memory.find_cluster_for(label, uf.never_guess_key, threshold=CLUSTER_THRESHOLD, country=job_country)
+            ng_key, suggested, confidence = uf.never_guess_key, uf.suggested_answer, uf.confidence
         vec = memory.embed_one(label)
         q, was_created = db.add_question(
             conn, canonical_question=label, job_id=job_id, cluster_id=cluster_id, field_type=uf.question.field_type,
-            options=uf.question.options, never_guess_key=uf.never_guess_key, reason=QuestionReason(uf.reason),
+            options=uf.question.options, never_guess_key=ng_key, reason=QuestionReason(uf.reason),
             embedding=vec, embedding_model=memory.embedder.model_name,
-            suggested_answer=uf.suggested_answer, suggested_confidence=uf.confidence, suggested_note=uf.note,
+            suggested_answer=suggested, suggested_confidence=confidence, suggested_note=uf.note if suggested else None,
+            kind=kind,
         )
         if was_created:
             created.append(q.id)
@@ -476,6 +497,8 @@ def answer_cluster(
     cluster = db.get_cluster(conn, cluster_id)
     if cluster is None:
         raise db.NotFound(f"open cluster {cluster_id!r} not found")
+    if cluster.kind == QuestionKind.ACTION.value:
+        return complete_action(conn, cluster_id)
     memory = memory or AnswerMemory(conn)
     per_job = dict(per_job_answers or {})
     questions = db.list_questions(conn, cluster_id=cluster_id, status=QuestionStatus.OPEN)
@@ -522,6 +545,24 @@ def answer_cluster(
             app = db.get_application_by_job(conn, jid)
             if app.state is AppState.NEEDS_YOU:
                 outcome.transitions.append(db.transition(conn, app.id, AppState.QUEUED, reason="answered", actor=Actor.USER))
+    return outcome
+
+
+def complete_action(conn: sqlite3.Connection, cluster_id: str) -> ClusterOutcome:
+    """"Done, retry": the user did the blocking step (created the account / signed in in the
+    agent's Chrome, solved the CAPTCHA, verified the email). Nothing is written to answer memory,
+    the profile or the per-job answers; the action is resolved and its jobs go back to the queue
+    (those still waiting on other open questions stay in needs_you)."""
+    cluster = db.get_cluster(conn, cluster_id)
+    if cluster is None:
+        raise db.NotFound(f"open cluster {cluster_id!r} not found")
+    outcome = ClusterOutcome(cluster_id=cluster_id, status="answered", job_ids=list(cluster.job_ids))
+    with db.transaction(conn):
+        job_ids = db.resolve_cluster(conn, cluster_id, status=QuestionStatus.ANSWERED, answer_text="(done by you)")
+        for jid in db.jobs_without_open_questions(conn, job_ids):
+            app = db.get_application_by_job(conn, jid)
+            if app.state is AppState.NEEDS_YOU:
+                outcome.transitions.append(db.transition(conn, app.id, AppState.QUEUED, reason="user_done_action", actor=Actor.USER))
     return outcome
 
 
@@ -602,7 +643,7 @@ def auto_resolve_known(conn: sqlite3.Connection) -> list[ClusterOutcome]:
     ng = db.get_never_guess(conn)
     outcomes: list[ClusterOutcome] = []
     for cluster in db.list_open_clusters(conn):
-        if cluster.reason is QuestionReason.CAPTCHA or not cluster.job_ids:
+        if cluster.reason is QuestionReason.CAPTCHA or cluster.kind == QuestionKind.ACTION.value or not cluster.job_ids:
             continue
         q = FormQuestion(key="auto", label=form_label(cluster.canonical_question), field_type=cluster.field_type,
                          options=list(cluster.options), required=True)

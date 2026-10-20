@@ -64,10 +64,12 @@ from autoapply.answers.resolver import AnswerResolver, ResolvedAnswer, profile_a
 from autoapply.answers.resume_picker import pick_resume
 from autoapply.answers.textnorm import match_option, normalize_question, yes_no
 from autoapply.apply.base import ApplyContext, FillResult, HarvestBlocked, PausedError, SubmitResult, UnresolvedField
-from autoapply.enums import AnswerOrigin, AppState, Ats, FieldType, Mode, QuestionReason
+from autoapply.enums import AnswerOrigin, AppState, Ats, FieldType, Mode, QuestionKind, QuestionReason
 from autoapply.llm.provider import AgentSDKProvider, TokenUsage
-from autoapply.models import AgentStepPayload, ApplicationAnswer, FormQuestion, Job, now_ts
+from autoapply.models import AgentStepPayload, ApplicationAnswer, FormQuestion, Job, choice_field_type, now_ts
 from autoapply.paths import get_paths
+from autoapply.question_kind import classify as classify_kind
+from autoapply.question_kind import resolve_kind
 from autoapply.workers import current_slot
 
 log = logging.getLogger(__name__)
@@ -497,8 +499,15 @@ _ASK_SCHEMA = {
     "properties": {
         "question": {"type": "string"},
         "field_type": {"type": "string", "enum": [f.value for f in FieldType]},
-        "options": {"type": "array", "items": {"type": "string"}},
+        "options": {"type": "array", "items": {"type": "string"},
+                    "description": "Every choice the form offers for this field (dropdown / radio / scale), exactly as shown."},
         "reason": {"type": "string", "enum": ["unknown", "low_confidence"]},
+        "kind": {
+            "type": "string", "enum": ["question", "action"],
+            "description": "'question' = a value to write into a form field. 'action' = you are blocked and the user "
+                           "must DO something (create an account / sign in, solve a CAPTCHA, finish an email/SMS "
+                           "verification, set a password); phrase the question as that task.",
+        },
     },
     "required": ["question"],
 }
@@ -603,7 +612,11 @@ class AgentToolbox:
         self.gate.allowed_upload_paths.add(str(Path(path).expanduser().resolve()))
 
     def _park(self, q: FormQuestion, reason: QuestionReason | str, **kw: Any) -> None:
-        self.unresolved[normalize_question(q.label)] = UnresolvedField(question=q, reason=QuestionReason(reason).value, **kw)
+        kind = resolve_kind(q.label, reason, kw.pop("kind", None))
+        if kind is QuestionKind.ACTION:
+            kw.pop("suggested_answer", None)  # nothing to type for an action
+        self.unresolved[normalize_question(q.label)] = UnresolvedField(question=q, reason=QuestionReason(reason).value,
+                                                                       kind=kind.value, **kw)
 
     # ---- handlers (async (args) -> MCP result) ---------------------------------------
 
@@ -620,6 +633,15 @@ class AgentToolbox:
             options=[str(o) for o in args.get("options") or []], max_length=args.get("max_length"),
         )
         norm = normalize_question(q.label)
+        if classify_kind(q.label) is QuestionKind.ACTION:
+            # Passwords, "retype email", sign-in and verification steps are never answered by the
+            # agent (nor stored in memory): the user does them in the agent's Chrome, then retries.
+            self._park(q, QuestionReason.UNKNOWN, kind=QuestionKind.ACTION)
+            return _ok({
+                "status": "needs_user", "reason": "action",
+                "instruction": "This is an account / sign-in / verification step, not a question to answer. Do NOT "
+                               "fill it or create an account. It has been sent to the user as a task. Stop now.",
+            })
         if self.phase == "submit" and norm in self.recorded:
             aa = self.recorded[norm]
             q = q.model_copy(update={"field_type": aa.field_type})
@@ -651,12 +673,18 @@ class AgentToolbox:
         return _ok(payload)
 
     async def ask_user(self, args: dict[str, Any]) -> dict[str, Any]:
+        opts = [str(o) for o in args.get("options") or [] if str(o).strip()]
         q = FormQuestion(
             key=normalize_question(args["question"])[:80] or "q", label=str(args["question"]).strip(),
-            field_type=FieldType(args.get("field_type") or "text"), options=[str(o) for o in args.get("options") or []],
+            field_type=choice_field_type(args.get("field_type") or "text", opts), options=opts,
         )
         reason = QuestionReason(args.get("reason") or "unknown")
-        self._park(q, reason, never_guess_key=classify_never_guess(q))
+        kind = resolve_kind(q.label, reason, args.get("kind"))
+        if kind is QuestionKind.ACTION:
+            self._park(q, reason, kind=kind)
+            return _ok("Sent to the user as a task to do (not a field to fill). Do not fill anything for it and do not "
+                       "create accounts. Stop now.")
+        self._park(q, reason, never_guess_key=classify_never_guess(q), kind=kind)
         return _ok("Sent to the user. Do not fill this field. Finish looking up any other unknown fields, then stop.")
 
     async def pick_resume(self, args: dict[str, Any]) -> dict[str, Any]:
@@ -760,8 +788,9 @@ class AgentToolbox:
             label = str(q.get("label") or "").strip()
             if not label:
                 continue
-            out.append(FormQuestion(key=str(q.get("key") or f"q{i}"), label=label, field_type=ft,
-                                    required=bool(q.get("required")), options=[str(o) for o in q.get("options") or []]))
+            opts = [str(o) for o in q.get("options") or [] if str(o).strip()]
+            out.append(FormQuestion(key=str(q.get("key") or f"q{i}"), label=label, field_type=choice_field_type(ft, opts),
+                                    required=bool(q.get("required")), options=opts))
         self.harvested = out
         return _ok(f"Recorded {len(out)} questions. Stop now.")
 
@@ -942,7 +971,12 @@ Rules (non-negotiable):
   field you filled and the exact value entered (values you type but do not report block the submission).
 - If you see a CAPTCHA or "verify you are human" check, call report_captcha and stop.
 - Never log in to or visit LinkedIn or Glassdoor. Never create accounts or set passwords: if the site requires an
-  account, call ask_user with question 'Account required to apply at <site>' and stop.
+  account, call ask_user with question 'Account required to apply at <site>' and kind 'action', and stop.
+- ask_user has two kinds. kind 'question' is for a value to write into a form field (work authorization, years of
+  experience, an essay prompt). kind 'action' is for anything that is a STEP for the user to perform rather than an
+  answer: account or login required, password / confirm-password / retype-email fields of an account form, CAPTCHA
+  or bot checks, email or SMS verification codes or links, no online form. Phrase an action as the task
+  ('Account required to apply at <site>', 'Verify your email at <site>'). Never ask the user to type a password.
 - Multi-page forms: use 'Next'/'Continue'/'Save and continue' buttons to move between pages.
 - Prefer browser_snapshot over screenshots to read the page (cheaper)."""
 
@@ -1068,9 +1102,10 @@ class AgenticAdapter:
             "Then stop.\n"
             "You MUST finish with exactly one of these calls:\n"
             "- report_form_questions (the form's fields);\n"
-            "- ask_user with question 'Account required to apply at <site>' if applying needs an account or login;\n"
+            "- ask_user with question 'Account required to apply at <site>' and kind 'action' if applying needs an "
+            "account or login (also when the form starts with password / retype-email fields);\n"
             "- ask_user with question 'No online application form at <site>: <what the posting says to do instead>' "
-            "if there is no form to fill (e.g. apply by email or an external Google Form);\n"
+            "and kind 'action' if there is no form to fill (e.g. apply by email or an external Google Form);\n"
             "- report_captcha for a CAPTCHA / human check.\n"
             "Do not spend long exploring: if the form is not reachable in a few steps, use ask_user as above.\n\n"
             + _job_header(ctx.job, company)

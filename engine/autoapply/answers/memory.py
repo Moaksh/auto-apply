@@ -24,7 +24,7 @@ import numpy as np
 
 from autoapply import db
 from autoapply.answers.textnorm import canonical_text, extract_country, normalize_question, question_intents
-from autoapply.enums import AnswerSource, FieldType, QuestionStatus
+from autoapply.enums import AnswerSource, FieldType, QuestionKind, QuestionStatus
 from autoapply.llm.provider import LLMError, LLMProvider
 from autoapply.models import Answer, Question
 
@@ -321,7 +321,7 @@ class AnswerMemory:
         vecs = self._ensure_question_embeddings(qs)
         groups: list[_Group] = []
         for q in qs:  # id order => deterministic
-            key = self._ng_cluster_key(q)
+            key = self._cluster_key(q)
             best: tuple[float, _Group] | None = None
             for g in groups:
                 if key is not None or g.key is not None:
@@ -353,6 +353,21 @@ class AnswerMemory:
         for q in db.list_questions(self.conn, status=QuestionStatus.OPEN):
             out.setdefault(q.cluster_id, []).append(q)
         return out
+
+    def _cluster_key(self, q: Question) -> tuple[str, str | None] | None:
+        """Forced-grouping key: agent actions group by (action type, companies) and never
+        join form questions; never-guess questions by key (+ country); else None (similarity)."""
+        if q.kind is QuestionKind.ACTION:
+            return db.action_group_key(self.conn, q.canonical_question, q.reason.value, q.job_ids)
+        return self._ng_cluster_key(q)
+
+    def find_action_cluster_for(self, label: str, reason: str | None, job_id: int) -> str | None:
+        """Open action cluster for the same blocker at the same company as ``job_id``, if any."""
+        key = db.action_group_key(self.conn, label, reason, [job_id])
+        for q in db.list_questions(self.conn, status=QuestionStatus.OPEN):
+            if q.kind is QuestionKind.ACTION and self._cluster_key(q) == key:
+                return q.cluster_id
+        return None
 
     def _ng_cluster_key(self, q: Question) -> tuple[str, str | None] | None:
         """Cluster key of a stored question. For country-scoped keys whose wording names no
@@ -386,6 +401,8 @@ class AnswerMemory:
             by_cluster.setdefault(q.cluster_id, []).append(q)
         best: tuple[float, str] | None = None
         for cid, members in by_cluster.items():
+            if any(m.kind is QuestionKind.ACTION for m in members):
+                continue  # form questions never join an agent action
             gkey = next((k for k in (self._ng_cluster_key(m) for m in members) if k is not None), None)
             if key is not None or gkey is not None:
                 if key == gkey:

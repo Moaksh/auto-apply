@@ -19,8 +19,10 @@ enum AppShortcut: String, CaseIterable, Identifiable, Sendable {
     case runNow
     case runPrep
     case nextQuestion
+    case addJobByLink
     // Lists / jobs
     case openSelected
+    /// ⌘↵: answer in Needs You; Approve & submit in Job detail (awaiting review, also in ⌘K).
     case submit
     case moveStatusPrevious
     case moveStatusNext
@@ -74,6 +76,7 @@ enum AppShortcut: String, CaseIterable, Identifiable, Sendable {
         case .runNow: "r"
         case .runPrep: "r"
         case .nextQuestion: "j"
+        case .addJobByLink: "n"
         case .openSelected: .return
         case .submit: .return
         case .moveStatusPrevious: .leftArrow
@@ -93,7 +96,7 @@ enum AppShortcut: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .goDashboard, .goNeedsYou, .goReview, .goPipeline, .goEasyApply, .goProfile, .goResumes, .goStories, .goActivity, .goColdEmail:
             .command
-        case .commandPalette, .openSettings, .openMainWindow, .filter, .runNow, .nextQuestion, .submit,
+        case .commandPalette, .openSettings, .openMainWindow, .filter, .runNow, .nextQuestion, .submit, .addJobByLink,
              .moveStatusPrevious, .moveStatusNext, .selectAll:
             .command
         case .toggleInspector: [.command, .option]
@@ -128,6 +131,7 @@ enum AppShortcut: String, CaseIterable, Identifiable, Sendable {
         case .runNow: "Run Now"
         case .runPrep: "Run Prep Pass"
         case .nextQuestion: "Answer Next Question"
+        case .addJobByLink: "Add Job by Link…"
         case .openSelected: "Open Selected"
         case .submit: "Submit / Approve"
         case .moveStatusPrevious: "Move to Previous Status"
@@ -167,6 +171,7 @@ enum AppShortcut: String, CaseIterable, Identifiable, Sendable {
         case .runNow: "play.fill"
         case .runPrep: "tray.and.arrow.down"
         case .nextQuestion: "hand.raised.fill"
+        case .addJobByLink: "link.badge.plus"
         case .openSelected: "arrow.up.forward.square"
         case .submit: "checkmark.circle"
         case .moveStatusPrevious: "arrow.left"

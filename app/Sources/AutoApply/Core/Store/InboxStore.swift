@@ -13,6 +13,25 @@ struct ResolvedCluster: Identifiable, Sendable, Hashable {
     var at: Date
 }
 
+/// Needs-You items come in two kinds (wire `QuestionCluster.kind`): form *questions* the user
+/// answers with a value, and agent *actions* — the agent is blocked and the user must do
+/// something (create an account / sign in, solve a CAPTCHA, verify an email) and then retry.
+/// Unknown kinds are treated as questions; an older daemon's CAPTCHA (reason only) is an action.
+extension QuestionCluster {
+    enum ActionType: String, Sendable {
+        case account, captcha, verification, other
+    }
+
+    var isAction: Bool { kind == "action" || reason == .captcha }
+
+    /// The blocker's subtype (nil for questions). Unknown values read as `.other`.
+    var action: ActionType? {
+        guard isAction else { return nil }
+        if reason == .captcha { return .captcha }
+        return actionType.flatMap(ActionType.init(rawValue:)) ?? .other
+    }
+}
+
 @MainActor
 @Observable
 final class InboxStore {
@@ -26,6 +45,20 @@ final class InboxStore {
     init() {}
 
     var openCount: Int { clusters.count }
+
+    /// Agent blockers ("to do") vs form questions.
+    var actionCount: Int { clusters.filter(\.isAction).count }
+    var questionCount: Int { clusters.count - actionCount }
+
+    /// "3 to do · 34 questions" / "1 question" (empty when the inbox is empty).
+    var summary: String { Self.summary(actions: actionCount, questions: questionCount) }
+
+    nonisolated static func summary(actions: Int, questions: Int) -> String {
+        var parts: [String] = []
+        if actions > 0 { parts.append("\(actions) to do") }
+        if questions > 0 { parts.append("\(questions) question\(questions == 1 ? "" : "s")") }
+        return parts.joined(separator: " · ")
+    }
 
     /// Distinct jobs blocked by any open cluster.
     var jobsWaiting: Int { Set(clusters.flatMap(\.jobIds)).count }
@@ -90,6 +123,8 @@ final class InboxStore {
 
     nonisolated static func sorted(_ list: [QuestionCluster]) -> [QuestionCluster] {
         list.sorted { a, b in
+            // Blockers first (the agent can't move until they're done), then impact.
+            if a.isAction != b.isAction { return a.isAction }
             if a.jobCount != b.jobCount { return a.jobCount > b.jobCount }
             return a.createdAt < b.createdAt
         }

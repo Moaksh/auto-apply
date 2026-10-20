@@ -88,10 +88,12 @@ def record_usage(total: TokenUsage, usage: TokenUsage) -> None:
 
 
 #: Model routing. Callers pass ``tier="fast"`` for cheap extraction/classification and leave it
-#: unset (smart) for judgment and writing. Aliases track the newest model of each family;
-#: override with ``AUTOAPPLY_FAST_MODEL`` / ``AUTOAPPLY_SMART_MODEL``.
+#: unset (smart) for judgment and writing. The smart tier is pinned (an alias would follow whatever
+#: the local ``claude`` CLI maps it to, which differs between machines); override with
+#: ``AUTOAPPLY_FAST_MODEL`` / ``AUTOAPPLY_SMART_MODEL``.
 FAST_TIER = "fast"
 SMART_TIER = "smart"
+DEFAULT_SMART_MODEL = "claude-sonnet-5-5"
 
 
 def model_for_tier(tier: str | None) -> str:
@@ -99,7 +101,7 @@ def model_for_tier(tier: str | None) -> str:
 
     if tier == FAST_TIER:
         return os.environ.get("AUTOAPPLY_FAST_MODEL", "haiku")
-    return os.environ.get("AUTOAPPLY_SMART_MODEL", "sonnet")
+    return os.environ.get("AUTOAPPLY_SMART_MODEL", DEFAULT_SMART_MODEL)
 
 
 @dataclass(slots=True)
@@ -398,7 +400,7 @@ class AnthropicAPIProvider:
 
     name = "anthropic_api"
 
-    def __init__(self, *, api_key: str, model: str = "claude-sonnet-4-5") -> None:
+    def __init__(self, *, api_key: str, model: str = DEFAULT_SMART_MODEL) -> None:
         if not api_key:
             raise ValueError("api_key is required")
         self.api_key = api_key

@@ -339,6 +339,31 @@ extension AckPayload {
     }
 }
 
+/// Add a job from any apply link (manual source) and queue it as a user choice.
+struct AddJobUrlPayload: Codable, Sendable, Hashable {
+    var url: String
+    var title: String? = nil
+    var company: String? = nil
+    var applyNow: Bool = true
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case url
+        case title
+        case company
+        case applyNow = "apply_now"
+    }
+}
+
+extension AddJobUrlPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        url = try c.decode(String.self, forKey: .url)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        company = try c.decodeIfPresent(String.self, forKey: .company)
+        applyNow = try c.decodeIfPresent(Bool.self, forKey: .applyNow) ?? true
+    }
+}
+
 struct AddResumeVariantPayload: Codable, Sendable, Hashable {
     var filePath: String
     var label: String
@@ -618,6 +643,7 @@ extension ClearMailAccountPayload {
 struct Counts: Codable, Sendable, Hashable {
     var queued: Int = 0
     var needsYouClusters: Int = 0
+    var needsYouActions: Int = 0
     var needsYouJobs: Int = 0
     var awaitingReview: Int = 0
     var easyApplyOpen: Int = 0
@@ -631,6 +657,7 @@ struct Counts: Codable, Sendable, Hashable {
     enum CodingKeys: String, CodingKey, CaseIterable {
         case queued
         case needsYouClusters = "needs_you_clusters"
+        case needsYouActions = "needs_you_actions"
         case needsYouJobs = "needs_you_jobs"
         case awaitingReview = "awaiting_review"
         case easyApplyOpen = "easy_apply_open"
@@ -648,6 +675,7 @@ extension Counts {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         queued = try c.decodeIfPresent(Int.self, forKey: .queued) ?? 0
         needsYouClusters = try c.decodeIfPresent(Int.self, forKey: .needsYouClusters) ?? 0
+        needsYouActions = try c.decodeIfPresent(Int.self, forKey: .needsYouActions) ?? 0
         needsYouJobs = try c.decodeIfPresent(Int.self, forKey: .needsYouJobs) ?? 0
         awaitingReview = try c.decodeIfPresent(Int.self, forKey: .awaitingReview) ?? 0
         easyApplyOpen = try c.decodeIfPresent(Int.self, forKey: .easyApplyOpen) ?? 0
@@ -1485,6 +1513,8 @@ struct QuestionCluster: Codable, Sendable, Hashable {
     var suggestedAnswer: String? = nil
     var suggestedConfidence: Double? = nil
     var suggestedNote: String? = nil
+    var kind: String = "question"
+    var actionType: String? = nil
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case clusterId = "cluster_id"
@@ -1502,6 +1532,8 @@ struct QuestionCluster: Codable, Sendable, Hashable {
         case suggestedAnswer = "suggested_answer"
         case suggestedConfidence = "suggested_confidence"
         case suggestedNote = "suggested_note"
+        case kind
+        case actionType = "action_type"
     }
 }
 
@@ -1523,6 +1555,8 @@ extension QuestionCluster {
         suggestedAnswer = try c.decodeIfPresent(String.self, forKey: .suggestedAnswer)
         suggestedConfidence = try c.decodeIfPresent(Double.self, forKey: .suggestedConfidence)
         suggestedNote = try c.decodeIfPresent(String.self, forKey: .suggestedNote)
+        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "question"
+        actionType = try c.decodeIfPresent(String.self, forKey: .actionType)
     }
 }
 
@@ -2381,6 +2415,7 @@ enum Command: Sendable, Hashable {
     case retryApplication(RetryApplicationPayload)
     case resolveUnknown(ResolveUnknownPayload)
     case applyAnyway(ApplyAnywayPayload)
+    case addJobUrl(AddJobUrlPayload)
     case updateJobNotes(UpdateJobNotesPayload)
     case setApplicationResume(SetApplicationResumePayload)
     case markEasyApplyDone(MarkEasyApplyDonePayload)
@@ -2428,6 +2463,7 @@ enum Command: Sendable, Hashable {
         case .retryApplication: "retry_application"
         case .resolveUnknown: "resolve_unknown"
         case .applyAnyway: "apply_anyway"
+        case .addJobUrl: "add_job_url"
         case .updateJobNotes: "update_job_notes"
         case .setApplicationResume: "set_application_resume"
         case .markEasyApplyDone: "mark_easy_apply_done"
@@ -2475,6 +2511,7 @@ enum Command: Sendable, Hashable {
         "retry_application",
         "resolve_unknown",
         "apply_anyway",
+        "add_job_url",
         "update_job_notes",
         "set_application_resume",
         "mark_easy_apply_done",
@@ -2613,6 +2650,7 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case "retry_application": command = .retryApplication(try c.decode(RetryApplicationPayload.self, forKey: .payload))
         case "resolve_unknown": command = .resolveUnknown(try c.decode(ResolveUnknownPayload.self, forKey: .payload))
         case "apply_anyway": command = .applyAnyway(try c.decode(ApplyAnywayPayload.self, forKey: .payload))
+        case "add_job_url": command = .addJobUrl(try c.decode(AddJobUrlPayload.self, forKey: .payload))
         case "update_job_notes": command = .updateJobNotes(try c.decode(UpdateJobNotesPayload.self, forKey: .payload))
         case "set_application_resume": command = .setApplicationResume(try c.decode(SetApplicationResumePayload.self, forKey: .payload))
         case "mark_easy_apply_done": command = .markEasyApplyDone(try c.decode(MarkEasyApplyDonePayload.self, forKey: .payload))
@@ -2667,6 +2705,7 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case .retryApplication(let p): try c.encode(p, forKey: .payload)
         case .resolveUnknown(let p): try c.encode(p, forKey: .payload)
         case .applyAnyway(let p): try c.encode(p, forKey: .payload)
+        case .addJobUrl(let p): try c.encode(p, forKey: .payload)
         case .updateJobNotes(let p): try c.encode(p, forKey: .payload)
         case .setApplicationResume(let p): try c.encode(p, forKey: .payload)
         case .markEasyApplyDone(let p): try c.encode(p, forKey: .payload)

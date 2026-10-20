@@ -103,6 +103,13 @@ enum MockScenario: String, CaseIterable, Sendable, Identifiable {
         default:
             break
         }
+        // Every rich-data scenario has applications waiting for review (one with a low-confidence
+        // answer), with a Q&A audit and a real pre-submit screenshot, so Review and Job detail render.
+        // Review mode builds its own queue through the script instead.
+        switch self {
+        case .stress, .firstRunEmpty, .onboarding, .reviewMode: break
+        default: MockScripts.addReviewSamples(&data, now: now)
+        }
 
         let submittedToday = data.jobs.filter { $0.submittedAt.map { Calendar.current.isDate($0, inSameDayAs: now) } ?? false }.count
         state.caps.dailyUsed = max(state.caps.dailyUsed, submittedToday)
@@ -174,6 +181,32 @@ enum MockScripts {
         }
     }
 
+    static let reviewSampleJobIDs = [25_001, 25_002]
+
+    static func screenshotName(_ applicationID: Int, _ company: String) -> String {
+        "\(applicationID)-\(company.lowercased().filter { $0.isLetter || $0.isNumber })-pre"
+    }
+
+    /// Two filled applications awaiting review: one clean, one with a low-confidence answer.
+    static func addReviewSamples(_ data: inout RepositoryData, now: Date) {
+        addJobs(&data, ids: reviewSampleJobIDs, state: .awaitingReview, now: now)
+        for (k, id) in reviewSampleJobIDs.enumerated() {
+            guard let i = data.jobs.firstIndex(where: { $0.id == id }) else { continue }
+            let company = data.jobs[i].company
+            let answers = MockFixtures.applicationAnswers(applicationID: id, company: company, lowConfidence: k == 1,
+                                                          startID: 90_000 + k * 20)
+            data.applicationAnswers[id] = answers
+            data.jobs[i].stateReason = "review_mode"
+            data.jobs[i].stateUpdatedAt = now.addingTimeInterval(-Double(20 + k * 25) * 60)
+            data.jobs[i].resumePickScore = 0.91
+            data.jobs[i].screenshotPath = MockFrames.preSubmitScreenshot(company: company, answers: answers, name: screenshotName(id, company))
+                ?? "/mock/screenshots/\(id)-pre.png"
+            data.activity.append(ActivityEvent(id: (data.activity.last?.id ?? 0) + 1, ts: data.jobs[i].stateUpdatedAt ?? now, kind: "review",
+                                               actor: .agent, level: .info, jobID: id, applicationID: id,
+                                               message: "filled \(answers.count) fields · waiting for your review"))
+        }
+    }
+
     // MARK: Clusters
 
     struct ClusterTemplate: Sendable {
@@ -183,6 +216,9 @@ enum MockScripts {
         var options: [String] = []
         var neverGuessKey: String?
         var reason: QuestionReason
+        /// "question" (type an answer) or "action" (the agent is blocked: do it, then retry).
+        var kind = "question"
+        var actionType: String?
         var variant: @Sendable (String) -> String
     }
 
@@ -199,6 +235,11 @@ enum MockScripts {
                         variant: { _ in "Link to your portfolio" }),
         ClusterTemplate(id: "c_conflict", question: "Describe a conflict with a teammate and how you resolved it.", fieldType: .textarea,
                         reason: .alwaysAsk, variant: { _ in "Tell us about a disagreement at work." }),
+        // Agent blockers (kind "action"): no answer box, "Done, retry" instead.
+        ClusterTemplate(id: "a_account", question: "Account required to apply at careers.oraclecloud.com", fieldType: .text,
+                        reason: .unknown, kind: "action", actionType: "account", variant: { _ in "Choose Password" }),
+        ClusterTemplate(id: "a_captcha", question: "Solve the CAPTCHA on the application", fieldType: .text,
+                        reason: .captcha, kind: "action", actionType: "captcha", variant: { "Solve the CAPTCHA on the \($0) application" }),
     ]
 
     static func cluster(_ t: ClusterTemplate, jobs: [JobItem], now: Date, questionIDBase: Int) -> QuestionCluster {
@@ -209,7 +250,8 @@ enum MockScripts {
             variants: Array(Set(jobs.map { t.variant($0.company) })).sorted(),
             jobIds: jobs.map(\.id), jobCount: jobs.count,
             companies: Array(Set(jobs.map(\.company))).sorted(),
-            createdAt: now.addingTimeInterval(-Double(questionIDBase)))
+            createdAt: now.addingTimeInterval(-Double(questionIDBase)),
+            kind: t.kind, actionType: t.actionType)
     }
 
     /// Clusters covering the baseline's parked (needs_you) jobs.
@@ -219,7 +261,7 @@ enum MockScripts {
         var groups: [Int: [JobItem]] = [:]
         for (i, job) in parked.enumerated() {
             // Skew toward the first templates so impact sorting is visible.
-            let t = [0, 0, 0, 1, 1, 2, 3, 4, 5][i % 9]
+            let t = [0, 0, 0, 6, 1, 1, 2, 3, 7, 4, 5][i % 11]
             groups[t, default: []].append(job)
         }
         return groups.keys.sorted().map { cluster(clusterTemplates[$0], jobs: groups[$0]!, now: now, questionIDBase: 500 + $0 * 50) }
@@ -323,8 +365,8 @@ enum MockScripts {
     }
 
     static func needsYouStorm() -> [ScriptStep] {
-        // 14 questions → 6 clusters: 5 + 3 + 2 + 2 + 1 + 1.
-        let assignment = [0, 1, 0, 2, 0, 3, 1, 0, 4, 2, 3, 0, 1, 5]
+        // 14 items → 6 questions + 2 agent actions: 4 + 3 + 2 + 2 + 1 + 1 questions, 1 + 1 actions.
+        let assignment = [0, 1, 6, 2, 0, 3, 1, 0, 4, 2, 3, 7, 1, 5]
         var steps: [ScriptStep] = [ScriptStep(at: 0) { world in
             world.startRun(.prep)
             world.setState(.prepping, message: "Collecting questions from 14 queued jobs…", progress: Progress(done: 0, total: 14))

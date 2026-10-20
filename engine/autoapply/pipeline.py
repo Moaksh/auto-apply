@@ -82,6 +82,7 @@ from autoapply.models import (
     utcnow,
 )
 from autoapply.paths import Paths
+from autoapply.question_kind import resolve_kind
 
 log = logging.getLogger("autoapply.pipeline")
 
@@ -555,6 +556,12 @@ class Pipeline:
         search_prefs = prefs.model_copy(update={"roles": focus.searches}) if focus.searches else prefs
         if round_ > 0:
             sources = [s for s in sources if hasattr(s, "browser_factory")]
+        else:
+            from autoapply.discovery import starter
+
+            # A fresh install has no boards to read: start it with verified ones the agent can apply to.
+            if starter.AUTO_SEED and (added := starter.seed_starter_watchlist(self.conn)):
+                await self._log(LogLevel.INFO, f"Watching {len(added)} starter company boards (undo any in Settings ▸ Sources)")
         companies = db.list_companies(self.conn, watch_only=True)
         new_ids: list[int] = []
         own_client = self._http is None
@@ -1269,6 +1276,26 @@ class Pipeline:
             _DETACHED.reset(token)
         return out
 
+    async def apply_detached(self, application_id: int) -> AppState:
+        """Fill one queued application right now (e.g. a job the user added by link).
+
+        Like :meth:`submit_approved`: outside any run, holding ``browser_lock`` so it waits for an
+        active run / approve batch instead of fighting it for the Chrome profile. Pause, the daily
+        cap and cooldowns apply as usual; a job that can't start now just stays queued.
+        """
+        token = _DETACHED.set(True)
+        try:
+            async with self.browser_lock:
+                try:
+                    return await self.apply_one(application_id)
+                except (PausedError, CapReached):
+                    return db.get_application(self.conn, application_id).state
+                finally:
+                    if self.run_row is None:
+                        await self._state(DaemonActivity.IDLE)
+        finally:
+            _DETACHED.reset(token)
+
     async def park(self, application_id: int, job: Job, unresolved: list[UnresolvedField]) -> list[str]:
         """Put unresolved fields in the Needs-You inbox; emits ``question_opened`` per cluster."""
         touched: list[str] = []
@@ -1286,6 +1313,7 @@ class Pipeline:
                     self.conn, canonical_question=u.question.label, job_id=job.id, field_type=u.question.field_type,
                     options=u.question.options, never_guess_key=u.never_guess_key, reason=reason,
                     suggested_answer=u.suggested_answer, suggested_confidence=u.confidence, suggested_note=u.note,
+                    kind=resolve_kind(u.question.label, reason, getattr(u, "kind", None)),
                 )
                 touched.append(q.cluster_id)
         try:

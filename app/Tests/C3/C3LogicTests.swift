@@ -72,7 +72,7 @@ struct AnswerComposerTests {
         #expect(AnswerKind(cluster: C3Fixtures.cluster("h", jobs: [1], question: "Portfolio", fieldType: .url)) == .url)
         var captcha = C3Fixtures.cluster("i", jobs: [1], question: "Solve CAPTCHA")
         captcha.reason = .captcha
-        #expect(AnswerKind(cluster: captcha) == .captcha)
+        #expect(AnswerKind(cluster: captcha) == .action)
     }
 
     @Test func draftDefaultsDependOnNeverGuess() {
@@ -90,7 +90,7 @@ struct AnswerComposerTests {
         #expect(try AnswerComposerLogic.resolve(d, kind: .choice(multi: true), jobIDs: [1]).get().answer == "A, C")
         d.text = "  4 years "
         #expect(try AnswerComposerLogic.resolve(d, kind: .number, jobIDs: [1]).get().answer == "4 years")
-        #expect(try AnswerComposerLogic.resolve(AnswerDraft(), kind: .captcha, jobIDs: [1]).get().answer == "solved")
+        #expect(try AnswerComposerLogic.resolve(AnswerDraft(), kind: .action, jobIDs: [1]).get() == ResolvedAnswer(answer: "done", saveToMemory: false, saveToProfile: false, perJobAnswers: []))
     }
 
     @Test func rejectsInvalidValues() {

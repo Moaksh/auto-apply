@@ -1,6 +1,8 @@
-// InboxView.swift — the Needs-You inbox screen (docs/UI_UX_PLAN.md §5.5): clusters sorted by
-// jobs unblocked on the left, the adaptive answer composer on the right (inline, no modal),
-// "Answered today" collapsed at the bottom, and the inbox-zero celebration (§6).
+// InboxView.swift — the Needs-You inbox screen (docs/UI_UX_PLAN.md §5.5). The list has two
+// sections: "Agent is blocked" (actions: create an account, solve a CAPTCHA, verify…; done in the
+// agent's Chrome, then retried) above "Questions to answer" (form fields, sorted by jobs
+// unblocked). The right pane is an action checklist or the adaptive answer composer (inline, no
+// modal); "Answered today" is collapsed at the bottom, then the inbox-zero celebration (§6).
 import SwiftUI
 
 @objc(InboxFeature)
@@ -32,9 +34,15 @@ struct InboxView: View {
                     Divider()
                     Group {
                         if let cluster = model.selectedCluster {
-                            AnswerComposer(model: model, cluster: cluster, undoManager: undoManager)
-                                .id(cluster.clusterId)
-                                .transition(reduced ? AnyTransition.opacity : AnyTransition(.blurReplace))
+                            Group {
+                                if cluster.isAction {
+                                    ActionPane(model: model, cluster: cluster, undoManager: undoManager)
+                                } else {
+                                    AnswerComposer(model: model, cluster: cluster, undoManager: undoManager)
+                                }
+                            }
+                            .id(cluster.clusterId)
+                            .transition(reduced ? AnyTransition.opacity : AnyTransition(.blurReplace))
                         } else {
                             EmptyState(symbol: "hand.raised", title: "Pick a question", message: "Answer once and every job asking it resumes.")
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -54,14 +62,16 @@ struct InboxView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(model.clusters, id: \.clusterId) { cluster in
-                        ClusterRow(model: model, cluster: cluster, isSelected: cluster.clusterId == model.selectedClusterID)
-                            .id(cluster.clusterId)
-                            .onTapGesture {
-                                model.select(cluster.clusterId)
-                                listFocused = true
-                            }
-                            .transition(reduced ? .opacity : .asymmetric(insertion: .rowInsert, removal: .inboxCollapse))
+                    let actions = model.actionClusters
+                    let questions = model.questionClusters
+                    if !actions.isEmpty {
+                        InboxSectionHeader(kind: .action, count: actions.count)
+                        ForEach(actions, id: \.clusterId) { row($0, model) }
+                    }
+                    if !questions.isEmpty {
+                        InboxSectionHeader(kind: .question, count: questions.count)
+                            .padding(.top, actions.isEmpty ? 0 : Space.m)
+                        ForEach(questions, id: \.clusterId) { row($0, model) }
                     }
                     AnsweredTodaySection(model: model)
                         .padding(.top, Space.l)
@@ -82,7 +92,46 @@ struct InboxView: View {
             }
         }
         .background(Palette.surface.opacity(0.4))
-        .accessibilityLabel("Questions, sorted by jobs unblocked")
+        .accessibilityLabel("Needs you: agent blockers first, then questions sorted by jobs unblocked")
+    }
+
+    private func row(_ cluster: QuestionCluster, _ model: InboxModel) -> some View {
+        ClusterRow(model: model, cluster: cluster, isSelected: cluster.clusterId == model.selectedClusterID)
+            .id(cluster.clusterId)
+            .onTapGesture {
+                model.select(cluster.clusterId)
+                listFocused = true
+            }
+            .transition(reduced ? .opacity : .asymmetric(insertion: .rowInsert, removal: .inboxCollapse))
+    }
+}
+
+// MARK: - Section header
+
+/// "AGENT IS BLOCKED · needs you to act" / "QUESTIONS TO ANSWER". Amber (status.needsYou) marks
+/// the blockers; questions stay neutral, so color carries the one meaning that matters here.
+private struct InboxSectionHeader: View {
+    enum Kind { case action, question }
+    var kind: Kind
+    var count: Int
+
+    var body: some View {
+        HStack(spacing: Space.xs) {
+            Image(systemName: kind == .action ? "hand.raised.fill" : "text.bubble")
+                .imageScale(.small)
+                .foregroundStyle(kind == .action ? Palette.needsYou : Palette.textTertiary)
+            Text(kind == .action ? "Agent is blocked" : "Questions to answer").eyebrowStyle()
+            if kind == .action {
+                Text("· needs you to act").font(Typography.callout).foregroundStyle(Palette.textTertiary)
+            }
+            Spacer()
+            Text("\(count)").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary).monospacedDigit()
+        }
+        .padding(.horizontal, Space.m)
+        .padding(.top, Space.s)
+        .padding(.bottom, Space.xxs)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -97,8 +146,13 @@ private struct InboxHeader: View {
             HStack(alignment: .firstTextBaseline, spacing: Space.m) {
                 Text("Needs You").font(Typography.title1)
                 HStack(spacing: Space.xs) {
-                    Text("\(model.openCount)").numericRoll(Double(model.openCount))
-                    Text(model.openCount == 1 ? "question ·" : "questions ·")
+                    if model.actionCount > 0 {
+                        Text("\(model.actionCount)").numericRoll(Double(model.actionCount))
+                            .foregroundStyle(Palette.needsYou)
+                        Text("to do ·")
+                    }
+                    Text("\(model.questionCount)").numericRoll(Double(model.questionCount))
+                    Text(model.questionCount == 1 ? "question ·" : "questions ·")
                     Text("\(model.jobsWaiting)").numericRoll(Double(model.jobsWaiting))
                     Text(model.jobsWaiting == 1 ? "job waiting" : "jobs waiting")
                 }
@@ -152,17 +206,21 @@ private struct ClusterRow: View {
                 .frame(width: 7, height: 7)
                 .padding(.top, 5)
                 .accessibilityHidden(true)
+            if cluster.isAction {
+                Image(systemName: InboxActionCopy.symbol(cluster))
+                    .foregroundStyle(Palette.needsYou)
+                    .frame(width: 18)
+                    .padding(.top, 1)
+                    .accessibilityHidden(true)
+            }
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: Space.xs) {
-                    Text(cluster.canonicalQuestion)
+                    Text(model.title(for: cluster))
                         .font(Typography.bodyEmph)
                         .lineLimit(2)
                     if isLocked {
                         Image(systemName: "lock.fill").imageScale(.small).foregroundStyle(Palette.textSecondary)
                             .accessibilityLabel("Never-guess fact")
-                    }
-                    if cluster.reason == .captcha {
-                        Image(systemName: "puzzlepiece.extension").imageScale(.small).foregroundStyle(Palette.needsYou)
                     }
                 }
                 HStack(spacing: Space.xs) {
@@ -177,6 +235,9 @@ private struct ClusterRow: View {
                     if AnswerKind(cluster: cluster) == .longText {
                         Text("· long").foregroundStyle(Palette.textTertiary)
                     }
+                    if cluster.isAction {
+                        Text("· to do").foregroundStyle(Palette.textTertiary)
+                    }
                 }
                 .font(Typography.callout)
                 .foregroundStyle(Palette.textSecondary)
@@ -189,10 +250,10 @@ private struct ClusterRow: View {
                     in: RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
         .contentShape(Rectangle())
         .contextMenu {
-            Button("Copy question") { model.copyQuestion(cluster) }
+            Button(cluster.isAction ? "Copy task" : "Copy question") { model.copyQuestion(cluster) }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(cluster.canonicalQuestion), \(C3Format.plural(cluster.jobCount, "job"))\(isLocked ? ", locked" : "")\(model.isUnread(cluster) ? ", unread" : "")")
+        .accessibilityLabel("\(cluster.isAction ? "To do: " : "")\(model.title(for: cluster)), \(C3Format.plural(cluster.jobCount, "job"))\(isLocked ? ", locked" : "")\(model.isUnread(cluster) ? ", unread" : "")")
         .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
     }
 }
@@ -256,6 +317,8 @@ struct AnswerComposer: View {
     var model: InboxModel
     var cluster: QuestionCluster
     var undoManager: UndoManager?
+    /// Inside an outer ScrollView (Job detail's Questions tab): doesn't scroll on its own.
+    var embedded = false
     @Environment(AppStore.self) private var store
     @State private var showAllVariants = false
     @State private var previewJobID: Int?
@@ -266,7 +329,7 @@ struct AnswerComposer: View {
     private var isLocked: Bool { cluster.neverGuessKey != nil || cluster.reason == .neverGuess }
 
     var body: some View {
-        ScrollView {
+        InboxPaneScroll(embedded: embedded) {
             VStack(alignment: .leading, spacing: Space.l) {
                 questionHeader
                 if draft.perJob {
@@ -284,7 +347,7 @@ struct AnswerComposer: View {
                 options
                 actions
             }
-            .padding(Space.contentPadding)
+            .padding(embedded ? 0 : Space.contentPadding)
             .frame(maxWidth: 720, alignment: .leading)
             .errorShake(trigger: model.shakeTrigger)
         }
@@ -412,10 +475,12 @@ struct AnswerComposer: View {
             case .yesNo:
                 let t = text.trimmingCharacters(in: .whitespaces).lowercased()
                 d.yesNo = t.hasPrefix("y") || t == "true" ? true : (t.hasPrefix("n") || t == "false" ? false : d.yesNo)
-            case .choice:
-                if let match = cluster.options.first(where: { $0.caseInsensitiveCompare(text) == .orderedSame }) {
-                    d.choices = [match]
-                } else {
+            case .choice(let multi):
+                if let hits = ChoiceLogic.match(text, options: cluster.options, multi: multi) {
+                    d.choices = hits
+                    d.useOther = false
+                } else if ChoiceLogic.allowsOther(cluster) {
+                    d.useOther = true
                     d.text = text
                 }
             default:
@@ -440,18 +505,7 @@ struct AnswerComposer: View {
             .labelsHidden()
             .frame(maxWidth: 240)
         case .choice(let multi):
-            VStack(alignment: .leading, spacing: Space.xs) {
-                Text(multi ? "Pick all that apply (options from the actual forms)" : "Pick one (options from the actual forms)")
-                    .font(Typography.callout).foregroundStyle(Palette.textSecondary)
-                ToggleChips(options: cluster.options, selection: Binding(
-                    get: { Set(draft.choices) },
-                    set: { new in
-                        model.updateDraft(for: cluster) { d in
-                            d.choices = multi ? cluster.options.filter(new.contains) : Array(new.subtracting(d.choices).prefix(1))
-                            if !multi && d.choices.isEmpty, let only = new.first { d.choices = [only] }
-                        }
-                    }), label: { $0 }, singleSelection: !multi)
-            }
+            ChoicePicker(model: model, cluster: cluster, multi: multi, focus: $editorFocused, undoManager: undoManager)
         case .longText:
             VStack(alignment: .leading, spacing: Space.xs) {
                 Label("Template answer, personalized per company", systemImage: "text.badge.star")
@@ -470,18 +524,8 @@ struct AnswerComposer: View {
                     Text("\(draft.text.count) characters").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
                 }
             }
-        case .captcha:
-            VStack(alignment: .leading, spacing: Space.s) {
-                Text("A CAPTCHA blocked the form. A browser window opens automatically; solve it there and the job resumes once it's solved. If it doesn't resume on its own, confirm below.")
-                    .font(Typography.body).foregroundStyle(Palette.textSecondary)
-                Button {
-                    let url = cluster.jobIds.first.flatMap { store.jobs.job(id: $0)?.applyURL }
-                    Task { await store.openAgentChrome(url: url) }
-                } label: {
-                    Label("Open agent Chrome", systemImage: "globe")
-                }
-                .buttonStyle(.glass)
-            }
+        case .action:
+            EmptyView()  // agent blockers use ActionPane
         default:
             TextField(placeholder, text: textBinding)
                 .textFieldStyle(.roundedBorder)
@@ -490,9 +534,9 @@ struct AnswerComposer: View {
                 .focused($editorFocused)
                 .onSubmit { model.submitSelected(undoManager: undoManager) }
         }
-        if let memory = model.memorySuggestion(for: cluster), draft.text.isEmpty, kind != .yesNo, kind != .captcha {
+        if let memory = model.memorySuggestion(for: cluster), draft.text.isEmpty, kind != .yesNo, kind != .action {
             Button {
-                model.updateDraft(for: cluster) { $0.text = memory.answer }
+                useSuggestion(memory.answer)
             } label: {
                 Label("Use your saved answer: “\(memory.answer.prefix(60))\(memory.answer.count > 60 ? "…" : "")”", systemImage: "brain")
                     .font(Typography.callout)
@@ -598,7 +642,7 @@ struct AnswerComposer: View {
                 .toggleStyle(.checkbox)
                 .disabled(draft.perJob)
             }
-            if kind != .captcha {
+            if kind != .action {
                 Toggle("Save to memory (reuse for future jobs)", isOn: Binding(
                     get: { draft.saveToMemory && !draft.saveToProfile },
                     set: { v in model.updateDraft(for: cluster) { $0.saveToMemory = v } }))
@@ -625,12 +669,302 @@ struct AnswerComposer: View {
                 model.submitSelected(undoManager: undoManager)
             } label: {
                 HStack(spacing: Space.xs) {
-                    Text(kind == .captcha ? "I've solved it" : "Answer")
+                    Text("Answer")
                     KeyCap(.submit)
                 }
             }
             .buttonStyle(.glassProminent)
             .keyboardShortcut(.submit)
+        }
+    }
+}
+
+/// The answer panes scroll on their own in Needs You, but not when embedded in a scrolling page.
+private struct InboxPaneScroll<Content: View>: View {
+    var embedded: Bool
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        if embedded { content } else { ScrollView { content } }
+    }
+}
+
+// MARK: - Choice picker
+
+/// Options as choices: chips with 1–9 number keys for a few short options, a filterable list
+/// for more, and "Other…" free text only when the field isn't a strict select.
+private struct ChoicePicker: View {
+    var model: InboxModel
+    var cluster: QuestionCluster
+    var multi: Bool
+    var focus: FocusState<Bool>.Binding
+    var undoManager: UndoManager?
+    @FocusState private var otherFocused: Bool
+
+    private var draft: AnswerDraft { model.draft(for: cluster) }
+    private var style: ChoiceLogic.Style { ChoiceLogic.style(for: cluster.options) }
+    private var visible: [String] {
+        style == .chips ? cluster.options : ChoiceLogic.filter(cluster.options, query: draft.choiceQuery)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            Text(multi ? "Pick all that apply · options from the actual form" : "Pick one · options from the actual form")
+                .font(Typography.callout).foregroundStyle(Palette.textSecondary)
+            Group {
+                if style == .chips { chips } else { searchable }
+            }
+            .focusable()
+            .focused(focus)
+            .focusEffectDisabled()
+            .onKeyPress(characters: .decimalDigits) { press in
+                guard let key = press.characters.first, let option = ChoiceLogic.option(forKey: key, in: Array(visible.prefix(9))) else {
+                    return .ignored
+                }
+                pick(option)
+                return .handled
+            }
+            if ChoiceLogic.allowsOther(cluster) { other }
+        }
+    }
+
+    private var chips: some View {
+        FlowLayout(spacing: Space.xs) {
+            ForEach(Array(cluster.options.enumerated()), id: \.element) { i, option in
+                chip(option, number: i + 1)
+            }
+        }
+    }
+
+    private var searchable: some View {
+        VStack(alignment: .leading, spacing: Space.xs) {
+            TextField("Filter \(cluster.options.count) options", text: Binding(
+                get: { draft.choiceQuery },
+                set: { v in model.updateDraft(for: cluster) { $0.choiceQuery = v } }))
+                .textFieldStyle(.roundedBorder)
+                .frame(maxWidth: 320)
+                .onSubmit { if let first = visible.first { pick(first) } }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(visible.enumerated()), id: \.element) { i, option in
+                        let on = !draft.useOther && draft.choices.contains(option)
+                        Button { pick(option) } label: {
+                            HStack(spacing: Space.s) {
+                                Image(systemName: on ? (multi ? "checkmark.square.fill" : "largecircle.fill.circle")
+                                                     : (multi ? "square" : "circle"))
+                                    .foregroundStyle(on ? Palette.accent : Palette.textTertiary)
+                                Text(option).font(Typography.body).frame(maxWidth: .infinity, alignment: .leading)
+                                if i < 9 {
+                                    Text("\(i + 1)").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
+                                }
+                            }
+                            .padding(.horizontal, Space.s).padding(.vertical, 4)
+                            .background(on ? Palette.accent.opacity(0.12) : Color.clear,
+                                        in: RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityAddTraits(on ? .isSelected : [])
+                    }
+                    if visible.isEmpty {
+                        Text("No option matches.").font(Typography.callout).foregroundStyle(Palette.textTertiary)
+                    }
+                }
+            }
+            .frame(maxWidth: 460, maxHeight: 220)
+            .sunkenWell()
+        }
+    }
+
+    private func chip(_ option: String, number: Int) -> some View {
+        let on = !draft.useOther && draft.choices.contains(option)
+        return Button { pick(option) } label: {
+            HStack(spacing: Space.xs) {
+                Text("\(number)").font(Typography.monoSmall).foregroundStyle(on ? Palette.accent : Palette.textTertiary)
+                Text(option).font(Typography.body)
+            }
+            .padding(.horizontal, Space.m)
+            .padding(.vertical, 5)
+            .background(on ? Palette.accent.opacity(0.12) : Palette.sunken, in: Capsule())
+            .overlay(Capsule().stroke(on ? Palette.accent.opacity(0.5) : Palette.hairline, lineWidth: 0.5))
+        }
+        .buttonStyle(PressScaleStyle())
+        .help("Press \(number)")
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    @ViewBuilder
+    private var other: some View {
+        if draft.useOther {
+            HStack(spacing: Space.s) {
+                TextField("Other: type your answer", text: Binding(
+                    get: { draft.text },
+                    set: { v in model.updateDraft(for: cluster) { $0.text = v } }))
+                    .textFieldStyle(.roundedBorder)
+                    .frame(maxWidth: 360)
+                    .focused($otherFocused)
+                    .onSubmit { model.submitSelected(undoManager: undoManager) }
+                Button("Use the options") { model.updateDraft(for: cluster) { $0.useOther = false } }
+                    .buttonStyle(.link).font(Typography.callout)
+            }
+        } else {
+            Button("Other…") {
+                model.updateDraft(for: cluster) { $0.useOther = true }
+                otherFocused = true
+            }
+            .buttonStyle(.link)
+            .font(Typography.callout)
+            .help("None of these fit: type your own answer")
+        }
+    }
+
+    private func pick(_ option: String) {
+        model.updateDraft(for: cluster) { d in
+            d.useOther = false
+            d.choices = ChoiceLogic.pick(option, in: d.choices, multi: multi, order: cluster.options)
+        }
+    }
+}
+
+// MARK: - Action pane
+
+/// Detail pane for an agent blocker: the task, why the agent stopped, the affected jobs, and
+/// "Open in agent Chrome" / "Done, retry N jobs" / "Skip these jobs". No answer box, nothing is
+/// saved to memory, and the user is never asked to type a password here.
+struct ActionPane: View {
+    var model: InboxModel
+    var cluster: QuestionCluster
+    var undoManager: UndoManager?
+    /// Inside an outer ScrollView (Job detail's Questions tab): doesn't scroll on its own.
+    var embedded = false
+    @Environment(AppStore.self) private var store
+    @State private var opening = false
+
+    private var jobs: [JobItem] { model.jobs(for: cluster) }
+
+    var body: some View {
+        InboxPaneScroll(embedded: embedded) {
+            VStack(alignment: .leading, spacing: Space.l) {
+                header
+                stepsList
+                evidence
+                affectedJobs
+                actions
+            }
+            .padding(embedded ? 0 : Space.contentPadding)
+            .frame(maxWidth: 720, alignment: .leading)
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            HStack(spacing: Space.xs) {
+                Image(systemName: "hand.raised.fill").imageScale(.small)
+                Text("Agent is blocked").eyebrowStyle()
+            }
+            .foregroundStyle(Palette.needsYou)
+            HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                Image(systemName: InboxActionCopy.symbol(cluster)).foregroundStyle(Palette.needsYou)
+                Text(InboxActionCopy.title(cluster)).font(Typography.title2).textSelection(.enabled)
+            }
+            Text(InboxActionCopy.explanation(cluster))
+                .font(Typography.body)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var stepsList: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            ForEach(Array(InboxActionCopy.steps(cluster, jobs: cluster.jobCount).enumerated()), id: \.offset) { i, step in
+                HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                    Text("\(i + 1)")
+                        .font(Typography.monoSmall)
+                        .foregroundStyle(Palette.textSecondary)
+                        .frame(width: 18, height: 18)
+                        .background(Palette.sunken, in: Circle())
+                    Text(step).font(Typography.body).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .padding(Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .sunkenWell()
+    }
+
+    /// What the agent actually hit ("Choose Password", "Retype Password", the site).
+    @ViewBuilder
+    private var evidence: some View {
+        let lines = InboxActionCopy.evidence(cluster).filter { $0 != InboxActionCopy.title(cluster) }
+        if !lines.isEmpty {
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text("What the agent saw").eyebrowStyle()
+                FlowLayout(spacing: Space.xs) {
+                    ForEach(lines, id: \.self) { line in
+                        Text(line)
+                            .font(Typography.callout)
+                            .foregroundStyle(Palette.textSecondary)
+                            .padding(.horizontal, Space.s).padding(.vertical, 2)
+                            .background(Palette.sunken, in: Capsule())
+                            .textSelection(.enabled)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var affectedJobs: some View {
+        if !jobs.isEmpty {
+            VStack(alignment: .leading, spacing: Space.xs) {
+                Text("Waiting on this · \(C3Format.plural(cluster.jobCount, "job"))").eyebrowStyle()
+                ForEach(jobs.prefix(6)) { job in
+                    Button { store.router.openJob(id: job.id) } label: {
+                        HStack(spacing: Space.xs) {
+                            Text(job.displayName).lineLimit(1)
+                            Text("· \(InboxJobContext.where_(job))").foregroundStyle(Palette.textTertiary).lineLimit(1)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                    .help("Open this job")
+                }
+                if jobs.count > 6 {
+                    Text("+\(jobs.count - 6) more").font(Typography.callout).foregroundStyle(Palette.textTertiary)
+                }
+            }
+        }
+    }
+
+    private var actions: some View {
+        HStack(spacing: Space.s) {
+            Button {
+                opening = true
+                Task {
+                    await model.openAgentChrome(for: cluster)
+                    opening = false
+                }
+            } label: {
+                Label("Open in agent Chrome", systemImage: "globe")
+            }
+            .buttonStyle(.glass)
+            .disabled(opening)
+            .help("Opens the application page in the Chrome profile the agent uses, so what you do there carries over")
+            Spacer()
+            Button(cluster.jobCount == 1 ? "Skip this job" : "Skip these jobs") { model.skipSelected(undoManager: undoManager) }
+                .buttonStyle(.glass)
+                .help("Skip every job waiting on this")
+            Button {
+                model.completeSelectedAction(undoManager: undoManager)
+            } label: {
+                HStack(spacing: Space.xs) {
+                    Text(cluster.jobCount == 1 ? "Done, retry job" : "Done, retry \(cluster.jobCount) jobs")
+                    KeyCap(.submit)
+                }
+            }
+            .buttonStyle(.glassProminent)
+            .keyboardShortcut(.submit)
+            .help("You did the step: the agent tries these jobs again")
         }
     }
 }

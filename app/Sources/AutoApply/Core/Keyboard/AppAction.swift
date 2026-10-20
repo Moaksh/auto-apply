@@ -8,6 +8,7 @@ enum AppAction: Hashable, Sendable, Identifiable {
     case runNow
     case runPrep
     case nextQuestion
+    case addJobByLink
     case go(SidebarItem)
     case setMode(Mode)
     case toggleInspector
@@ -17,6 +18,8 @@ enum AppAction: Hashable, Sendable, Identifiable {
     case openAgentChrome
     case openDataFolder
     case openMainWindow
+    /// Approve & submit the awaiting-review job open in Job detail (only listed when there is one).
+    case approveOpenJob
 
     var id: String {
         switch self {
@@ -28,7 +31,7 @@ enum AppAction: Hashable, Sendable, Identifiable {
 
     /// Actions listed in the ⌘K palette's ACTIONS / NAVIGATE sections.
     static var paletteActions: [AppAction] {
-        [.togglePause, .runNow, .runPrep, .nextQuestion, .setMode(.auto), .setMode(.review),
+        [.approveOpenJob, .addJobByLink, .togglePause, .runNow, .runPrep, .nextQuestion, .setMode(.auto), .setMode(.review),
          .openAgentChrome, .openDataFolder, .toggleInspector, .openSettings]
             + SidebarItem.allCases.map { .go($0) }
     }
@@ -41,12 +44,14 @@ enum AppAction: Hashable, Sendable, Identifiable {
         case .runNow: .runNow
         case .runPrep: .runPrep
         case .nextQuestion: .nextQuestion
+        case .addJobByLink: .addJobByLink
         case .go(let item): .go(item)
         case .toggleInspector: .toggleInspector
         case .toggleSidebar: .toggleSidebar
         case .openPalette: .commandPalette
         case .openSettings: .openSettings
         case .openMainWindow: .openMainWindow
+        case .approveOpenJob: .submit
         case .setMode, .openAgentChrome, .openDataFolder: nil
         }
     }
@@ -58,6 +63,7 @@ enum AppAction: Hashable, Sendable, Identifiable {
         case .runNow: "Run discovery now"
         case .runPrep: "Run Prep pass"
         case .nextQuestion: "Answer next question"
+        case .addJobByLink: "Add job by link"
         case .go(let item): "Go to \(item.title)"
         case .setMode(let m): m == .auto ? "Switch to Auto mode" : "Switch to Review mode"
         case .toggleInspector: "Toggle inspector"
@@ -67,7 +73,24 @@ enum AppAction: Hashable, Sendable, Identifiable {
         case .openAgentChrome: "Open agent Chrome"
         case .openDataFolder: "Open data folder"
         case .openMainWindow: "Open AutoApply"
+        case .approveOpenJob: approvableJob(in: store).map { "Approve & submit \($0.company)" } ?? "Approve & submit"
         }
+    }
+
+    /// Whether the action applies right now (the palette hides ones that don't).
+    @MainActor
+    func isAvailable(in store: AppStore) -> Bool {
+        switch self {
+        case .approveOpenJob: approvableJob(in: store) != nil
+        default: true
+        }
+    }
+
+    /// The job open in Job detail when it's awaiting review.
+    @MainActor
+    func approvableJob(in store: AppStore) -> JobItem? {
+        guard let id = store.router.openJobDetailID, let job = store.jobs.job(id: id), job.state == .awaitingReview else { return nil }
+        return job
     }
 
     @MainActor
@@ -77,6 +100,7 @@ enum AppAction: Hashable, Sendable, Identifiable {
         case .runNow: "play.fill"
         case .runPrep: "tray.and.arrow.down"
         case .nextQuestion: "hand.raised.fill"
+        case .addJobByLink: "link.badge.plus"
         case .go(let item): item.symbol
         case .setMode(let m): m == .auto ? "bolt.fill" : "checkmark.rectangle.stack"
         case .toggleInspector: "sidebar.right"
@@ -86,6 +110,7 @@ enum AppAction: Hashable, Sendable, Identifiable {
         case .openAgentChrome: "globe"
         case .openDataFolder: "folder"
         case .openMainWindow: "macwindow"
+        case .approveOpenJob: "paperplane.fill"
         }
     }
 }
@@ -100,6 +125,7 @@ extension AppStore {
         case .runPrep: await runPrepPass()
         case .nextQuestion:
             router.go(.needsYou)
+        case .addJobByLink: router.requestAddJob()
         case .go(let item): router.go(item)
         case .setMode(let mode): await setMode(mode)
         case .toggleInspector: router.toggleInspector()
@@ -112,6 +138,8 @@ extension AppStore {
             try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
             NSWorkspace.shared.open(home)
         case .openMainWindow: router.requestMainWindow()
+        case .approveOpenJob:
+            if let job = action.approvableJob(in: self) { router.requestApprove(jobID: job.id) }
         }
     }
 }

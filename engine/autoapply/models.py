@@ -18,6 +18,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Annotated, Any, ClassVar, Literal
 
@@ -49,6 +50,7 @@ from autoapply.enums import (
     LogLevel,
     Mode,
     Seniority,
+    QuestionKind,
     QuestionReason,
     QuestionStatus,
     RemotePolicy,
@@ -447,6 +449,7 @@ class Question(RowModel):
     suggested_answer: str | None = None
     suggested_confidence: float | None = None
     suggested_note: str | None = None
+    kind: QuestionKind = QuestionKind.QUESTION
     created_at: Timestamp
     resolved_at: Timestamp | None = None
 
@@ -539,6 +542,16 @@ class FormQuestion(BaseModel):
     max_length: int | None = None
 
 
+def choice_field_type(field_type: FieldType | str, options: Sequence[str] | None) -> FieldType:
+    """A field that lists options is a choice: ``text`` / ``textarea`` with options (Rippling's
+    YES_NO_SCALE_4, dropdowns reported as text) becomes ``select`` so the inbox shows the choices
+    instead of a free-text box. Other types (select, multiselect, boolean, ...) are kept."""
+    ft = FieldType(field_type)
+    if options and ft in (FieldType.TEXT, FieldType.TEXTAREA):
+        return FieldType.SELECT
+    return ft
+
+
 # =====================================================================================
 # Protocol: shared payload parts
 # =====================================================================================
@@ -592,6 +605,17 @@ class QuestionCluster(_P):
     suggested_answer: str | None = Field(default=None, description="The agent's low-confidence draft, to accept or edit.")
     suggested_confidence: float | None = None
     suggested_note: str | None = Field(default=None, description="What the draft could not cover from the user's facts (shown beside it, never inside it).")
+    kind: str = Field(
+        default="question",
+        description="'question': type a value for an application field. 'action': the agent is blocked and the user must "
+                    "do something (create an account / sign in, solve a CAPTCHA, finish a verification), then retry or "
+                    "skip the jobs; answer it with answer_question (save_to_memory false; the text is ignored). Unknown "
+                    "values must be treated as 'question'.",
+    )
+    action_type: str | None = Field(
+        default=None,
+        description="For kind 'action': 'account' | 'captcha' | 'verification' | 'other' (unknown values -> 'other').",
+    )
 
 
 class RunInfo(_P):
@@ -611,6 +635,7 @@ class Counts(_P):
 
     queued: int = 0
     needs_you_clusters: int = 0
+    needs_you_actions: int = Field(default=0, description="How many of needs_you_clusters are agent actions (kind 'action').")
     needs_you_jobs: int = 0
     awaiting_review: int = 0
     easy_apply_open: int = 0
@@ -805,6 +830,15 @@ class RetryApplicationPayload(_P):
     application_id: int
 
 
+class AddJobUrlPayload(_P):
+    """Add a job from any apply link (manual source) and queue it as a user choice."""
+
+    url: str = Field(description="Job / apply page URL (http or https; scheme optional).")
+    title: str | None = Field(default=None, description="Override the title read from the page.")
+    company: str | None = Field(default=None, description="Override the company read from the page.")
+    apply_now: bool = Field(default=True, description="Start filling right away (else it waits for the next run).")
+
+
 class ApplyAnywayPayload(_P):
     """User override of a hard-filter / below-threshold skip: skipped -> queued (actor user)."""
 
@@ -924,6 +958,7 @@ COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "retry_application": RetryApplicationPayload,
     "resolve_unknown": ResolveUnknownPayload,
     "apply_anyway": ApplyAnywayPayload,
+    "add_job_url": AddJobUrlPayload,
     "update_job_notes": UpdateJobNotesPayload,
     "set_application_resume": SetApplicationResumePayload,
     "mark_easy_apply_done": MarkEasyApplyDonePayload,

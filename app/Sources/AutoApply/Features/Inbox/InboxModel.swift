@@ -15,10 +15,16 @@ enum AnswerKind: Equatable, Sendable {
     case url
     case email
     case date
-    case captcha           // "solve it in the agent's Chrome, then confirm"
+    case action            // agent blocker: no answer box — "do it in the agent's Chrome, then retry"
 
     init(cluster: QuestionCluster) {
-        if cluster.reason == .captcha { self = .captcha; return }
+        if cluster.isAction { self = .action; return }
+        // Options decide, not field_type: forms often report dropdowns / scales ("Strong No" …
+        // "Strong Yes") as text fields that carry options.
+        if !cluster.options.isEmpty {
+            self = .choice(multi: cluster.fieldType == .multiselect)
+            return
+        }
         switch cluster.fieldType {
         case .textarea: self = .longText
         case .number: self = .number
@@ -47,6 +53,10 @@ struct AnswerDraft: Equatable, Sendable {
     var saveToMemory = true
     /// Never-guess clusters: write the value into the profile's facts instead of memory.
     var saveToProfile = false
+    /// Choice questions: "Other…" free text instead of a listed option (non-strict fields only).
+    var useOther = false
+    /// Choice questions with many options: the search filter.
+    var choiceQuery = ""
     /// "Answer per job instead" escape hatch.
     var perJob = false
     var perJobAnswers: [Int: String] = [:]
@@ -56,7 +66,7 @@ struct AnswerDraft: Equatable, Sendable {
     init(cluster: QuestionCluster) {
         let isNeverGuess = cluster.neverGuessKey != nil || cluster.reason == .neverGuess
         saveToProfile = isNeverGuess && cluster.neverGuessKey != nil
-        saveToMemory = !saveToProfile && cluster.reason != .captcha
+        saveToMemory = !saveToProfile && !cluster.isAction
     }
 }
 
@@ -107,10 +117,15 @@ enum AnswerComposerLogic {
             guard let yes = draft.yesNo else { return .failure(.empty) }
             value = yes ? "Yes" : "No"
         case .choice:
-            guard !draft.choices.isEmpty else { return .failure(.empty) }
-            value = draft.choices.joined(separator: ", ")
-        case .captcha:
-            value = "solved"
+            if draft.useOther {
+                value = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            } else {
+                guard !draft.choices.isEmpty else { return .failure(.empty) }
+                value = draft.choices.joined(separator: ", ")
+            }
+        case .action:
+            // "Done, retry": the daemon ignores the text and never stores it.
+            return .success(ResolvedAnswer(answer: "done", saveToMemory: false, saveToProfile: false, perJobAnswers: []))
         default:
             value = draft.text.trimmingCharacters(in: .whitespacesAndNewlines)
         }
@@ -148,6 +163,125 @@ enum AnswerComposerLogic {
     }
 
     static func usesTokens(_ text: String) -> Bool { text.contains("{company}") || text.contains("{role}") }
+}
+
+/// Choice questions (any question that lists options): chips with 1–9 shortcuts for a few short
+/// options, a searchable list for more; "Other…" free text only when the field isn't a strict select.
+enum ChoiceLogic {
+    enum Style: Equatable, Sendable { case chips, searchable }
+
+    /// Up to this many short options render as chips.
+    static let chipLimit = 5
+    static let shortOption = 28
+
+    static func style(for options: [String]) -> Style {
+        options.count <= chipLimit && options.allSatisfy { $0.count <= shortOption } ? .chips : .searchable
+    }
+
+    /// Free text is allowed unless the form said the field is a select / multiselect / boolean.
+    static func allowsOther(_ cluster: QuestionCluster) -> Bool {
+        ![.select, .multiselect, .boolean].contains(cluster.fieldType)
+    }
+
+    /// Options matching a search query (case- and diacritic-insensitive substring), in form order.
+    static func filter(_ options: [String], query: String) -> [String] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return options }
+        return options.filter { $0.range(of: q, options: [.caseInsensitive, .diacriticInsensitive]) != nil }
+    }
+
+    /// The option bound to number key "1"…"9" among the visible options.
+    static func option(forKey key: Character, in options: [String]) -> String? {
+        guard let n = key.wholeNumberValue, (1...9).contains(n), n <= options.count else { return nil }
+        return options[n - 1]
+    }
+
+    /// New selection after picking `option`: single select replaces, multi toggles (kept in form order).
+    static func pick(_ option: String, in current: [String], multi: Bool, order: [String]) -> [String] {
+        guard multi else { return [option] }
+        var set = Set(current)
+        if set.contains(option) { set.remove(option) } else { set.insert(option) }
+        return order.filter(set.contains) + current.filter { !order.contains($0) && set.contains($0) }
+    }
+
+    /// An agent draft / restored answer mapped back onto the options (exact, case-insensitive).
+    static func match(_ answer: String, options: [String], multi: Bool) -> [String]? {
+        let parts = multi ? answer.components(separatedBy: ", ") : [answer]
+        let hits = parts.compactMap { part in
+            options.first { $0.caseInsensitiveCompare(part.trimmingCharacters(in: .whitespaces)) == .orderedSame }
+        }
+        return hits.count == parts.count && !hits.isEmpty ? hits : nil
+    }
+}
+
+/// Plain-English copy for agent blockers (kind "action"): the task title, why the agent
+/// stopped, and what to do. Never asks for a password.
+enum InboxActionCopy {
+    /// "Create an account at JPMC" — the task, not the form label.
+    static func title(_ cluster: QuestionCluster) -> String {
+        let at = companies(cluster)
+        switch cluster.action {
+        case .account: return at.isEmpty ? "Create an account or sign in" : "Create an account or sign in at \(at)"
+        case .captcha: return at.isEmpty ? "Solve the CAPTCHA" : "Solve the CAPTCHA at \(at)"
+        case .verification: return at.isEmpty ? "Finish the email or phone verification" : "Finish verifying at \(at)"
+        case .other, nil: return cluster.canonicalQuestion
+        }
+    }
+
+    /// Why the agent stopped, in one or two sentences.
+    static func explanation(_ cluster: QuestionCluster) -> String {
+        switch cluster.action {
+        case .account:
+            return "This application site wants an account before it shows the form. The agent never creates accounts "
+                + "or types passwords for you, so it stopped here."
+        case .captcha:
+            return "A CAPTCHA or bot check appeared on the form. Only a person can get past it, so the agent stopped."
+        case .verification:
+            return "The site sent a verification code or link. The agent can't open your messages, so it stopped here."
+        case .other, nil:
+            return "The agent can't continue on its own. Do this step yourself, then retry, or skip these jobs."
+        }
+    }
+
+    /// Numbered steps shown under the explanation.
+    static func steps(_ cluster: QuestionCluster, jobs: Int) -> [String] {
+        let retry = jobs == 1 ? "Click Done, retry. The agent picks the job up again." : "Click Done, retry. The agent picks the \(jobs) jobs up again."
+        switch cluster.action {
+        case .account:
+            return ["Open the agent's Chrome. The application page loads there.",
+                    "Create the account or sign in yourself, and choose your own password there. Don't type it into AutoApply.",
+                    retry + " It reuses the signed-in session."]
+        case .captcha:
+            return ["Open the agent's Chrome and solve the check.", retry]
+        case .verification:
+            return ["Open the agent's Chrome and finish verifying, using the code or link from your email or phone.", retry]
+        case .other, nil:
+            return ["Do the step above, in the agent's Chrome if it needs the site.", retry]
+        }
+    }
+
+    /// SF Symbol per action type.
+    static func symbol(_ cluster: QuestionCluster) -> String {
+        switch cluster.action {
+        case .account: "person.badge.key"
+        case .captcha: "puzzlepiece.extension"
+        case .verification: "envelope.badge"
+        case .other, nil: "hand.raised"
+        }
+    }
+
+    /// Field labels the agent hit ("Choose Password", "Retype Password"), excluding the title wording.
+    static func evidence(_ cluster: QuestionCluster) -> [String] {
+        var seen = Set<String>()
+        return ([cluster.canonicalQuestion] + cluster.variants).filter { seen.insert($0.lowercased()).inserted }
+    }
+
+    private static func companies(_ cluster: QuestionCluster) -> String {
+        var seen = Set<String>()
+        let names = cluster.companies.filter { seen.insert($0).inserted }
+        guard !names.isEmpty else { return "" }
+        return names.count > 2 ? "\(names.prefix(2).joined(separator: ", ")) +\(names.count - 2)" : names.joined(separator: " and ")
+    }
 }
 
 /// Ranks stories against a question by tag / keyword overlap ("Suggested from your stories").
@@ -237,8 +371,30 @@ final class InboxModel {
 
     // MARK: Derived
 
-    /// Open clusters, impact first (the store already sorts by jobs unblocked).
-    var clusters: [QuestionCluster] { store.inbox.clusters.filter { pending[$0.clusterId] == nil } }
+    /// Open clusters in list order: agent blockers first, then questions; impact first within
+    /// each (the store already sorts this way). Keyboard navigation follows this order.
+    var clusters: [QuestionCluster] {
+        let open = store.inbox.clusters.filter { pending[$0.clusterId] == nil }
+        return open.filter(\.isAction) + open.filter { !$0.isAction }
+    }
+
+    /// "Agent is blocked · needs you to act" section.
+    var actionClusters: [QuestionCluster] { clusters.filter(\.isAction) }
+
+    /// "Questions to answer" section.
+    var questionClusters: [QuestionCluster] { clusters.filter { !$0.isAction } }
+
+    var actionCount: Int { actionClusters.count }
+
+    var questionCount: Int { questionClusters.count }
+
+    /// Header line: "3 to do · 34 questions".
+    var summary: String { InboxStore.summary(actions: actionCount, questions: questionCount) }
+
+    /// List / palette title: the task for an action, the question otherwise.
+    func title(for cluster: QuestionCluster) -> String {
+        cluster.isAction ? InboxActionCopy.title(cluster) : cluster.canonicalQuestion
+    }
 
     var selectedCluster: QuestionCluster? {
         guard let id = selectedClusterID else { return nil }
@@ -336,6 +492,10 @@ final class InboxModel {
     @discardableResult
     func submitSelected(undoManager: UndoManager? = nil) -> Bool {
         guard let cluster = selectedCluster else { return false }
+        if cluster.isAction {
+            completeSelectedAction(undoManager: undoManager)
+            return true
+        }
         let draft = draft(for: cluster)
         switch AnswerComposerLogic.resolve(draft, kind: kind(for: cluster), jobIDs: cluster.jobIds) {
         case .failure(let error):
@@ -346,6 +506,20 @@ final class InboxModel {
             enqueue(cluster: cluster, answer: resolved, skipReason: nil, undoManager: undoManager)
             return true
         }
+    }
+
+    /// "Done, retry N jobs" on an agent blocker: resolves it (nothing saved to memory) and the
+    /// daemon re-queues its jobs. Same Undo window as answers.
+    func completeSelectedAction(undoManager: UndoManager? = nil) {
+        guard let cluster = selectedCluster, cluster.isAction else { return }
+        enqueue(cluster: cluster, answer: ResolvedAnswer(answer: "done", saveToMemory: false, saveToProfile: false, perJobAnswers: []),
+                skipReason: nil, undoManager: undoManager)
+    }
+
+    /// Open the agent's Chrome on the blocked job's application page.
+    func openAgentChrome(for cluster: QuestionCluster) async {
+        let url = cluster.jobIds.lazy.compactMap { self.store.jobs.job(id: $0)?.applyURL }.first
+        await store.openAgentChrome(url: url)
     }
 
     /// "Skip these jobs": parks every job in the cluster as skipped (same Undo window).
@@ -368,7 +542,7 @@ final class InboxModel {
         pending[id] = Pending(cluster: cluster, answer: answer, skipReason: skipReason, task: task, enqueuedAt: Date(),
                               priorResolvedAt: store.inbox.resolvedToday.first { $0.clusterID == id }?.at)
         answered.removeAll { $0.clusterID == id }
-        answered.insert(InboxAnsweredRecord(clusterID: id, question: cluster.canonicalQuestion, jobCount: cluster.jobCount,
+        answered.insert(InboxAnsweredRecord(clusterID: id, question: title(for: cluster), jobCount: cluster.jobCount,
                                             status: answer == nil ? .skipped : .answered, at: Date(), isPending: true), at: 0)
         drafts.removeValue(forKey: id)
         validationMessage = nil
@@ -379,14 +553,14 @@ final class InboxModel {
             Haptics.levelChange()
         }
         let jobsText = C3Format.plural(cluster.jobCount, "job")
-        let message = answer == nil ? "Skipped · \(jobsText)" : "Answered · \(jobsText) resumed"
+        let message = answer == nil ? "Skipped · \(jobsText)" : cluster.isAction ? "Retrying · \(jobsText)" : "Answered · \(jobsText) resumed"
         store.toasts.show(message, symbol: answer == nil ? "arrow.uturn.right" : "checkmark", style: .success,
                           duration: window, actionTitle: "Undo") { [weak self] in self?.undo(clusterID: id) }
         if let undoManager {
             undoManager.registerUndo(withTarget: self) { model in
                 MainActor.assumeIsolated { model.undo(clusterID: id) }
             }
-            undoManager.setActionName(answer == nil ? "Skip Question" : "Answer")
+            undoManager.setActionName(answer == nil ? (cluster.isAction ? "Skip Jobs" : "Skip Question") : (cluster.isAction ? "Retry" : "Answer"))
         }
     }
 
@@ -410,7 +584,7 @@ final class InboxModel {
     /// Put a held answer back in the composer (text, yes/no, choices, per-job, save toggles) so
     /// nothing typed is lost.
     private func restoreDraft(from p: Pending) {
-        guard let a = p.answer else { return }
+        guard let a = p.answer, !p.cluster.isAction else { return }
         var d = AnswerDraft(cluster: p.cluster)
         d.text = a.perJobAnswers.isEmpty ? a.answer : ""
         d.saveToMemory = a.saveToMemory
@@ -420,7 +594,13 @@ final class InboxModel {
             d.perJobAnswers = Dictionary(a.perJobAnswers.map { ($0.jobId, $0.answer) }, uniquingKeysWith: { a, _ in a })
         }
         if AnswerKind(cluster: p.cluster) == .yesNo { d.yesNo = a.answer == "Yes" }
-        if case .choice = AnswerKind(cluster: p.cluster) { d.choices = a.answer.components(separatedBy: ", ") }
+        if case .choice(let multi) = AnswerKind(cluster: p.cluster), a.perJobAnswers.isEmpty {
+            if let hits = ChoiceLogic.match(a.answer, options: p.cluster.options, multi: multi) {
+                d.choices = hits
+            } else {
+                d.useOther = true
+            }
+        }
         drafts[p.cluster.clusterId] = d
     }
 
@@ -500,7 +680,7 @@ final class InboxModel {
     }
 
     func copyQuestion(_ cluster: QuestionCluster) {
-        clipboard.write(cluster.canonicalQuestion)
+        clipboard.write(title(for: cluster))
         store.toasts.show("Copied · question", symbol: "doc.on.clipboard", style: .success)
     }
 }

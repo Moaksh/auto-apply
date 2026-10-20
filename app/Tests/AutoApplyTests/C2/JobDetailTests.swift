@@ -30,6 +30,76 @@ struct JobDetailTests {
         #expect(JobDetailRules.statusActions(for: C2.job(id: 1, state: .skipped)) == [.applyAnyway], "user-only skipped → queued")
     }
 
+    @Test func headerActionsFollowTheJobState() {
+        typealias A = JobDetailRules.HeaderAction
+        func actions(_ state: AppState) -> [A] {
+            JobDetailRules.headerActions(for: C2.job(id: 1, state: state))
+        }
+        #expect(actions(.awaitingReview) == [.approve, .skip])
+        #expect(actions(.needsYou) == [], "questions are answered in the Questions tab, not from the header")
+        #expect(actions(.failed) == [.retry])
+        #expect(actions(.skipped) == [.applyAnyway])
+        #expect(actions(.unknownVerify) == [.resolveSent, .resolveNotSent])
+        for state in [AppState.queued, .discovered, .scored, .prepping, .filling, .submitting, .submitted] {
+            #expect(actions(state).isEmpty, "\(state) has no header action")
+        }
+        // Actions that need an application row disappear without one.
+        var bare = C2.job(id: 2, state: .awaitingReview)
+        bare.applicationID = nil
+        #expect(JobDetailRules.headerActions(for: bare).isEmpty)
+        bare.state = .failed
+        #expect(JobDetailRules.headerActions(for: bare).isEmpty)
+    }
+
+    @Test func headerActionPresentation() {
+        typealias A = JobDetailRules.HeaderAction
+        #expect(A.approve.title == "Approve & submit")
+        #expect(A.resolveSent.title == "It was sent" && A.resolveNotSent.title == "It wasn't sent")
+        #expect(A.approve.shortcut == .submit && AppShortcut.submit.displayString == "⌘↵")
+        #expect(A.skip.shortcut == nil)
+        // One accent-filled button per state.
+        for state in AppState.allCases {
+            let primaries = JobDetailRules.headerActions(for: C2.job(id: 1, state: state)).filter(\.isPrimary)
+            #expect(primaries.count <= 1, "\(state)")
+        }
+        #expect(A.approve.needsDaemon)
+    }
+
+    @Test func queuedShowsANoteInsteadOfAButton() {
+        #expect(JobDetailRules.headerNote(for: C2.job(id: 1, state: .queued)) == "Queued · next run")
+        #expect(JobDetailRules.headerNote(for: C2.job(id: 1, state: .awaitingReview)) == nil)
+    }
+
+    @Test func openClustersAreThoseBlockingTheJob() {
+        let at = Samples.now
+        let clusters = [
+            QuestionCluster(clusterId: "a", canonicalQuestion: "Why?", jobIds: [1, 2], jobCount: 2, createdAt: at),
+            QuestionCluster(clusterId: "b", canonicalQuestion: "Start?", jobIds: [3], jobCount: 1, createdAt: at),
+            QuestionCluster(clusterId: "c", canonicalQuestion: "PST?", jobIds: [2, 3], jobCount: 2, createdAt: at),
+        ]
+        #expect(JobDetailRules.openClusters(forJob: 2, in: clusters).map(\.clusterId) == ["a", "c"])
+        #expect(JobDetailRules.openClusters(forJob: 9, in: clusters).isEmpty)
+    }
+
+    @Test func statusMenuOnlyOffersBoardMoves() {
+        #expect(JobDetailRules.menuActions(for: C2.job(id: 1, state: .submitted, status: .applied)).count == 5)
+        for state in [AppState.awaitingReview, .failed, .skipped, .unknownVerify] {
+            #expect(JobDetailRules.menuActions(for: C2.job(id: 1, state: state)).isEmpty, "\(state) uses header buttons")
+        }
+    }
+
+    @Test func reviewSafeguardRules() {
+        let clean = [ApplicationAnswerItem(id: 1, applicationID: 1, question: "Name", answer: "M", confidence: nil, origin: .profile),
+                     ApplicationAnswerItem(id: 2, applicationID: 1, question: "Go", answer: "4", confidence: 0.93, origin: .cv)]
+        let medium = clean + [ApplicationAnswerItem(id: 3, applicationID: 1, question: "Why", answer: "…", confidence: 0.7, origin: .memory)]
+        let low = medium + [ApplicationAnswerItem(id: 4, applicationID: 1, question: "Start", answer: "2m", confidence: 0.4, origin: .generated)]
+        #expect(ReviewSafeguard.flagRank(clean) == 0 && ReviewSafeguard.flagRank(medium) == 1 && ReviewSafeguard.flagRank(low) == 2)
+        #expect(ReviewSafeguard.flaggedAnswers(low).map(\.id) == [3, 4])
+        #expect(!ReviewSafeguard.needsLook(answers: clean, loaded: true))
+        #expect(ReviewSafeguard.needsLook(answers: clean, loaded: false), "unknown confidence is never clean")
+        #expect(ReviewSafeguard.needsLook(answers: medium, loaded: true))
+    }
+
     @Test func copyAllFormatsEveryAnswer() {
         let job = C2.job(id: 1, company: "Stripe", title: "Backend Engineer")
         let answers = MockFixtures.applicationAnswers(applicationID: 1, company: "Stripe", startID: 1)
@@ -71,6 +141,8 @@ struct JobDetailTests {
         #expect(JobDetailRules.screenshots(for: C2.job(id: 2)).isEmpty)
         #expect(JobDetailTab.initial(for: job) == .application)
         #expect(JobDetailTab.initial(for: C2.job(id: 2, state: .queued)) == .overview)
+        #expect(JobDetailTab.initial(for: C2.job(id: 3, state: .needsYou), openQuestions: 2) == .questions)
+        #expect(JobDetailTab.initial(for: C2.job(id: 3, state: .needsYou)) == .overview)
     }
 
     @Test @MainActor func loaderStreamsAnswersAndDescription() async {

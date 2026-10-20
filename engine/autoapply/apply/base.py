@@ -138,6 +138,8 @@ class UnresolvedField:
     suggested_answer: str | None = None
     confidence: float | None = None
     note: str | None = None  # what the draft could not cover; shown beside it in the inbox
+    #: QuestionKind value ("question" | "action"); None = classify the label (autoapply.question_kind)
+    kind: str | None = None
 
 
 @dataclass(slots=True)
@@ -1622,6 +1624,7 @@ def _park_unresolved(ctx: ApplyContext, unresolved: list[UnresolvedField]) -> No
     paraphrase clusters, tags country-dependent questions with the job's country); falls back
     to plain ``db.add_question`` rows if that is unavailable."""
     from autoapply import db
+    from autoapply.question_kind import resolve_kind
 
     try:
         from autoapply import prep
@@ -1637,7 +1640,8 @@ def _park_unresolved(ctx: ApplyContext, unresolved: list[UnresolvedField]) -> No
             reason = QuestionReason.UNKNOWN
         db.add_question(ctx.conn, canonical_question=u.question.label, job_id=ctx.job.id, field_type=u.question.field_type,
                         options=u.question.options, never_guess_key=u.never_guess_key, reason=reason,
-                        suggested_answer=u.suggested_answer, suggested_confidence=u.confidence, suggested_note=u.note)
+                        suggested_answer=u.suggested_answer, suggested_confidence=u.confidence, suggested_note=u.note,
+                        kind=resolve_kind(u.question.label, reason, u.kind))
 
 
 async def run_application(

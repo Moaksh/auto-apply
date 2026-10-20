@@ -105,6 +105,7 @@ An `error` without `reply_to` is an unsolicited daemon problem (login expired, C
 | `retry_application` | `application_id` | `null` | failed → queued (actor user) |
 | `resolve_unknown` | `application_id`, `submitted` (bool) | `null` | unknown_verify → submitted \| failed (actor user) |
 | `apply_anyway` | `application_id` | `null` | skipped → queued (actor user): override a filter / threshold skip |
+| `add_job_url` | `url`, `title?`, `company?`, `apply_now` (default true) | `{job_id, application_id, created, state, title, company, started}` | paste a job link: reads title/company from the page (JSON-LD / Rippling API / `<title>`), inserts it as source `manual`, queues it (reason `user_added_link`, exempt from hard filters) and starts filling unless paused. A link already stored is re-queued if skipped/failed. LinkedIn/Glassdoor links → `invalid_payload` |
 | `update_job_notes` | `job_id`, `notes?` (null/empty clears) | `null` | free-form notes on Job detail (`jobs.notes`) |
 | `set_application_resume` | `application_id`, `resume_variant_id` | `{requeued}` | swap the resume (Review ↻). Allowed before filling / while parked / awaiting review / failed / skipped; `conflict` while filling, submitting or after submit. awaiting_review → queued (reason `resume_swapped`) so the form is re-filled |
 | `mark_easy_apply_done` | `job_id` | `{application_id}` | user applied manually; records state submitted, mode `manual`, status `applied` |
@@ -179,7 +180,10 @@ events) is read from SQLite by the app; the DB always wins over optimistic event
 ### 6.2 Shared payload types
 
 - `JobSummary`: `id, application_id?, company_id, company, title, location?, remote?, source, ats, apply_url?, source_url?, easy_apply, salary_min?, salary_max?, salary_currency?, discovered_at`
-- `QuestionCluster`: `cluster_id, canonical_question, field_type, options[], never_guess_key?, reason, question_ids[], variants[], job_ids[], job_count, companies[], created_at`
+- `QuestionCluster`: `cluster_id, canonical_question, field_type, options[], never_guess_key?, reason, question_ids[], variants[], job_ids[], job_count, companies[], created_at, suggested_answer?, suggested_confidence?, suggested_note?, kind, action_type?`
+  - `kind` (string, default `"question"`): `"question"` = a value for a form field; `"action"` = the agent is blocked and the user must do something (create an account / sign in, solve a CAPTCHA, finish a verification). An action is completed with `answer_question` (`save_to_memory` false; the text is ignored and never stored): it resolves and re-queues its jobs. `skip_question` skips them. Actions are never saved to answer memory and never share a cluster with questions. Unknown kinds must be treated as `"question"`.
+  - `action_type` (string, actions only): `account | captcha | verification | other` (unknown -> `other`).
+  - Choices: a question with non-empty `options` is a choice whatever its `field_type` (the engine stores text+options as `select`).
 - `RunInfo`: `run_id, kind, trigger, started_at, finished_at?, outcome?, stats{discovered, scored, skipped, queued, needs_you, awaiting_review, submitted, failed}, tokens_in, tokens_out`
 - `Preferences` / `NeverGuess` / `Profile`: see `protocol.schema.json` `$defs` (field names = DB columns).
 
