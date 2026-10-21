@@ -586,6 +586,9 @@ class Daemon:
             self.llm = get_provider(os.environ.get("AUTOAPPLY_LLM_PROVIDER", "agent_sdk"))
         self.paused = bool(db.get_meta(self.conn, db.META_PAUSED, False))
         self.state = StatePayload(daemon=DaemonActivity.IDLE, paused=self.paused)
+        from autoapply.answers import voice
+
+        voice.set_active(voice.load_profile(self.conn))  # the cover-letter writer has no connection
         available = {
             "conn": self.conn, "paths": self.paths, "llm": self.llm, "emit": self.emit,
             "is_paused": self.is_paused, "profile_dir": self.paths.chrome_profile, "headless": True,
@@ -1625,6 +1628,25 @@ class Daemon:
 
     async def _cmd_import_contacts(self, p: Any) -> dict[str, Any]:
         return self._out.import_contacts(p.file_path)
+
+    async def _cmd_import_linkedin_connections(self, p: Any) -> dict[str, Any]:
+        """The user's own LinkedIn export -> contacts + referral suggestions (never touches LinkedIn)."""
+        from autoapply.outreach import linkedin_export
+
+        return linkedin_export.import_connections(self.conn, p.file_path).as_result()
+
+    async def _cmd_get_voice_profile(self, p: Any) -> dict[str, Any]:
+        from autoapply.answers import voice
+
+        return voice.load_profile(self.conn).model_dump(mode="json")
+
+    async def _cmd_update_voice_profile(self, p: Any) -> dict[str, Any]:
+        from autoapply.answers import voice
+
+        patch = {k: getattr(p, k) for k in p.model_fields_set}
+        profile = voice.update_profile(self.conn, patch)
+        db.log_event(self.conn, "user", "updated the writing voice", actor=Actor.USER, payload={"fields": sorted(patch)})
+        return profile.model_dump(mode="json")
 
     async def _cmd_draft_outreach(self, p: Any) -> dict[str, Any]:
         return await self._out.draft(p.contact_id, p.kind, application_id=p.application_id, instructions=p.instructions)

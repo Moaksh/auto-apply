@@ -142,6 +142,7 @@ Nothing is ever sent without `approve_outreach`. Sending stays off until `enable
 | `update_contact` | `id` + any of `company_id`, `full_name`, `email`, `title`, `linkedin_url`, `relationship`, `notes`, `share_ok` (only keys present; null clears) | `null` | |
 | `delete_contact` | `id`, `suppress` (true) | `null` | with `suppress` the address goes on the do-not-contact list; its pending drafts are cancelled |
 | `import_contacts` | `file_path` (CSV `name,email,company,title,linkedin_url,notes`) | `{added, merged, skipped}` | deduplicated by normalized email |
+| `import_linkedin_connections` | `file_path` (the user's own LinkedIn export `Connections.csv`) | `{imported, merged, skipped, matched_companies: [{company_id, name, why, connections}], referral_suggestions}` | see §5.1.1; LinkedIn is never opened |
 | `draft_outreach` | `contact_id`, `kind` (`application`\|`prospect`\|`referral_email`), `application_id?` (required for `application`), `instructions?` | `{thread_id, message_id, grounded, unsupported_claims}` | grounded + fact-checked; re-drafting / switching contact replaces the open draft |
 | `edit_outreach_draft` | `message_id`, `subject?`, `body`, `confirm_claims` (false) | `{grounded, unsupported_claims}` | re-checked; `confirm_claims` ("These are true") allows approval despite unsupported claims |
 | `approve_outreach` | `message_ids[]`, `include_followups` (false), `send_anyway[]` (message ids OK'd below the confidence bar) | `{batch_uid, scheduled: [{message_id, send_at}], days: [{date, count}]}` | the only path to sending; never fails because of caps (spills to later days) |
@@ -161,6 +162,24 @@ Nothing is ever sent without `approve_outreach`. Sending stays off until `enable
 | `draft_referral` | `id`, `instructions?` | `{connect_note, referral_dm, grounded, unsupported_claims}` | note ≤ 300 characters, message ≤ 120 words; stored on the referral |
 | `update_referral` | `id`, `state?`, `connect_note?`, `referral_dm?` | `null` | states per §7.2; `referred` adds a note to the application |
 | `set_provider_key` | `provider` (`hunter`\|`github`), `api_key?` (null removes) | `{provider, ok}` | checked with the provider, then stored in the Keychain only |
+
+##### 5.1.1 Warm intros from a LinkedIn export (`engine/autoapply/outreach/linkedin_export.py`)
+
+The user downloads their own data from LinkedIn (Settings → Data privacy → Get a copy of your data → Connections) and picks `Connections.csv`. The daemon only reads that file; `linkedin.com` stays blocked and profile URLs are stored as references for the user's browser.
+
+- **Parsing.** The notes preamble before the header is skipped (the header is the first row naming a first name / name and a company); a BOM, UTF-16, quoted cells with commas or line breaks, header variations (`Email Address` / `Email`, `Position` / `Title`, ...) and empty emails are fine. A file with no such header is `invalid_payload`; a missing file is `not_found`.
+- **Contacts.** Each row becomes a contact with `origin = import`, `relationship = other`, a note `LinkedIn connection · {position} at {company} · connected {date}`, and `share_ok = false` (never leaves the Mac). Re-importing a newer export merges by profile URL (then email, then name at the same company): the newest title and employer win, nothing is duplicated. Anyone whose address or domain is on the do-not-contact list is skipped (`skipped`, with rows that have no name).
+- **Matching.** `Company` is compared with the watched companies, the companies of active applications (queued … submitted, not rejected / ghosted) and prospects that were not dismissed. Exact tier: equal after case, accents, punctuation, spacing and legal suffixes (`Pvt Ltd`, `Private Limited`, `Inc`, `LLC`, ...) are removed, with common aliases (`TCS`, `Facebook` = `Meta`, `AWS` = `Amazon`, ...). Strong tier: the distinctive words are equal once generic filler (`Technologies`, `Software`, `India`, ...) is also removed. No substring matching.
+- **Referral suggestions.** For each connection at a matched company (whose domain is not on the do-not-contact list) a `referrals` row is created in state `suggested` with `basis = user`, `basis_detail = "We're connected on LinkedIn."`, the profile URL, the contact and (for an application) the job. Deduplicated per company and profile URL, so a re-import or a dismissed suggestion is never recreated. `referral_suggestions` counts new rows only. The user sends every request and message themselves.
+
+#### 5.1.2 Writing voice (`engine/autoapply/answers/voice.py`)
+
+A small profile stored in `meta` (`voice_profile`) shapes generated cover letters, outreach drafts / LinkedIn notes and long form answers. Generation prompts get a style block (style only; the grounding rules and fact checks are unchanged, and the writing sample is never a source of facts). After generation a deterministic linter flags "AI tells" and rewrites the safe ones (never changing a number or proper noun; a rewrite the fact check would reject is undone).
+
+| type | payload | ack.result | notes |
+|---|---|---|---|
+| `get_voice_profile` | — | `VoiceProfile` `{sign_off, formality, max_words, avoid_phrases, writing_sample}` | defaults: `"Best regards"`, `neutral`, 250, `[]`, `null` |
+| `update_voice_profile` | any of `sign_off` (≤ 40), `formality` (`casual`\|`neutral`\|`formal`), `max_words` (60-600), `avoid_phrases[]` (≤ 20, each ≤ 80), `writing_sample` (≤ 1500) | `VoiceProfile` | only keys present; null resets a field to its default |
 
 #### 5.2 Employer reply commands (schema v11; `engine/autoapply/mail/replywatch.py`)
 

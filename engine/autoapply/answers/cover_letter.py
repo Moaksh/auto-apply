@@ -16,10 +16,11 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from autoapply.answers import voice as voice_rules
 from autoapply.answers.resolver import profile_facts, story_text, trim
 from autoapply.answers.textnorm import strip_accents
 from autoapply.llm.provider import LLMProvider, TokenUsage
-from autoapply.models import Company, Job, Profile, Story
+from autoapply.models import Company, Job, Profile, Story, VoiceProfile
 
 
 @dataclass(slots=True)
@@ -33,6 +34,8 @@ class CoverLetter:
     unsupported_claims: list[str] = field(default_factory=list)
     grounded: bool = True
     attempts: int = 1
+    #: what the writing-voice linter changed or flagged (``voice.VoiceResult.report``)
+    voice: dict = field(default_factory=dict)
 
 
 # -------------------------------------------------------------------------------------
@@ -217,20 +220,25 @@ async def generate_cover_letter(
     out_dir: Path | None = None,
     max_words: int = 250,
     max_attempts: int = 2,
+    voice: VoiceProfile | None = None,
 ) -> CoverLetter:
     """Generate (and optionally write to ``out_dir``) a cover letter for ``job``."""
+    vp = voice or voice_rules.active()
+    max_words = min(max_words, vp.max_words)
     facts = profile_facts(profile)
     fact_lines = "\n".join(f"F{i + 1}. {f}" for i, f in enumerate(facts)) or "(no facts)"
     story_lines = "\n".join(story_text(s) for s in stories) or "(no stories)"
-    sources = allowed_sources(profile, stories, job, company)
-    own_sources = candidate_sources(profile, stories, job, company)
+    # The user's own sign-off ("Warm wishes,") is not a claim about them.
+    sources = [*allowed_sources(profile, stories, job, company), vp.sign_off]
+    own_sources = [*candidate_sources(profile, stories, job, company), vp.sign_off]
     base_prompt = (
         f"COVER LETTER for the role \"{job.title}\" at {company.name}.\n"
         f"At most {max_words} words. Address it to the {company.name} hiring team. Sign with the candidate's name"
         + (f" ({profile.full_name})" if profile.full_name else "") + ".\n\n"
         f"FACTS about the candidate:\n{fact_lines}\n\nSTORIES:\n{story_lines}\n\n"
         f"JOB DESCRIPTION:\n{trim(job.description, 4000)}\n\n"
-        "Return the letter text and the ids of the stories you used."
+        "Return the letter text and the ids of the stories you used.\n\n"
+        + voice_rules.prompt_guidance(vp, kind="cover_letter")
     )
     usage = TokenUsage()
     prompt = base_prompt
@@ -251,9 +259,12 @@ async def generate_cover_letter(
             + "; ".join(unsupported)
             + ". Rewrite without them, using only the facts."
         )
+    styled = voice_rules.polish(text, vp, kind="cover_letter", verify=lambda t: fact_check(t, sources, own_sources))
+    if styled.text != text:
+        text, unsupported = styled.text, fact_check(styled.text, sources, own_sources)
     letter = CoverLetter(
         text=text, path=None, story_ids=story_ids, tokens_in=usage.input_tokens, tokens_out=usage.output_tokens,
-        unsupported_claims=unsupported, grounded=not unsupported, attempts=attempts,
+        unsupported_claims=unsupported, grounded=not unsupported, attempts=attempts, voice=styled.report(),
     )
     if out_dir is not None and letter.grounded:
         out_dir.mkdir(parents=True, exist_ok=True)

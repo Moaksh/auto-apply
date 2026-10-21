@@ -60,6 +60,7 @@
     "update_contact",
     "delete_contact",
     "import_contacts",
+    "import_linkedin_connections",
     "draft_outreach",
     "edit_outreach_draft",
     "approve_outreach",
@@ -83,7 +84,9 @@
     "dismiss_reply_suggestion",
     "generate_interview_prep",
     "get_interview_prep",
-    "interview_debrief"
+    "interview_debrief",
+    "get_voice_profile",
+    "update_voice_profile"
   ],
   "x-event-types": [
     "ack",
@@ -1952,6 +1955,16 @@
       "title": "FormQuestion",
       "type": "object"
     },
+    "Formality": {
+      "description": "Writing-voice formality for generated text (answers/voice.py).",
+      "enum": [
+        "casual",
+        "neutral",
+        "formal"
+      ],
+      "title": "Formality",
+      "type": "string"
+    },
     "GenerateInterviewPrepPayload": {
       "additionalProperties": false,
       "description": "Build (or rebuild) the interview prep pack for one application.",
@@ -2019,6 +2032,12 @@
       "title": "GetMailAccountPayload",
       "type": "object"
     },
+    "GetVoiceProfilePayload": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "GetVoiceProfilePayload",
+      "type": "object"
+    },
     "HelloPayload": {
       "additionalProperties": false,
       "properties": {
@@ -2066,6 +2085,22 @@
         "file_path"
       ],
       "title": "ImportContactsPayload",
+      "type": "object"
+    },
+    "ImportLinkedinConnectionsPayload": {
+      "additionalProperties": false,
+      "description": "The user's own LinkedIn data export (``Connections.csv``), picked by the user. Never fetched from LinkedIn.",
+      "properties": {
+        "file_path": {
+          "description": "Path to Connections.csv (the notes preamble before the header is fine).",
+          "title": "File Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_path"
+      ],
+      "title": "ImportLinkedinConnectionsPayload",
       "type": "object"
     },
     "Insights": {
@@ -6964,6 +6999,84 @@
       "title": "UpdateResumeVariantPayload",
       "type": "object"
     },
+    "UpdateVoiceProfilePayload": {
+      "additionalProperties": false,
+      "description": "Only the keys present are applied; null resets that field to its default.",
+      "properties": {
+        "sign_off": {
+          "anyOf": [
+            {
+              "maxLength": 40,
+              "minLength": 1,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sign Off"
+        },
+        "formality": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Formality"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "max_words": {
+          "anyOf": [
+            {
+              "maximum": 600,
+              "minimum": 60,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Max Words"
+        },
+        "avoid_phrases": {
+          "anyOf": [
+            {
+              "items": {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              "maxItems": 20,
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Avoid Phrases"
+        },
+        "writing_sample": {
+          "anyOf": [
+            {
+              "maxLength": 1500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Writing Sample"
+        }
+      },
+      "title": "UpdateVoiceProfilePayload",
+      "type": "object"
+    },
     "UpsertStoryPayload": {
       "additionalProperties": false,
       "properties": {
@@ -7185,6 +7298,60 @@
         "low_sample"
       ],
       "title": "VariantPerformance",
+      "type": "object"
+    },
+    "VoiceProfile": {
+      "additionalProperties": false,
+      "description": "The user's writing voice for generated text (cover letters, outreach, long form answers).\n``ack.result`` for ``get_voice_profile`` / ``update_voice_profile``; stored in ``meta``.",
+      "properties": {
+        "sign_off": {
+          "default": "Best regards",
+          "description": "Closing line before the name, without the trailing comma.",
+          "maxLength": 40,
+          "minLength": 1,
+          "title": "Sign Off",
+          "type": "string"
+        },
+        "formality": {
+          "$ref": "#/$defs/Formality",
+          "default": "neutral"
+        },
+        "max_words": {
+          "default": 250,
+          "description": "Upper bound for a cover letter or email body.",
+          "maximum": 600,
+          "minimum": 60,
+          "title": "Max Words",
+          "type": "integer"
+        },
+        "avoid_phrases": {
+          "description": "Phrases the user never wants in their text (flagged, not rewritten).",
+          "items": {
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          },
+          "maxItems": 20,
+          "title": "Avoid Phrases",
+          "type": "array",
+          "default": []
+        },
+        "writing_sample": {
+          "anyOf": [
+            {
+              "maxLength": 1500,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A short sample of the user's own writing: style only, never a source of facts.",
+          "title": "Writing Sample"
+        }
+      },
+      "title": "VoiceProfile",
       "type": "object"
     },
     "WorkHistoryItem": {
@@ -8680,6 +8847,32 @@
       ],
       "additionalProperties": false
     },
+    "CommandImportLinkedinConnections": {
+      "type": "object",
+      "title": "Command: import_linkedin_connections",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "import_linkedin_connections"
+        },
+        "payload": {
+          "$ref": "#/$defs/ImportLinkedinConnectionsPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
     "CommandDraftOutreach": {
       "type": "object",
       "title": "Command: draft_outreach",
@@ -9294,6 +9487,58 @@
         },
         "payload": {
           "$ref": "#/$defs/InterviewDebriefPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandGetVoiceProfile": {
+      "type": "object",
+      "title": "Command: get_voice_profile",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "get_voice_profile"
+        },
+        "payload": {
+          "$ref": "#/$defs/GetVoiceProfilePayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandUpdateVoiceProfile": {
+      "type": "object",
+      "title": "Command: update_voice_profile",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "update_voice_profile"
+        },
+        "payload": {
+          "$ref": "#/$defs/UpdateVoiceProfilePayload"
         }
       },
       "required": [
@@ -10103,6 +10348,9 @@
           "$ref": "#/$defs/CommandImportContacts"
         },
         {
+          "$ref": "#/$defs/CommandImportLinkedinConnections"
+        },
+        {
           "$ref": "#/$defs/CommandDraftOutreach"
         },
         {
@@ -10173,6 +10421,12 @@
         },
         {
           "$ref": "#/$defs/CommandInterviewDebrief"
+        },
+        {
+          "$ref": "#/$defs/CommandGetVoiceProfile"
+        },
+        {
+          "$ref": "#/$defs/CommandUpdateVoiceProfile"
         }
       ]
     },

@@ -27,11 +27,12 @@ import logging
 import re
 from dataclasses import dataclass, field
 
+from autoapply.answers import voice as voice_rules
 from autoapply.answers.cover_letter import fact_check
 from autoapply.answers.resolver import profile_facts, story_text, trim
 from autoapply.enums import DraftKind
 from autoapply.llm.provider import LLMProvider, TokenUsage
-from autoapply.models import Company, Job, Profile, Story
+from autoapply.models import Company, Job, Profile, Story, VoiceProfile
 
 log = logging.getLogger("autoapply.outreach.drafts")
 
@@ -103,6 +104,11 @@ class DraftContext:
     previous_subject: str | None = None
     previous_body: str | None = None
     instructions: str | None = None
+    voice: VoiceProfile | None = None  # the user's writing voice (None: voice.active())
+
+    @property
+    def voice_profile(self) -> VoiceProfile:
+        return self.voice or voice_rules.active()
 
 
 @dataclass(slots=True)
@@ -114,6 +120,8 @@ class Draft:
     tokens_in: int = 0
     tokens_out: int = 0
     attempts: int = 1
+    #: what the writing-voice linter changed or flagged (``voice.VoiceResult.report``)
+    voice: dict = field(default_factory=dict)
 
     @property
     def grounded(self) -> bool:
@@ -149,7 +157,7 @@ def allowed_sources(ctx: DraftContext) -> list[str]:
     return [
         *profile_facts(p), *(story_text(s) for s in ctx.stories), p.raw_text or "", *_job_lines(ctx),
         ctx.company.name, ctx.company.domain or "", *ctx.company_evidence, ctx.recipient_name, ctx.recipient_title or "",
-        ctx.referral_basis or "", ctx.previous_body or "", *(p.links or {}).values(),
+        ctx.referral_basis or "", ctx.previous_body or "", *(p.links or {}).values(), ctx.voice_profile.sign_off,
     ]
 
 
@@ -158,7 +166,7 @@ def candidate_sources(ctx: DraftContext) -> list[str]:
     return [
         *profile_facts(p), *(story_text(s) for s in ctx.stories), p.raw_text or "",
         ctx.job.title if ctx.job else "", ctx.company.name, ctx.company.domain or "", ctx.recipient_name,
-        ctx.referral_basis or "", *(p.links or {}).values(),
+        ctx.referral_basis or "", *(p.links or {}).values(), ctx.voice_profile.sign_off,
     ]
 
 
@@ -272,12 +280,17 @@ def _prompt(ctx: DraftContext, limit: int) -> str:
     if ctx.instructions:
         parts.append(f"THE SENDER ASKS: {ctx.instructions.strip()[:500]}")
     parts.append("Return the subject, the body and the ids of the stories you used.")
+    parts.append(voice_rules.prompt_guidance(ctx.voice_profile, kind=_voice_kind(ctx.kind)))
     return "\n\n".join(parts)
+
+
+def _voice_kind(kind: DraftKind) -> voice_rules.Kind:
+    return {DraftKind.LINKEDIN_REFERRAL_DM: "linkedin_dm", DraftKind.LINKEDIN_CONNECT_NOTE: "linkedin_note"}.get(kind, "email")
 
 
 async def generate(llm: LLMProvider, ctx: DraftContext, *, max_attempts: int = 2) -> Draft:
     """Draft one email (or LinkedIn message), fact-checked, with one regeneration on failure."""
-    limit = WORD_LIMITS.get(ctx.kind, 110)
+    limit = min(WORD_LIMITS.get(ctx.kind, 110), ctx.voice_profile.max_words)
     base = _prompt(ctx, limit)
     usage = TokenUsage()
     prompt = base
@@ -302,6 +315,10 @@ async def generate(llm: LLMProvider, ctx: DraftContext, *, max_attempts: int = 2
             break
         prompt = (base + "\n\nYOUR PREVIOUS DRAFT had problems: " + "; ".join(unsupported)
                   + ". Rewrite it without them, using only the facts given.")
+    styled = voice_rules.polish(draft.body, ctx.voice_profile, kind=_voice_kind(ctx.kind), verify=lambda t: check(t, ctx))
+    if styled.text != draft.body:
+        draft.body, draft.unsupported_claims = styled.text, check(styled.text, ctx)
+    draft.voice = styled.report()
     draft.tokens_in, draft.tokens_out = usage.input_tokens, usage.output_tokens
     return draft
 
@@ -318,16 +335,19 @@ async def generate_connect_note(llm: LLMProvider, ctx: DraftContext) -> Draft:
         f"At most {CONNECT_NOTE_CHARS} characters. Mention the shared basis honestly"
         + (f" ({ctx.referral_basis})" if ctx.referral_basis else "") + " and one line on why "
         + (f"(interested in the {ctx.job.title} role)" if ctx.job else "") + ". Do not ask for a referral yet. "
-        f"Only these facts about the sender:\n{facts}"
+        f"Only these facts about the sender:\n{facts}\n\n"
+        + voice_rules.prompt_guidance(ctx.voice_profile, kind="linkedin_note")
     )
     res = await llm.complete(prompt, system=SYSTEM, schema=_NOTE_SCHEMA, max_tokens=200, tier="fast")
     note = re.sub(r"\s+", " ", str((res.data or {}).get("note") or "")).strip()
     if len(note) > CONNECT_NOTE_CHARS:
         note = note[:CONNECT_NOTE_CHARS].rsplit(" ", 1)[0].rstrip(",;:") + "…"
         note = note[:CONNECT_NOTE_CHARS]
+    styled = voice_rules.polish(note, ctx.voice_profile, kind="linkedin_note", verify=lambda t: check(t, ctx))
+    note = styled.text
     unsupported = check(note, ctx)
     return Draft(subject=None, body=note, unsupported_claims=unsupported, tokens_in=res.usage.input_tokens,
-                 tokens_out=res.usage.output_tokens)
+                 tokens_out=res.usage.output_tokens, voice=styled.report())
 
 
 __all__ = [

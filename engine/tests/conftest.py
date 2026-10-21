@@ -54,6 +54,16 @@ def _no_interview_prep_automation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(interview, "AUTO_ENABLED", False)
 
 
+@pytest.fixture(autouse=True)
+def _default_voice_profile() -> Iterator[None]:
+    """The process-wide writing voice (answers/voice.py) starts at the defaults in every test."""
+    from autoapply.answers import voice
+
+    voice.set_active(None)
+    yield
+    voice.set_active(None)
+
+
 @pytest.fixture
 def autoapply_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Paths:
     home = tmp_path / "AutoApplyHome"

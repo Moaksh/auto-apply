@@ -166,6 +166,7 @@ def samples() -> list[Envelope]:
     c("update_contact", {"id": 5, "title": "Head of Talent", "notes": None})
     c("delete_contact", {"id": 5, "suppress": True})
     c("import_contacts", {"file_path": "/Users/me/contacts.csv"})
+    c("import_linkedin_connections", {"file_path": "/Users/me/Downloads/Basic_LinkedInDataExport/Connections.csv"})
     c("draft_outreach", {"contact_id": 5, "kind": "application", "application_id": 11, "instructions": "Mention Go."})
     c("edit_outreach_draft", {"message_id": 8, "subject": "Backend Engineer application – Asha Rao",
                               "body": "Hi Jane,\n\nI applied for the Backend Engineer role…", "confirm_claims": False})
@@ -191,6 +192,9 @@ def samples() -> list[Envelope]:
     c("generate_interview_prep", {"application_id": 11, "force": False})
     c("get_interview_prep", {"application_id": 11})
     c("interview_debrief", {"application_id": 11, "notes": "Spoke with Priya (EM). Went deep on Kafka consumer lag; I froze on a sharding question."})
+    c("get_voice_profile", {})
+    c("update_voice_profile", {"sign_off": "Thanks", "formality": "neutral", "max_words": 180,
+                               "avoid_phrases": ["circling back"], "writing_sample": "Hi Ravi, quick one about the Go role."})
 
     # ---- events
     e("ack", {"ok": True, "result": {"application_ids": [11, 12]}}, reply_to=CMD)

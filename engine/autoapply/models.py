@@ -50,6 +50,7 @@ from autoapply.enums import (
     EmailStatus,
     ErrorCode,
     EvidenceKind,
+    Formality,
     MessageState,
     MxProvider,
     OutreachKind,
@@ -1463,6 +1464,40 @@ class ImportContactsPayload(_P):
     file_path: str = Field(description="CSV with columns name,email,company,title,linkedin_url,notes (header row).")
 
 
+class ImportLinkedinConnectionsPayload(_P):
+    """The user's own LinkedIn data export (``Connections.csv``), picked by the user. Never fetched from LinkedIn."""
+
+    file_path: str = Field(description="Path to Connections.csv (the notes preamble before the header is fine).")
+
+
+class VoiceProfile(_P):
+    """The user's writing voice for generated text (cover letters, outreach, long form answers).
+    ``ack.result`` for ``get_voice_profile`` / ``update_voice_profile``; stored in ``meta``."""
+
+    sign_off: str = Field(default="Best regards", min_length=1, max_length=40,
+                          description="Closing line before the name, without the trailing comma.")
+    formality: Formality = Formality.NEUTRAL
+    max_words: int = Field(default=250, ge=60, le=600, description="Upper bound for a cover letter or email body.")
+    avoid_phrases: list[Annotated[str, Field(min_length=1, max_length=80)]] = Field(
+        default_factory=list, max_length=20, description="Phrases the user never wants in their text (flagged, not rewritten).")
+    writing_sample: str | None = Field(default=None, max_length=1500,
+                                       description="A short sample of the user's own writing: style only, never a source of facts.")
+
+
+class GetVoiceProfilePayload(_P):
+    pass
+
+
+class UpdateVoiceProfilePayload(_P):
+    """Only the keys present are applied; null resets that field to its default."""
+
+    sign_off: str | None = Field(default=None, min_length=1, max_length=40)
+    formality: Formality | None = None
+    max_words: int | None = Field(default=None, ge=60, le=600)
+    avoid_phrases: list[Annotated[str, Field(min_length=1, max_length=80)]] | None = Field(default=None, max_length=20)
+    writing_sample: str | None = Field(default=None, max_length=1500)
+
+
 class DraftOutreachPayload(_P):
     contact_id: int
     kind: OutreachKind = OutreachKind.APPLICATION
@@ -1660,6 +1695,7 @@ COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "update_contact": UpdateContactPayload,
     "delete_contact": DeleteContactPayload,
     "import_contacts": ImportContactsPayload,
+    "import_linkedin_connections": ImportLinkedinConnectionsPayload,
     "draft_outreach": DraftOutreachPayload,
     "edit_outreach_draft": EditOutreachDraftPayload,
     "approve_outreach": ApproveOutreachPayload,
@@ -1684,6 +1720,8 @@ COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "generate_interview_prep": GenerateInterviewPrepPayload,
     "get_interview_prep": GetInterviewPrepPayload,
     "interview_debrief": InterviewDebriefPayload,
+    "get_voice_profile": GetVoiceProfilePayload,
+    "update_voice_profile": UpdateVoiceProfilePayload,
 }
 
 
@@ -2062,6 +2100,7 @@ _EXTRA_DEFS: tuple[type[BaseModel], ...] = (
     FormQuestion,
     InterviewPrepPack,
     InterviewDebrief,
+    VoiceProfile,
 )
 
 

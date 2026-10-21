@@ -68,6 +68,8 @@ class ResolvedAnswer:
     similarity: float | None = None
     memory_answer_id: int | None = None
     story_ids: list[int] = field(default_factory=list)
+    #: generated long text only: what the writing-voice linter changed or flagged
+    voice: dict | None = None
 
 
 @dataclass(slots=True)
@@ -537,6 +539,12 @@ class AnswerResolver:
             constraints.append("Answer with a number only.")
         if q.field_type is FieldType.BOOLEAN:
             constraints.append("Answer Yes or No.")
+        long_text = not q.options and (q.field_type is FieldType.TEXTAREA or (q.field_type is FieldType.TEXT and (q.max_length or 0) >= 500))
+        voice_profile = None
+        if long_text:
+            from autoapply.answers import voice
+
+            voice_profile = voice.load_profile(self.conn)
         prompt = (
             "GENERATE ANSWER to a job application question.\n"
             f"Question: {q.label}\n" + (f"Help text: {q.description}\n" if q.description else "")
@@ -545,6 +553,7 @@ class AnswerResolver:
             "Return: answer; confidence (0-1) that the answer is truthful given ONLY these facts and appropriate; "
             "grounded (true only if every claim about the candidate comes from the facts/stories); story_ids used; "
             "gaps: one short sentence to the candidate naming what they should add (empty if nothing is missing)."
+            + (("\n\n" + voice.prompt_guidance(voice_profile, kind="answer")) if voice_profile is not None else "")
         )
         try:
             res = await self.llm.complete(prompt, system=GEN_SYSTEM, schema=_GEN_SCHEMA, max_tokens=700)
@@ -563,6 +572,10 @@ class AnswerResolver:
                 raise NeedsUser(q, QuestionReason.LOW_CONFIDENCE, suggested_answer=answer, confidence=conf, note=note,
                                 detail="generated answer is not one of the options")
             answer = opt
+        voice_report = None
+        if voice_profile is not None:
+            styled = voice.lint(answer, voice_profile, kind="answer")
+            answer, voice_report = styled.text, styled.report()
         if q.max_length and len(answer) > q.max_length:
             answer = answer[: q.max_length].rstrip()
         if not answer:
@@ -574,7 +587,7 @@ class AnswerResolver:
                             detail=f"confidence {conf:.2f} < {self.preferences.confidence_threshold:.2f}")
         origin = AnswerOrigin.STORY if story_ids else AnswerOrigin.GENERATED
         ref = f"stories:{story_ids[0]}" if story_ids else None
-        return ResolvedAnswer(q, answer, origin, round(conf, 3), origin_ref=ref, story_ids=story_ids)
+        return ResolvedAnswer(q, answer, origin, round(conf, 3), origin_ref=ref, story_ids=story_ids, voice=voice_report)
 
 
 __all__ = [

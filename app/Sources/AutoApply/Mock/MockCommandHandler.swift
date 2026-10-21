@@ -474,6 +474,19 @@ enum MockCommandHandler {
         case .generateInterviewPrep, .getInterviewPrep, .interviewDebrief:
             // No interview prep in the mock world yet (no UI): "no pack stored".
             return Handled(reply: ack())
+        case .importLinkedinConnections:
+            return Handled(reply: ack(["imported": .int(0), "merged": .int(0), "skipped": .int(0),
+                                       "matched_companies": .array([]), "referral_suggestions": .int(0)]))
+        case .getVoiceProfile:
+            return Handled(reply: ack(encoding: VoiceProfile()))
+        case .updateVoiceProfile(let p):
+            var profile = VoiceProfile()
+            if let v = p.signOff { profile.signOff = v }
+            if let v = p.formality { profile.formality = v }
+            if let v = p.maxWords { profile.maxWords = v }
+            if let v = p.avoidPhrases { profile.avoidPhrases = v }
+            profile.writingSample = p.writingSample
+            return Handled(reply: ack(encoding: profile))
         }
     }
 

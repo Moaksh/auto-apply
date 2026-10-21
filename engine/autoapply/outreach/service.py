@@ -50,6 +50,7 @@ from autoapply.enums import (
     ThreadOutcome,
     ThreadState,
 )
+from autoapply.answers import voice
 from autoapply.llm.provider import LLMProvider
 from autoapply.models import (
     OutreachMessage,
@@ -479,7 +480,7 @@ class OutreachService:
             recipient_name=contact.full_name if contact else "", recipient_title=contact.title if contact else None,
             job=job, company_evidence=evidence, referral_basis=basis, has_referral=has_ref,
             previous_subject=previous.subject if previous else None, previous_body=previous.body if previous else None,
-            instructions=instructions,
+            instructions=instructions, voice=voice.load_profile(self.conn),
         )
 
     @staticmethod
@@ -825,7 +826,7 @@ class OutreachService:
         job = db.get_job(self.conn, r.job_id) if r.job_id is not None else None
         base = dict(profile=profile, stories=db.list_stories(self.conn), company=company, recipient_name=r.person_name,
                     recipient_title=r.title, job=job, referral_basis=referrals.basis_sentence(r, profile),
-                    has_referral=False, instructions=instructions)
+                    has_referral=False, instructions=instructions, voice=voice.load_profile(self.conn))
         note = await drafts.generate_connect_note(self.llm, drafts.DraftContext(kind=DraftKind.LINKEDIN_CONNECT_NOTE, **base))
         dm = await drafts.generate(self.llm, drafts.DraftContext(kind=DraftKind.LINKEDIN_REFERRAL_DM, **base))
         unsupported = list(dict.fromkeys([*note.unsupported_claims, *dm.unsupported_claims]))

@@ -326,6 +326,14 @@ class ContactOrigin(StrEnum):
     SHARED = "shared"
 
 
+class Formality(StrEnum):
+    """Writing-voice formality for generated text (answers/voice.py)."""
+
+    CASUAL = "casual"
+    NEUTRAL = "neutral"
+    FORMAL = "formal"
+
+
 class Relationship(StrEnum):
     FRIEND = "friend"
     EX_COLLEAGUE = "ex_colleague"

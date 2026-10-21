@@ -237,6 +237,12 @@ enum FieldType: String, Codable, Sendable, CaseIterable, Hashable {
     case file
 }
 
+enum Formality: String, Codable, Sendable, CaseIterable, Hashable {
+    case casual
+    case neutral
+    case formal
+}
+
 enum JobSource: String, Codable, Sendable, CaseIterable, Hashable {
     case greenhouse
     case lever
@@ -1434,6 +1440,14 @@ extension GetMailAccountPayload {
     }
 }
 
+struct GetVoiceProfilePayload: Codable, Sendable, Hashable {
+}
+
+extension GetVoiceProfilePayload {
+    init(from decoder: any Decoder) throws {
+    }
+}
+
 struct HelloPayload: Codable, Sendable, Hashable {
     enum Client: String, Codable, Sendable, CaseIterable, Hashable {
         case app
@@ -1469,6 +1483,22 @@ struct ImportContactsPayload: Codable, Sendable, Hashable {
 }
 
 extension ImportContactsPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        filePath = try c.decode(String.self, forKey: .filePath)
+    }
+}
+
+/// The user's own LinkedIn data export (``Connections.csv``), picked by the user. Never fetched from LinkedIn.
+struct ImportLinkedinConnectionsPayload: Codable, Sendable, Hashable {
+    var filePath: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case filePath = "file_path"
+    }
+}
+
+extension ImportLinkedinConnectionsPayload {
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         filePath = try c.decode(String.self, forKey: .filePath)
@@ -3677,6 +3707,34 @@ extension UpdateResumeVariantPayload {
     }
 }
 
+/// Only the keys present are applied; null resets that field to its default.
+struct UpdateVoiceProfilePayload: Codable, Sendable, Hashable {
+    var signOff: String? = nil
+    var formality: Formality? = nil
+    var maxWords: Int? = nil
+    var avoidPhrases: [String]? = nil
+    var writingSample: String? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case signOff = "sign_off"
+        case formality
+        case maxWords = "max_words"
+        case avoidPhrases = "avoid_phrases"
+        case writingSample = "writing_sample"
+    }
+}
+
+extension UpdateVoiceProfilePayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        signOff = try c.decodeIfPresent(String.self, forKey: .signOff)
+        formality = try c.decodeIfPresent(Formality.self, forKey: .formality)
+        maxWords = try c.decodeIfPresent(Int.self, forKey: .maxWords)
+        avoidPhrases = try c.decodeIfPresent([String].self, forKey: .avoidPhrases)
+        writingSample = try c.decodeIfPresent(String.self, forKey: .writingSample)
+    }
+}
+
 struct UpsertStoryPayload: Codable, Sendable, Hashable {
     var id: Int? = nil
     var title: String
@@ -3818,6 +3876,35 @@ extension VariantPerformance {
         interviews = try c.decode(Int.self, forKey: .interviews)
         responseRate = try c.decode(Double.self, forKey: .responseRate)
         lowSample = try c.decode(Bool.self, forKey: .lowSample)
+    }
+}
+
+/// The user's writing voice for generated text (cover letters, outreach, long form answers).
+/// ``ack.result`` for ``get_voice_profile`` / ``update_voice_profile``; stored in ``meta``.
+struct VoiceProfile: Codable, Sendable, Hashable {
+    var signOff: String = "Best regards"
+    var formality: Formality = .neutral
+    var maxWords: Int = 250
+    var avoidPhrases: [String] = []
+    var writingSample: String? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case signOff = "sign_off"
+        case formality
+        case maxWords = "max_words"
+        case avoidPhrases = "avoid_phrases"
+        case writingSample = "writing_sample"
+    }
+}
+
+extension VoiceProfile {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        signOff = try c.decodeIfPresent(String.self, forKey: .signOff) ?? "Best regards"
+        formality = try c.decodeIfPresent(Formality.self, forKey: .formality) ?? .neutral
+        maxWords = try c.decodeIfPresent(Int.self, forKey: .maxWords) ?? 250
+        avoidPhrases = try c.decodeIfPresent([String].self, forKey: .avoidPhrases) ?? []
+        writingSample = try c.decodeIfPresent(String.self, forKey: .writingSample)
     }
 }
 
@@ -4014,6 +4101,7 @@ enum Command: Sendable, Hashable {
     case updateContact(UpdateContactPayload)
     case deleteContact(DeleteContactPayload)
     case importContacts(ImportContactsPayload)
+    case importLinkedinConnections(ImportLinkedinConnectionsPayload)
     case draftOutreach(DraftOutreachPayload)
     case editOutreachDraft(EditOutreachDraftPayload)
     case approveOutreach(ApproveOutreachPayload)
@@ -4038,6 +4126,8 @@ enum Command: Sendable, Hashable {
     case generateInterviewPrep(GenerateInterviewPrepPayload)
     case getInterviewPrep(GetInterviewPrepPayload)
     case interviewDebrief(InterviewDebriefPayload)
+    case getVoiceProfile(GetVoiceProfilePayload)
+    case updateVoiceProfile(UpdateVoiceProfilePayload)
 
     /// Wire `type` string.
     var type: String {
@@ -4097,6 +4187,7 @@ enum Command: Sendable, Hashable {
         case .updateContact: "update_contact"
         case .deleteContact: "delete_contact"
         case .importContacts: "import_contacts"
+        case .importLinkedinConnections: "import_linkedin_connections"
         case .draftOutreach: "draft_outreach"
         case .editOutreachDraft: "edit_outreach_draft"
         case .approveOutreach: "approve_outreach"
@@ -4121,6 +4212,8 @@ enum Command: Sendable, Hashable {
         case .generateInterviewPrep: "generate_interview_prep"
         case .getInterviewPrep: "get_interview_prep"
         case .interviewDebrief: "interview_debrief"
+        case .getVoiceProfile: "get_voice_profile"
+        case .updateVoiceProfile: "update_voice_profile"
         }
     }
 
@@ -4180,6 +4273,7 @@ enum Command: Sendable, Hashable {
         "update_contact",
         "delete_contact",
         "import_contacts",
+        "import_linkedin_connections",
         "draft_outreach",
         "edit_outreach_draft",
         "approve_outreach",
@@ -4204,6 +4298,8 @@ enum Command: Sendable, Hashable {
         "generate_interview_prep",
         "get_interview_prep",
         "interview_debrief",
+        "get_voice_profile",
+        "update_voice_profile",
     ]
 }
 
@@ -4366,6 +4462,7 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case "update_contact": command = .updateContact(try c.decode(UpdateContactPayload.self, forKey: .payload))
         case "delete_contact": command = .deleteContact(try c.decode(DeleteContactPayload.self, forKey: .payload))
         case "import_contacts": command = .importContacts(try c.decode(ImportContactsPayload.self, forKey: .payload))
+        case "import_linkedin_connections": command = .importLinkedinConnections(try c.decode(ImportLinkedinConnectionsPayload.self, forKey: .payload))
         case "draft_outreach": command = .draftOutreach(try c.decode(DraftOutreachPayload.self, forKey: .payload))
         case "edit_outreach_draft": command = .editOutreachDraft(try c.decode(EditOutreachDraftPayload.self, forKey: .payload))
         case "approve_outreach": command = .approveOutreach(try c.decode(ApproveOutreachPayload.self, forKey: .payload))
@@ -4390,6 +4487,8 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case "generate_interview_prep": command = .generateInterviewPrep(try c.decode(GenerateInterviewPrepPayload.self, forKey: .payload))
         case "get_interview_prep": command = .getInterviewPrep(try c.decode(GetInterviewPrepPayload.self, forKey: .payload))
         case "interview_debrief": command = .interviewDebrief(try c.decode(InterviewDebriefPayload.self, forKey: .payload))
+        case "get_voice_profile": command = .getVoiceProfile(try c.decode(GetVoiceProfilePayload.self, forKey: .payload))
+        case "update_voice_profile": command = .updateVoiceProfile(try c.decode(UpdateVoiceProfilePayload.self, forKey: .payload))
         default:
             throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "unknown command type \(type)")
         }
@@ -4456,6 +4555,7 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case .updateContact(let p): try c.encode(p, forKey: .payload)
         case .deleteContact(let p): try c.encode(p, forKey: .payload)
         case .importContacts(let p): try c.encode(p, forKey: .payload)
+        case .importLinkedinConnections(let p): try c.encode(p, forKey: .payload)
         case .draftOutreach(let p): try c.encode(p, forKey: .payload)
         case .editOutreachDraft(let p): try c.encode(p, forKey: .payload)
         case .approveOutreach(let p): try c.encode(p, forKey: .payload)
@@ -4480,6 +4580,8 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case .generateInterviewPrep(let p): try c.encode(p, forKey: .payload)
         case .getInterviewPrep(let p): try c.encode(p, forKey: .payload)
         case .interviewDebrief(let p): try c.encode(p, forKey: .payload)
+        case .getVoiceProfile(let p): try c.encode(p, forKey: .payload)
+        case .updateVoiceProfile(let p): try c.encode(p, forKey: .payload)
         }
     }
 }
