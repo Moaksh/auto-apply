@@ -70,6 +70,7 @@ from autoapply.models import (
     Answer,
     Application,
     ApplicationAnswer,
+    ApplicationReply,
     ApplicationStatePayload,
     ApplicationStatusPayload,
     CapsStatus,
@@ -98,7 +99,7 @@ from autoapply.models import (
 )
 
 #: Must equal MAX(version) seeded by contract/schema.sql.
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 11
 
 #: Forward migrations: version -> SQL to go from (version-1) to version. Append-only.
 #: Version 1 is the baseline created by contract/schema.sql itself.
@@ -143,6 +144,32 @@ CREATE INDEX IF NOT EXISTS ix_company_suggestions_status ON company_suggestions(
     8: "python:_migrate_v8",
     9: "python:_migrate_v9",
     10: "python:_migrate_v10",
+    # v11: employer replies to submitted applications (mail/replywatch.py). Suggestions only;
+    # any row means "heard back" (stops auto-ghost and the "Heard back?" nudges).
+    11: """
+CREATE TABLE IF NOT EXISTS application_replies (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    application_id    INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+    message_id        TEXT NOT NULL UNIQUE,
+    from_email        TEXT NOT NULL,
+    from_name         TEXT,
+    subject           TEXT NOT NULL DEFAULT '',
+    snippet           TEXT NOT NULL DEFAULT '',
+    received_at       TEXT NOT NULL,
+    label             TEXT NOT NULL CHECK (label IN ('interview_invite','assessment','rejection','offer','received_ack','other')),
+    classified_by     TEXT NOT NULL DEFAULT 'rules' CHECK (classified_by IN ('rules','model')),
+    match_basis       TEXT NOT NULL CHECK (match_basis IN ('domain','ats')),
+    ambiguous         INTEGER NOT NULL DEFAULT 0 CHECK (ambiguous IN (0, 1)),
+    suggested_status  TEXT CHECK (suggested_status IS NULL OR suggested_status IN ('assessment','interview','offer','rejected')),
+    suggestion_state  TEXT NOT NULL DEFAULT 'none' CHECK (suggestion_state IN ('none','pending','accepted','dismissed')),
+    tokens_in         INTEGER NOT NULL DEFAULT 0,
+    tokens_out        INTEGER NOT NULL DEFAULT 0,
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    decided_at        TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_application_replies_app ON application_replies(application_id, received_at);
+CREATE INDEX IF NOT EXISTS ix_application_replies_suggestion ON application_replies(suggestion_state);
+""",
 }
 
 
@@ -1843,14 +1870,17 @@ def company_attempt_at(
 
 def ghost_stale_applications(conn: sqlite3.Connection, ghost_after_days: int, now: datetime | None = None) -> list[ApplicationStatusPayload]:
     """Auto-move ``applied`` applications with no status change for N days to ``ghosted``
-    (never one whose outreach thread got a reply)."""
+    (never one whose outreach thread got a reply, nor one the employer wrote about: see
+    :func:`heard_back_at`)."""
     cutoff = format_ts((now or utcnow()) - timedelta(days=ghost_after_days))
     out: list[ApplicationStatusPayload] = []
     with transaction(conn):
         rows = conn.execute(
             "SELECT id FROM applications WHERE state = 'submitted' AND status = 'applied' AND status_updated_at < ? "
             # Somebody answered an outreach email about it: not ghosted.
-            "AND id NOT IN (SELECT application_id FROM outreach_threads WHERE application_id IS NOT NULL AND state = 'replied')",
+            "AND id NOT IN (SELECT application_id FROM outreach_threads WHERE application_id IS NOT NULL AND state = 'replied') "
+            # The employer (or its ATS) wrote about it, even if only "we received your application".
+            "AND id NOT IN (SELECT application_id FROM application_replies)",
             (cutoff,),
         ).fetchall()
         for r in rows:
@@ -1863,7 +1893,8 @@ def due_nudges(conn: sqlite3.Connection, nudge_days: Sequence[int], now: datetim
     now = now or utcnow()
     days = sorted(nudge_days)
     out: list[tuple[Application, int]] = []
-    for r in conn.execute("SELECT * FROM applications WHERE state = 'submitted' AND status = 'applied'"):
+    for r in conn.execute("SELECT * FROM applications WHERE state = 'submitted' AND status = 'applied' "
+                          "AND id NOT IN (SELECT application_id FROM application_replies)"):  # heard back: no nudge
         app: Application = Application.from_row(r)  # type: ignore[assignment]
         if app.nudges_sent >= len(days) or app.submitted_at is None:
             continue
@@ -1871,6 +1902,79 @@ def due_nudges(conn: sqlite3.Connection, nudge_days: Sequence[int], now: datetim
         if now - app.submitted_at >= timedelta(days=day):
             out.append((app, day))
     return out
+
+
+def heard_back_at(conn: sqlite3.Connection, application_id: int) -> datetime | None:
+    """When the employer first wrote about this application (any ``application_replies`` row,
+    acknowledgements included), else None."""
+    row = conn.execute("SELECT MIN(received_at) FROM application_replies WHERE application_id = ?", (application_id,)).fetchone()
+    return parse_ts(row[0]) if row and row[0] else None
+
+
+# ---- application replies (schema v11) ------------------------------------------------
+
+
+def get_application_reply(conn: sqlite3.Connection, reply_id: int) -> ApplicationReply:
+    row = _require(_one(conn, "SELECT * FROM application_replies WHERE id = ?", (reply_id,)), "application reply", reply_id)
+    return ApplicationReply.from_row(row)  # type: ignore[return-value]
+
+
+def application_reply_seen(conn: sqlite3.Connection, message_id: str) -> bool:
+    return conn.execute("SELECT 1 FROM application_replies WHERE message_id = ?", (message_id,)).fetchone() is not None
+
+
+def list_application_replies(conn: sqlite3.Connection, application_id: int | None = None, *,
+                             pending_only: bool = False) -> list[ApplicationReply]:
+    where, params = [], []
+    if application_id is not None:
+        where.append("application_id = ?")
+        params.append(application_id)
+    if pending_only:
+        where.append("suggestion_state = 'pending'")
+    sql = "SELECT * FROM application_replies" + (" WHERE " + " AND ".join(where) if where else "") + " ORDER BY received_at DESC, id DESC"
+    return [ApplicationReply.from_row(r) for r in conn.execute(sql, params)]  # type: ignore[misc]
+
+
+def insert_application_reply(
+    conn: sqlite3.Connection, *, application_id: int, message_id: str, from_email: str, from_name: str | None,
+    subject: str, snippet: str, received_at: datetime | str, label: str, classified_by: str, match_basis: str,
+    ambiguous: bool, suggested_status: BoardStatus | str | None, tokens_in: int = 0, tokens_out: int = 0,
+) -> ApplicationReply | None:
+    """Record one reply; None when that Message-ID is already stored (dedupe)."""
+    st = BoardStatus(suggested_status).value if suggested_status else None
+    with transaction(conn):
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO application_replies(application_id, message_id, from_email, from_name, subject, snippet, "
+            "received_at, label, classified_by, match_basis, ambiguous, suggested_status, suggestion_state, tokens_in, tokens_out) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (application_id, message_id, from_email, from_name, subject[:300], snippet[:300], _ts(received_at), label,
+             classified_by, match_basis, int(bool(ambiguous)), st, "pending" if st else "none", int(tokens_in), int(tokens_out)),
+        )
+        if cur.rowcount == 0:
+            return None
+        reply_id = int(cur.lastrowid)
+        app = get_application(conn, application_id)
+        log_event(conn, "reply", f"employer reply: {label}" + (f" (suggests {st})" if st else ""), actor=Actor.SYSTEM,
+                  job_id=app.job_id, application_id=application_id, payload={"reply_id": reply_id, "message_id": message_id})
+    return get_application_reply(conn, reply_id)
+
+
+def decide_reply_suggestion(conn: sqlite3.Connection, reply_id: int, accept: bool) -> tuple[ApplicationReply, ApplicationStatusPayload | None]:
+    """Accept (``set_status`` with actor user) or dismiss a reply's suggested board move.
+    Dismissing twice is a no-op; accepting needs a pending suggestion (else :class:`Conflict`)."""
+    with transaction(conn):
+        r = get_application_reply(conn, reply_id)
+        if not accept and r.suggestion_state in ("dismissed", "none"):
+            if r.suggestion_state == "none":
+                conn.execute("UPDATE application_replies SET suggestion_state = 'dismissed', decided_at = ? WHERE id = ?",
+                             (now_ts(), reply_id))
+            return get_application_reply(conn, reply_id), None
+        if r.suggestion_state != "pending" or r.suggested_status is None:
+            raise Conflict(f"reply {reply_id} has no pending suggestion (is {r.suggestion_state})")
+        payload = set_status(conn, r.application_id, r.suggested_status, actor=Actor.USER) if accept else None
+        conn.execute("UPDATE application_replies SET suggestion_state = ?, decided_at = ? WHERE id = ?",
+                     ("accepted" if accept else "dismissed", now_ts(), reply_id))
+    return get_application_reply(conn, reply_id), payload
 
 
 def record_nudge_sent(conn: sqlite3.Connection, application_id: int) -> None:
@@ -2389,6 +2493,8 @@ def compute_counts(conn: sqlite3.Connection, now: datetime | None = None) -> Cou
             "WHERE m.direction = 'out' AND m.state = 'draft' AND t.state IN ('draft','active')").fetchone()[0]),
         outreach_replies_unread=int(conn.execute("SELECT COUNT(*) FROM outreach_threads WHERE unread_reply = 1").fetchone()[0]),
         outreach_unknown=int(conn.execute("SELECT COUNT(*) FROM outreach_messages WHERE state = 'unknown'").fetchone()[0]),
+        application_replies_unread=int(conn.execute(
+            "SELECT COUNT(*) FROM application_replies WHERE suggestion_state = 'pending'").fetchone()[0]),
     )
 
 

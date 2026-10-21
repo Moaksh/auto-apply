@@ -162,6 +162,13 @@ Nothing is ever sent without `approve_outreach`. Sending stays off until `enable
 | `update_referral` | `id`, `state?`, `connect_note?`, `referral_dm?` | `null` | states per §7.2; `referred` adds a note to the application |
 | `set_provider_key` | `provider` (`hunter`\|`github`), `api_key?` (null removes) | `{provider, ok}` | checked with the provider, then stored in the Keychain only |
 
+#### 5.2 Employer reply commands (schema v11; `engine/autoapply/mail/replywatch.py`)
+
+| type | payload | ack `result` | notes |
+|---|---|---|---|
+| `accept_reply_suggestion` | `reply_id` | `{reply_id, application_id, status}` | applies the reply's `suggested_status` through `set_status` (actor `user`; emits `application_status`). `conflict` when there is no pending suggestion (already accepted or dismissed, or nothing suggested) |
+| `dismiss_reply_suggestion` | `reply_id` | `null` | keeps the board as it is; idempotent. The reply stays as evidence and still counts as "heard back" |
+
 ## 6. Events (daemon → app)
 
 | type | payload | when |
@@ -184,6 +191,7 @@ Nothing is ever sent without `approve_outreach`. Sending stays off until `enable
 | `nudge_due` | `application_id`, `job_id`, `day`, `company`, `title` | day-7 / day-14 "Heard back?" |
 | `outreach_state` | `thread_id`, `message_id?`, `entity` (`message`\|`thread`), `from_state?`, `to_state`, `reason?`, `at` | a cold-email message or thread changed state (states per §7.1); re-read the tables |
 | `outreach_reply` | `thread_id`, `message_id?`, `contact_name`, `company`, `label` (`positive`\|`referred`\|`not_interested`\|`opt_out`\|`question`\|`other`\|`ooo`\|`bounce`), `snippet`, `application_id?`, `suggested_status?` (`interview`\|`rejected`) | someone replied (Needs You ▸ Replies); a board move is only suggested |
+| `application_reply` | `reply_id`, `application_id`, `job_id`, `company`, `title?`, `label` (`interview_invite`\|`assessment`\|`rejection`\|`offer`\|`received_ack`\|`other`), `suggested_status?` (`interview`\|`assessment`\|`rejected`\|`offer`), `ambiguous`, `from_email`, `from_name?`, `subject`, `snippet`, `received_at`, `message_id` | an employer / ATS email about a submitted application was read (§6.2.3). A board move is only suggested; the user accepts or dismisses it |
 | `scout_finished` | `company_id`, `purpose`, `application_id?`, `found`, `with_email`, `best_confidence?`, `queued_google`, `thread_id?` | a scout's HTTP phase ended (`thread_id`: the automatic draft) |
 | `log` | `level` (`debug`\|`info`\|`warning`\|`error`), `message`, `logger?`, `job_id?`, `application_id?`, `at` | human-readable daemon log line |
 
@@ -203,7 +211,8 @@ Nothing is ever sent without `approve_outreach`. Sending stays off until `enable
   "last_run": null,
   "counts": { "queued": 12, "needs_you_clusters": 1, "needs_you_jobs": 2, "awaiting_review": 0, "easy_apply_open": 0,
               "unknown_verify": 0, "failed": 0, "submitted_today": 9, "discovered_today": 41, "submitted_total": 98,
-              "suggestions_pending": 2, "outreach_drafts": 3, "outreach_replies_unread": 1, "outreach_unknown": 0 },
+              "suggestions_pending": 2, "outreach_drafts": 3, "outreach_replies_unread": 1, "outreach_unknown": 0,
+              "application_replies_unread": 1 },
   "caps": { "daily_used": 9, "daily_limit": 15, "companies_cooling_down": 2, "linkedin_sessions_used": 1,
             "linkedin_sessions_limit": 3, "glassdoor_sessions_used": 0, "glassdoor_sessions_limit": 3,
             "outreach_sent_today": 2, "outreach_daily_limit": 5, "people_finder_used": 1, "people_finder_limit": 6 },
@@ -246,6 +255,30 @@ verified ATS board the agent watched by itself; Dismiss unwatches it), `accepted
 - Email confidence tiers: Verified ≥ 90, Likely 70–89, Guess 40–69, Unknown < 40.
 - `meta.mail_account.send_enabled` (bool) says whether sending is on.
 - Open in Gmail: `https://mail.google.com/mail/u/0/#search/rfc822msgid%3A<message_id_header without <>>`.
+
+### 6.2.3 Employer replies (schema v11, table `application_replies`)
+
+The daemon reads the connected mailbox (read-only IMAP, INBOX, last 7 days, at most 100 messages
+every 10 minutes; never while paused; nothing without a mailbox) for emails about **submitted
+applications**. Replies to cold-outreach threads are not included (they are `outreach_reply`).
+
+- **Matching** (deterministic): the sender's domain is the company's domain, or the sender is an
+  ATS mailer (greenhouse-mail.io, lever.co, ashbyhq.com, myworkday.com, smartrecruiters.com,
+  workable, icims, …) and the company's name is in the subject, sender name, sender address or
+  body. Only messages received after the application's `submitted_at`. Several applications at
+  that company: the job title in the subject (then the body) decides; otherwise the most
+  recently submitted one is used, `ambiguous = 1` and nothing is suggested.
+- **Classification**: phrase rules first; the fast model only when the rules are unsure
+  (`classified_by = 'model'`, tokens in `tokens_in/out` and added to the application).
+  `interview_invite` → `interview`, `assessment` → `assessment`, `rejection` → `rejected`,
+  `offer` → `offer`; `received_ack` and `other` suggest nothing. No suggestion either when the
+  application already has that status.
+- One row per Message-ID (`message_id`, dedupe). `suggestion_state`: `none` \| `pending` \|
+  `accepted` \| `dismissed`. `counts.application_replies_unread` = rows with `pending`.
+- Evidence: `from_email`, `from_name`, `subject`, `snippet` (≤ 240 characters), `received_at`.
+  Open in Gmail: `https://mail.google.com/mail/u/0/#search/rfc822msgid%3A<message_id without <>>`.
+- Any row means the employer wrote ("heard back"): the application is never auto-ghosted and gets
+  no more "Heard back?" nudges.
 
 ### 6.3 Enumerations (identical to `schema.sql` CHECK constraints)
 
@@ -326,7 +359,8 @@ Special path (not an edge): `mark_easy_apply_done` records a **manual** applicat
 **Board statuses** (manual, only when `state = submitted`): `applied` (set automatically on
 submit), `assessment`, `interview`, `offer`, `rejected`, `ghosted` (auto after
 `ghost_after_days` = 21 with no change). The user may move between any of them (`set_status`).
-An application whose outreach thread got a reply is never auto-ghosted.
+An application whose outreach thread got a reply, or that the employer wrote about
+(`application_replies`, §6.2.3), is never auto-ghosted.
 
 ### 7.1 Cold-email message and thread states
 

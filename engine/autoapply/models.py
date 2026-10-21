@@ -40,6 +40,7 @@ from autoapply.enums import (
     AnswerSource,
     AppState,
     ApplicationMode,
+    ApplicationReplyLabel,
     Ats,
     BoardStatus,
     CapKind,
@@ -473,6 +474,31 @@ class Application(RowModel):
     updated_at: Timestamp
 
 
+class ApplicationReply(RowModel):
+    """``application_replies`` (schema v11): an employer / ATS email matched to a submitted application."""
+
+    _bool_fields = frozenset({"ambiguous"})
+
+    id: int
+    application_id: int
+    message_id: str
+    from_email: str
+    from_name: str | None = None
+    subject: str = ""
+    snippet: str = ""
+    received_at: Timestamp
+    label: ApplicationReplyLabel
+    classified_by: str = "rules"
+    match_basis: str
+    ambiguous: bool = False
+    suggested_status: BoardStatus | None = None
+    suggestion_state: str = "none"
+    tokens_in: int = 0
+    tokens_out: int = 0
+    created_at: Timestamp
+    decided_at: Timestamp | None = None
+
+
 class BBox(BaseModel):
     x: float
     y: float
@@ -874,6 +900,8 @@ class Counts(_P):
     outreach_drafts: int = Field(default=0, description="Cold email drafts waiting for review (Cold Email badge).")
     outreach_replies_unread: int = Field(default=0, description="Outreach threads with a reply the user has not opened (Needs You > Replies).")
     outreach_unknown: int = Field(default=0, description="Emails that may or may not have gone out (Needs You > Possibly sent).")
+    application_replies_unread: int = Field(
+        default=0, description="Employer replies with a suggested board move waiting for Accept / Dismiss (application_replies).")
 
 
 class CapsStatus(_P):
@@ -1277,6 +1305,18 @@ class MarkReplyReadPayload(_P):
     thread_id: int
 
 
+class AcceptReplySuggestionPayload(_P):
+    """Apply an employer reply's suggested board status (``set_status``, actor user)."""
+
+    reply_id: int
+
+
+class DismissReplySuggestionPayload(_P):
+    """Keep the board as it is; the reply stays as evidence (and still counts as heard back)."""
+
+    reply_id: int
+
+
 class SetThreadOutcomePayload(_P):
     thread_id: int
     outcome: ThreadOutcome | None = None
@@ -1423,6 +1463,8 @@ COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "draft_referral": DraftReferralPayload,
     "update_referral": UpdateReferralPayload,
     "set_provider_key": SetProviderKeyPayload,
+    "accept_reply_suggestion": AcceptReplySuggestionPayload,
+    "dismiss_reply_suggestion": DismissReplySuggestionPayload,
 }
 
 
@@ -1596,6 +1638,27 @@ class OutreachReplyPayload(_P):
     suggested_status: BoardStatus | None = Field(default=None, description="A board move the reply suggests (never applied by itself).")
 
 
+class ApplicationReplyPayload(_P):
+    """An employer / ATS email about a submitted application was read from the mailbox. A board
+    move is only suggested (``suggested_status``); the user confirms it with ``accept_reply_suggestion``."""
+
+    reply_id: int = Field(description="application_replies.id (for accept / dismiss).")
+    application_id: int
+    job_id: int
+    company: str
+    title: str | None = Field(default=None, description="The job title of the matched application.")
+    label: ApplicationReplyLabel
+    suggested_status: BoardStatus | None = Field(
+        default=None, description="interview | assessment | rejected | offer; null for an acknowledgement, other or ambiguous match.")
+    ambiguous: bool = Field(default=False, description="Several applications at this company could match; nothing is suggested.")
+    from_email: str
+    from_name: str | None = None
+    subject: str = ""
+    snippet: str = ""
+    received_at: Timestamp
+    message_id: str = Field(description="RFC 822 Message-ID (open in Gmail: #search/rfc822msgid%3A<id without <>>).")
+
+
 class ScoutFinishedPayload(_P):
     company_id: int
     purpose: ScoutPurpose = ScoutPurpose.APPLICATION
@@ -1626,6 +1689,7 @@ EVENT_PAYLOADS: dict[str, type[BaseModel]] = {
     "nudge_due": NudgeDuePayload,
     "outreach_state": OutreachStatePayload,
     "outreach_reply": OutreachReplyPayload,
+    "application_reply": ApplicationReplyPayload,
     "scout_finished": ScoutFinishedPayload,
     "log": LogPayload,
 }

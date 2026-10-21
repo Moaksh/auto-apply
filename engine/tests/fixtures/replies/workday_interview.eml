@@ -1,0 +1,12 @@
+From: Acme Careers <acme@myworkday.com>
+To: asha@gmail.com
+Subject: Next steps for Backend Engineer
+Date: {DATE}
+Message-ID: <wd-interview-1@myworkday.com>
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>Hello Asha,</p>
+<p>Thanks for applying. We'd like to schedule a phone screen with our recruiting team for the
+Backend Engineer role.</p>
+<p>Please pick a time that works for you: <a href="https://calendly.com/acme-recruiting/30min">calendly.com/acme-recruiting</a></p>
+<p>Best,<br>Acme Recruiting</p></body></html>

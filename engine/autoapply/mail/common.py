@@ -117,6 +117,16 @@ class ImapMailbox:
             return None
         return email.message_from_bytes(data[0][1])
 
+    def message_id(self, uid: bytes) -> str | None:
+        """Only the Message-ID header (cheap; lets a scan skip messages it has already seen)."""
+        try:
+            typ, data = self._m.fetch(uid, "(BODY.PEEK[HEADER.FIELDS (MESSAGE-ID)])")
+        except imaplib.IMAP4.error:
+            return None
+        if typ != "OK" or not data or not isinstance(data[0], tuple):
+            return None
+        return (email.message_from_bytes(data[0][1]).get("Message-ID") or "").strip() or None
+
     def has_gmail_ext(self) -> bool:
         return "X-GM-EXT-1" in getattr(self._m, "capabilities", ())
 

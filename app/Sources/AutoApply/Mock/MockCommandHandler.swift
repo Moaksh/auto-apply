@@ -464,6 +464,11 @@ enum MockCommandHandler {
         case .updateContact, .deleteContact, .discardOutreach, .resolveOutreachUnknown, .markReplyRead, .setThreadOutcome,
              .suppress, .unsuppress, .updateProspect, .updateReferral:
             return Handled(reply: ack())
+        // Employer replies (protocol.md §5.2): the mock world keeps no reply state.
+        case .acceptReplySuggestion(let p):
+            return Handled(reply: ack(["reply_id": .int(p.replyId), "application_id": .null, "status": .null]))
+        case .dismissReplySuggestion:
+            return Handled(reply: ack())
         case .importContacts:
             return Handled(reply: ack(["added": .int(0), "merged": .int(0), "skipped": .int(0)]))
         case .draftOutreach:

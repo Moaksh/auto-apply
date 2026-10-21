@@ -77,7 +77,9 @@
     "add_referral",
     "draft_referral",
     "update_referral",
-    "set_provider_key"
+    "set_provider_key",
+    "accept_reply_suggestion",
+    "dismiss_reply_suggestion"
   ],
   "x-event-types": [
     "ack",
@@ -98,6 +100,7 @@
     "nudge_due",
     "outreach_state",
     "outreach_reply",
+    "application_reply",
     "scout_finished",
     "log"
   ],
@@ -237,6 +240,21 @@
         "suggestion_id"
       ],
       "title": "AcceptCompanySuggestionPayload",
+      "type": "object"
+    },
+    "AcceptReplySuggestionPayload": {
+      "additionalProperties": false,
+      "description": "Apply an employer reply's suggested board status (``set_status``, actor user).",
+      "properties": {
+        "reply_id": {
+          "title": "Reply Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "reply_id"
+      ],
+      "title": "AcceptReplySuggestionPayload",
       "type": "object"
     },
     "AckPayload": {
@@ -753,6 +771,124 @@
       "title": "AppState",
       "type": "string"
     },
+    "ApplicationReplyLabel": {
+      "description": "Classification of an employer / ATS email about a submitted application\n(``application_replies.label``). Every label counts as \"heard back\" for auto-ghosting.",
+      "enum": [
+        "interview_invite",
+        "assessment",
+        "rejection",
+        "offer",
+        "received_ack",
+        "other"
+      ],
+      "title": "ApplicationReplyLabel",
+      "type": "string"
+    },
+    "ApplicationReplyPayload": {
+      "additionalProperties": false,
+      "description": "An employer / ATS email about a submitted application was read from the mailbox. A board\nmove is only suggested (``suggested_status``); the user confirms it with ``accept_reply_suggestion``.",
+      "properties": {
+        "reply_id": {
+          "description": "application_replies.id (for accept / dismiss).",
+          "title": "Reply Id",
+          "type": "integer"
+        },
+        "application_id": {
+          "title": "Application Id",
+          "type": "integer"
+        },
+        "job_id": {
+          "title": "Job Id",
+          "type": "integer"
+        },
+        "company": {
+          "title": "Company",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The job title of the matched application.",
+          "title": "Title"
+        },
+        "label": {
+          "$ref": "#/$defs/ApplicationReplyLabel"
+        },
+        "suggested_status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoardStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "interview | assessment | rejected | offer; null for an acknowledgement, other or ambiguous match."
+        },
+        "ambiguous": {
+          "default": false,
+          "description": "Several applications at this company could match; nothing is suggested.",
+          "title": "Ambiguous",
+          "type": "boolean"
+        },
+        "from_email": {
+          "title": "From Email",
+          "type": "string"
+        },
+        "from_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "From Name"
+        },
+        "subject": {
+          "default": "",
+          "title": "Subject",
+          "type": "string"
+        },
+        "snippet": {
+          "default": "",
+          "title": "Snippet",
+          "type": "string"
+        },
+        "received_at": {
+          "format": "date-time",
+          "title": "Received At",
+          "type": "string"
+        },
+        "message_id": {
+          "description": "RFC 822 Message-ID (open in Gmail: #search/rfc822msgid%3A<id without <>>).",
+          "title": "Message Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "reply_id",
+        "application_id",
+        "job_id",
+        "company",
+        "label",
+        "from_email",
+        "received_at",
+        "message_id"
+      ],
+      "title": "ApplicationReplyPayload",
+      "type": "object"
+    },
     "ApplicationStatePayload": {
       "additionalProperties": false,
       "properties": {
@@ -1203,6 +1339,12 @@
           "description": "Emails that may or may not have gone out (Needs You > Possibly sent).",
           "title": "Outreach Unknown",
           "type": "integer"
+        },
+        "application_replies_unread": {
+          "default": 0,
+          "description": "Employer replies with a suggested board move waiting for Accept / Dismiss (application_replies).",
+          "title": "Application Replies Unread",
+          "type": "integer"
         }
       },
       "title": "Counts",
@@ -1322,6 +1464,21 @@
         "job_id"
       ],
       "title": "DismissEasyApplyPayload",
+      "type": "object"
+    },
+    "DismissReplySuggestionPayload": {
+      "additionalProperties": false,
+      "description": "Keep the board as it is; the reply stays as evidence (and still counts as heard back).",
+      "properties": {
+        "reply_id": {
+          "title": "Reply Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "reply_id"
+      ],
+      "title": "DismissReplySuggestionPayload",
       "type": "object"
     },
     "DraftOutreachPayload": {
@@ -5127,7 +5284,8 @@
             "suggestions_pending": 0,
             "outreach_drafts": 0,
             "outreach_replies_unread": 0,
-            "outreach_unknown": 0
+            "outreach_unknown": 0,
+            "application_replies_unread": 0
           }
         },
         "caps": {
@@ -7960,6 +8118,58 @@
       ],
       "additionalProperties": false
     },
+    "CommandAcceptReplySuggestion": {
+      "type": "object",
+      "title": "Command: accept_reply_suggestion",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "accept_reply_suggestion"
+        },
+        "payload": {
+          "$ref": "#/$defs/AcceptReplySuggestionPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandDismissReplySuggestion": {
+      "type": "object",
+      "title": "Command: dismiss_reply_suggestion",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "dismiss_reply_suggestion"
+        },
+        "payload": {
+          "$ref": "#/$defs/DismissReplySuggestionPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
     "EventAck": {
       "type": "object",
       "title": "Event: ack",
@@ -8501,6 +8711,36 @@
       ],
       "additionalProperties": false
     },
+    "EventApplicationReply": {
+      "type": "object",
+      "title": "Event: application_reply",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "application_reply"
+        },
+        "payload": {
+          "$ref": "#/$defs/ApplicationReplyPayload"
+        },
+        "reply_to": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
     "EventScoutFinished": {
       "type": "object",
       "title": "Event: scout_finished",
@@ -8781,6 +9021,12 @@
         },
         {
           "$ref": "#/$defs/CommandSetProviderKey"
+        },
+        {
+          "$ref": "#/$defs/CommandAcceptReplySuggestion"
+        },
+        {
+          "$ref": "#/$defs/CommandDismissReplySuggestion"
         }
       ]
     },
@@ -8839,6 +9085,9 @@
         },
         {
           "$ref": "#/$defs/EventOutreachReply"
+        },
+        {
+          "$ref": "#/$defs/EventApplicationReply"
         },
         {
           "$ref": "#/$defs/EventScoutFinished"

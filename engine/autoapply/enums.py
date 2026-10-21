@@ -276,6 +276,27 @@ class ReplyLabel(StrEnum):
     BOUNCE = "bounce"
 
 
+class ApplicationReplyLabel(StrEnum):
+    """Classification of an employer / ATS email about a submitted application
+    (``application_replies.label``). Every label counts as "heard back" for auto-ghosting."""
+
+    INTERVIEW_INVITE = "interview_invite"  # suggests board status interview
+    ASSESSMENT = "assessment"              # suggests assessment
+    REJECTION = "rejection"                # suggests rejected
+    OFFER = "offer"                        # suggests offer
+    RECEIVED_ACK = "received_ack"          # "we received your application": no suggestion
+    OTHER = "other"
+
+
+class ReplySuggestionState(StrEnum):
+    """``application_replies.suggestion_state``: a suggested board move is never applied by itself."""
+
+    NONE = "none"          # nothing to suggest (acknowledgement, other, ambiguous, or already in that status)
+    PENDING = "pending"    # waiting for the user's Accept / Dismiss
+    ACCEPTED = "accepted"
+    DISMISSED = "dismissed"
+
+
 class RoleCategory(StrEnum):
     RECRUITER = "recruiter"
     TALENT_LEAD = "talent_lead"

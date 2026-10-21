@@ -163,7 +163,30 @@ def _v9_schema_sql() -> str:
     start = sql.rindex("-- =", 0, sql.index("-- Cold outreach (v10)"))
     end = sql.rindex("-- -", 0, sql.index("-- updated_at maintenance"))
     sql = sql[:start] + sql[end:]
-    return "\n".join(line for line in sql.splitlines() if "-- v10" not in line and "VALUES (10)" not in line)
+    return "\n".join(line for line in sql.splitlines()
+                     if "-- v10" not in line and "VALUES (10)" not in line and "VALUES (11)" not in line)
+
+
+def _v10_schema_sql() -> str:
+    """schema.sql as it was at v10: without the employer-replies block and the v11 row."""
+    sql = schema_sql_path().read_text()
+    start = sql.rindex("-- =", 0, sql.index("-- Employer replies (v11)"))
+    end = sql.rindex("-- -", 0, sql.index("-- updated_at maintenance"))
+    sql = sql[:start] + sql[end:]
+    return "\n".join(line for line in sql.splitlines() if "VALUES (11)" not in line)
+
+
+def test_v10_database_upgrades_to_v11(tmp_path, conn):
+    c = db.connect(tmp_path / "v10.db")
+    c.executescript("BEGIN;\n" + _v10_schema_sql() + "\nCOMMIT;")
+    assert db.current_schema_version(c) == 10
+    assert "application_replies" not in tables(c)
+    c.execute("INSERT INTO companies(name, normalized_name, domain) VALUES ('Acme', 'acme', 'acme.com')")
+    assert db.migrate(c) == db.SCHEMA_VERSION == 11
+    assert _shape(c, "application_replies") == _shape(conn, "application_replies")
+    assert c.execute("SELECT domain FROM companies WHERE name = 'Acme'").fetchone()[0] == "acme.com"
+    assert db.migrate(c) == db.SCHEMA_VERSION  # idempotent
+    c.close()
 
 
 def _shape(conn: sqlite3.Connection, table: str) -> tuple:

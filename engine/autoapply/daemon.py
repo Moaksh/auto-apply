@@ -544,6 +544,7 @@ class Daemon:
         #: Extra OutreachService arguments (tests inject SMTP / IMAP / HTTP / DNS fakes here).
         self._outreach_options = outreach_options or {}
         self.outreach: OutreachService | None = None
+        self.replywatch: Any = None  # mail.replywatch.ReplyWatcher
 
         self.clients: set[Client] = set()
         self.lock = InstanceLock(paths.home / LOCK_FILENAME)
@@ -598,6 +599,13 @@ class Daemon:
             notifier=self.notifier, profile_dir=self.paths.chrome_profile, **self._outreach_options,
         )
         self.pipeline.outreach = self.outreach
+        from autoapply.mail.replywatch import ReplyWatcher
+
+        # Employer replies to submitted applications share the outreach mailbox seams (fakes in tests).
+        self.replywatch = ReplyWatcher(
+            self.conn, self.llm, self.emit, is_paused=self.is_paused, mailbox_factory=self.outreach.mailbox_factory,
+            mail_password=self.outreach.mail_password, now=self.outreach.now,
+        )
         self.coordinator = RunCoordinator(self._begin_run, self.pipeline.execute, caffeinate_factory=self.caffeinate_factory)
         prefs = db.get_preferences(self.conn)
         last = db.get_current_run(self.conn) or db.get_last_run(self.conn)
@@ -942,7 +950,8 @@ class Daemon:
 
     async def _outreach_loop(self) -> None:
         """Every minute: send one due approved email, watch the mailbox (every 10 min), and do
-        queued Google work for outreach when no run holds the browser."""
+        queued Google work for outreach when no run holds the browser. Also reads employer
+        replies to submitted applications (every 10 min, not while paused)."""
         while True:
             try:
                 if self.outreach is not None:
@@ -950,6 +959,11 @@ class Daemon:
                     await self.outreach_google_if_idle()
             except Exception:  # noqa: BLE001
                 log.exception("outreach tick failed")
+            try:
+                if self.replywatch is not None:
+                    await self.replywatch.tick()
+            except Exception:  # noqa: BLE001
+                log.exception("reply watch tick failed")
             await asyncio.sleep(OUTREACH_INTERVAL)
 
     async def outreach_google_if_idle(self) -> bool:
@@ -1652,6 +1666,18 @@ class Daemon:
 
     async def _cmd_set_provider_key(self, p: Any) -> dict[str, Any]:
         return await self._out.set_provider_key(p.provider, p.api_key)
+
+    # ---- employer replies (mail/replywatch.py) ---------------------------------------------
+
+    async def _cmd_accept_reply_suggestion(self, p: Any) -> dict[str, Any]:
+        reply, status = db.decide_reply_suggestion(self.conn, p.reply_id, accept=True)
+        if status is not None:
+            await self.emit("application_status", status)
+        return {"reply_id": reply.id, "application_id": reply.application_id,
+                "status": reply.suggested_status.value if reply.suggested_status else None}
+
+    async def _cmd_dismiss_reply_suggestion(self, p: Any) -> None:
+        db.decide_reply_suggestion(self.conn, p.reply_id, accept=False)
 
     async def log_line(self, level: LogLevel, message: str) -> None:
         await self.emit("log", LogPayload(level=level, message=message, logger=log.name, at=utcnow()))

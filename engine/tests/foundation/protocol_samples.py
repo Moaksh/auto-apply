@@ -149,6 +149,8 @@ def samples() -> list[Envelope]:
     c("add_referral", {"contact_id": 5, "basis": "alumni", "basis_detail": "IIT Madras"})
     c("draft_referral", {"id": 4})
     c("update_referral", {"id": 4, "state": "requested"})
+    c("accept_reply_suggestion", {"reply_id": 4})
+    c("dismiss_reply_suggestion", {"reply_id": 5})
     c("set_provider_key", {"provider": "hunter", "api_key": "hunter-key"})
 
     # ---- events
@@ -201,6 +203,12 @@ def samples() -> list[Envelope]:
     e("outreach_reply", {"thread_id": 3, "message_id": 12, "contact_name": "Jane Doe", "company": "Acme", "label": "positive",
                          "snippet": "Thanks, I've passed your profile to the team.", "application_id": 11,
                          "suggested_status": "interview"})
+    e("application_reply", {"reply_id": 4, "application_id": 11, "job_id": 11, "company": "Stripe", "title": "Backend Engineer",
+                            "label": "interview_invite", "suggested_status": "interview", "ambiguous": False,
+                            "from_email": "no-reply@us.greenhouse-mail.io", "from_name": "Stripe Recruiting",
+                            "subject": "Stripe: next steps for Backend Engineer",
+                            "snippet": "We'd love to schedule a call. Pick a time: https://calendly.com/stripe-recruiting",
+                            "received_at": TS, "message_id": "<abc123@greenhouse-mail.io>"})
     e("scout_finished", {"company_id": 1, "purpose": "application", "application_id": 11, "found": 6, "with_email": 4,
                          "best_confidence": 95, "queued_google": True, "thread_id": 3})
     e("log", {"level": "warning", "message": "selector timeout on step 5 · retried ok", "logger": "apply.lever",

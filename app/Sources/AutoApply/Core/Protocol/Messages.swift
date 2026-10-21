@@ -159,6 +159,15 @@ enum AppState: String, Codable, Sendable, CaseIterable, Hashable {
     case unknownVerify = "unknown_verify"
 }
 
+enum ApplicationReplyLabel: String, Codable, Sendable, CaseIterable, Hashable {
+    case interviewInvite = "interview_invite"
+    case assessment
+    case rejection
+    case offer
+    case receivedAck = "received_ack"
+    case other
+}
+
 enum AskConfidence: String, Codable, Sendable, CaseIterable, Hashable {
     case strict
     case balanced
@@ -395,6 +404,22 @@ extension AcceptCompanySuggestionPayload {
     }
 }
 
+/// Apply an employer reply's suggested board status (``set_status``, actor user).
+struct AcceptReplySuggestionPayload: Codable, Sendable, Hashable {
+    var replyId: Int
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case replyId = "reply_id"
+    }
+}
+
+extension AcceptReplySuggestionPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        replyId = try c.decode(Int.self, forKey: .replyId)
+    }
+}
+
 /// Success reply to a command (envelope carries ``reply_to``).
 struct AckPayload: Codable, Sendable, Hashable {
     var ok: Bool = true
@@ -623,6 +648,62 @@ extension AnswerQuestionPayload {
         saveToMemory = try c.decodeIfPresent(Bool.self, forKey: .saveToMemory) ?? true
         saveToProfile = try c.decodeIfPresent(Bool.self, forKey: .saveToProfile) ?? false
         perJobAnswers = try c.decodeIfPresent([PerJobAnswer].self, forKey: .perJobAnswers) ?? []
+    }
+}
+
+/// An employer / ATS email about a submitted application was read from the mailbox. A board
+/// move is only suggested (``suggested_status``); the user confirms it with ``accept_reply_suggestion``.
+struct ApplicationReplyPayload: Codable, Sendable, Hashable {
+    var replyId: Int
+    var applicationId: Int
+    var jobId: Int
+    var company: String
+    var title: String? = nil
+    var label: ApplicationReplyLabel
+    var suggestedStatus: BoardStatus? = nil
+    var ambiguous: Bool = false
+    var fromEmail: String
+    var fromName: String? = nil
+    var subject: String = ""
+    var snippet: String = ""
+    var receivedAt: Date
+    var messageId: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case replyId = "reply_id"
+        case applicationId = "application_id"
+        case jobId = "job_id"
+        case company
+        case title
+        case label
+        case suggestedStatus = "suggested_status"
+        case ambiguous
+        case fromEmail = "from_email"
+        case fromName = "from_name"
+        case subject
+        case snippet
+        case receivedAt = "received_at"
+        case messageId = "message_id"
+    }
+}
+
+extension ApplicationReplyPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        replyId = try c.decode(Int.self, forKey: .replyId)
+        applicationId = try c.decode(Int.self, forKey: .applicationId)
+        jobId = try c.decode(Int.self, forKey: .jobId)
+        company = try c.decode(String.self, forKey: .company)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        label = try c.decode(ApplicationReplyLabel.self, forKey: .label)
+        suggestedStatus = try c.decodeIfPresent(BoardStatus.self, forKey: .suggestedStatus)
+        ambiguous = try c.decodeIfPresent(Bool.self, forKey: .ambiguous) ?? false
+        fromEmail = try c.decode(String.self, forKey: .fromEmail)
+        fromName = try c.decodeIfPresent(String.self, forKey: .fromName)
+        subject = try c.decodeIfPresent(String.self, forKey: .subject) ?? ""
+        snippet = try c.decodeIfPresent(String.self, forKey: .snippet) ?? ""
+        receivedAt = try c.decode(Date.self, forKey: .receivedAt)
+        messageId = try c.decode(String.self, forKey: .messageId)
     }
 }
 
@@ -873,6 +954,7 @@ struct Counts: Codable, Sendable, Hashable {
     var outreachDrafts: Int = 0
     var outreachRepliesUnread: Int = 0
     var outreachUnknown: Int = 0
+    var applicationRepliesUnread: Int = 0
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case queued
@@ -890,6 +972,7 @@ struct Counts: Codable, Sendable, Hashable {
         case outreachDrafts = "outreach_drafts"
         case outreachRepliesUnread = "outreach_replies_unread"
         case outreachUnknown = "outreach_unknown"
+        case applicationRepliesUnread = "application_replies_unread"
     }
 }
 
@@ -911,6 +994,7 @@ extension Counts {
         outreachDrafts = try c.decodeIfPresent(Int.self, forKey: .outreachDrafts) ?? 0
         outreachRepliesUnread = try c.decodeIfPresent(Int.self, forKey: .outreachRepliesUnread) ?? 0
         outreachUnknown = try c.decodeIfPresent(Int.self, forKey: .outreachUnknown) ?? 0
+        applicationRepliesUnread = try c.decodeIfPresent(Int.self, forKey: .applicationRepliesUnread) ?? 0
     }
 }
 
@@ -1019,6 +1103,22 @@ extension DismissEasyApplyPayload {
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         jobId = try c.decode(Int.self, forKey: .jobId)
+    }
+}
+
+/// Keep the board as it is; the reply stays as evidence (and still counts as heard back).
+struct DismissReplySuggestionPayload: Codable, Sendable, Hashable {
+    var replyId: Int
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case replyId = "reply_id"
+    }
+}
+
+extension DismissReplySuggestionPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        replyId = try c.decode(Int.self, forKey: .replyId)
     }
 }
 
@@ -3293,6 +3393,8 @@ enum Command: Sendable, Hashable {
     case draftReferral(DraftReferralPayload)
     case updateReferral(UpdateReferralPayload)
     case setProviderKey(SetProviderKeyPayload)
+    case acceptReplySuggestion(AcceptReplySuggestionPayload)
+    case dismissReplySuggestion(DismissReplySuggestionPayload)
 
     /// Wire `type` string.
     var type: String {
@@ -3370,6 +3472,8 @@ enum Command: Sendable, Hashable {
         case .draftReferral: "draft_referral"
         case .updateReferral: "update_referral"
         case .setProviderKey: "set_provider_key"
+        case .acceptReplySuggestion: "accept_reply_suggestion"
+        case .dismissReplySuggestion: "dismiss_reply_suggestion"
         }
     }
 
@@ -3447,6 +3551,8 @@ enum Command: Sendable, Hashable {
         "draft_referral",
         "update_referral",
         "set_provider_key",
+        "accept_reply_suggestion",
+        "dismiss_reply_suggestion",
     ]
 }
 
@@ -3470,6 +3576,7 @@ enum DaemonEvent: Sendable, Hashable {
     case nudgeDue(NudgeDuePayload)
     case outreachState(OutreachStatePayload)
     case outreachReply(OutreachReplyPayload)
+    case applicationReply(ApplicationReplyPayload)
     case scoutFinished(ScoutFinishedPayload)
     case log(LogPayload)
     case unknown(type: String, payload: JSONValue)
@@ -3495,6 +3602,7 @@ enum DaemonEvent: Sendable, Hashable {
         case .nudgeDue: "nudge_due"
         case .outreachState: "outreach_state"
         case .outreachReply: "outreach_reply"
+        case .applicationReply: "application_reply"
         case .scoutFinished: "scout_finished"
         case .log: "log"
         case .unknown(let type, _): type
@@ -3520,6 +3628,7 @@ enum DaemonEvent: Sendable, Hashable {
         "nudge_due",
         "outreach_state",
         "outreach_reply",
+        "application_reply",
         "scout_finished",
         "log",
     ]
@@ -3624,6 +3733,8 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case "draft_referral": command = .draftReferral(try c.decode(DraftReferralPayload.self, forKey: .payload))
         case "update_referral": command = .updateReferral(try c.decode(UpdateReferralPayload.self, forKey: .payload))
         case "set_provider_key": command = .setProviderKey(try c.decode(SetProviderKeyPayload.self, forKey: .payload))
+        case "accept_reply_suggestion": command = .acceptReplySuggestion(try c.decode(AcceptReplySuggestionPayload.self, forKey: .payload))
+        case "dismiss_reply_suggestion": command = .dismissReplySuggestion(try c.decode(DismissReplySuggestionPayload.self, forKey: .payload))
         default:
             throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "unknown command type \(type)")
         }
@@ -3708,6 +3819,8 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case .draftReferral(let p): try c.encode(p, forKey: .payload)
         case .updateReferral(let p): try c.encode(p, forKey: .payload)
         case .setProviderKey(let p): try c.encode(p, forKey: .payload)
+        case .acceptReplySuggestion(let p): try c.encode(p, forKey: .payload)
+        case .dismissReplySuggestion(let p): try c.encode(p, forKey: .payload)
         }
     }
 }
@@ -3756,6 +3869,7 @@ struct EventEnvelope: Codable, Sendable, Hashable {
         case "nudge_due": event = .nudgeDue(try c.decode(NudgeDuePayload.self, forKey: .payload))
         case "outreach_state": event = .outreachState(try c.decode(OutreachStatePayload.self, forKey: .payload))
         case "outreach_reply": event = .outreachReply(try c.decode(OutreachReplyPayload.self, forKey: .payload))
+        case "application_reply": event = .applicationReply(try c.decode(ApplicationReplyPayload.self, forKey: .payload))
         case "scout_finished": event = .scoutFinished(try c.decode(ScoutFinishedPayload.self, forKey: .payload))
         case "log": event = .log(try c.decode(LogPayload.self, forKey: .payload))
         default:
@@ -3788,6 +3902,7 @@ struct EventEnvelope: Codable, Sendable, Hashable {
         case .nudgeDue(let p): try c.encode(p, forKey: .payload)
         case .outreachState(let p): try c.encode(p, forKey: .payload)
         case .outreachReply(let p): try c.encode(p, forKey: .payload)
+        case .applicationReply(let p): try c.encode(p, forKey: .payload)
         case .scoutFinished(let p): try c.encode(p, forKey: .payload)
         case .log(let p): try c.encode(p, forKey: .payload)
         case .unknown(_, let payload): try c.encode(payload, forKey: .payload)

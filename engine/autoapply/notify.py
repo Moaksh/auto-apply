@@ -21,6 +21,10 @@ NotifyFn = Callable[[str, str], Awaitable[None]]
 DEDUPE_SECONDS = 60.0
 
 
+#: Employer-reply labels worth a notification (``application_reply``), as words.
+_REPLY_WORDS = {"interview_invite": "interview invite", "assessment": "assessment", "rejection": "rejection", "offer": "offer"}
+
+
 def _esc(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
 
@@ -73,5 +77,9 @@ class Notifier:
         elif event_type == "outreach_reply" and d.get("label") not in ("ooo", "bounce"):
             who = (d.get("contact_name") or "Someone").split()[0]
             await self.notify(f"{who} at {d.get('company')} replied", d.get("snippet") or "Open it in Gmail.")
+        elif event_type == "application_reply" and d.get("label") in _REPLY_WORDS:
+            # Acknowledgements and "other" stay quiet; the reply is still on the board.
+            await self.notify(f"{d.get('company') or 'An employer'} replied: {_REPLY_WORDS[d['label']]}",
+                              d.get("subject") or d.get("snippet") or "Open it in Gmail.")
         elif event_type == "error":
             await self.notify("AutoApply problem", d.get("message") or "See the activity log.")

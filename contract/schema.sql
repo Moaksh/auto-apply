@@ -620,6 +620,36 @@ CREATE TABLE IF NOT EXISTS prospects (
 );
 CREATE INDEX IF NOT EXISTS ix_prospects_status ON prospects(status);
 
+-- =====================================================================================
+-- Employer replies (v11). engine/autoapply/mail/replywatch.py reads the connected mailbox
+-- (read-only) for emails from a company's domain or its ATS about a submitted application.
+-- A board move is only suggested; the user accepts or dismisses it. Any row means the
+-- employer wrote ("heard back"): such an application is never auto-ghosted.
+-- =====================================================================================
+
+CREATE TABLE IF NOT EXISTS application_replies (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    application_id    INTEGER NOT NULL REFERENCES applications(id) ON DELETE CASCADE,
+    message_id        TEXT NOT NULL UNIQUE,
+    from_email        TEXT NOT NULL,
+    from_name         TEXT,
+    subject           TEXT NOT NULL DEFAULT '',
+    snippet           TEXT NOT NULL DEFAULT '',
+    received_at       TEXT NOT NULL,
+    label             TEXT NOT NULL CHECK (label IN ('interview_invite','assessment','rejection','offer','received_ack','other')),
+    classified_by     TEXT NOT NULL DEFAULT 'rules' CHECK (classified_by IN ('rules','model')),
+    match_basis       TEXT NOT NULL CHECK (match_basis IN ('domain','ats')),
+    ambiguous         INTEGER NOT NULL DEFAULT 0 CHECK (ambiguous IN (0, 1)),
+    suggested_status  TEXT CHECK (suggested_status IS NULL OR suggested_status IN ('assessment','interview','offer','rejected')),
+    suggestion_state  TEXT NOT NULL DEFAULT 'none' CHECK (suggestion_state IN ('none','pending','accepted','dismissed')),
+    tokens_in         INTEGER NOT NULL DEFAULT 0,
+    tokens_out        INTEGER NOT NULL DEFAULT 0,
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    decided_at        TEXT
+);
+CREATE INDEX IF NOT EXISTS ix_application_replies_app ON application_replies(application_id, received_at);
+CREATE INDEX IF NOT EXISTS ix_application_replies_suggestion ON application_replies(suggestion_state);
+
 -- -------------------------------------------------------------------------------------
 -- updated_at maintenance is done by autoapply.db (explicit), not triggers, to keep the
 -- app's GRDB observation cheap and predictable.
@@ -639,3 +669,4 @@ INSERT OR IGNORE INTO schema_version (version) VALUES (7);
 INSERT OR IGNORE INTO schema_version (version) VALUES (8);
 INSERT OR IGNORE INTO schema_version (version) VALUES (9);
 INSERT OR IGNORE INTO schema_version (version) VALUES (10);
+INSERT OR IGNORE INTO schema_version (version) VALUES (11);
