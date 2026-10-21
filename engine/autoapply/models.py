@@ -498,6 +498,7 @@ class ApplicationReply(RowModel):
     tokens_out: int = 0
     created_at: Timestamp
     decided_at: Timestamp | None = None
+    read_at: Timestamp | None = None
 
 
 class BBox(BaseModel):
@@ -693,6 +694,9 @@ class OutreachThread(RowModel):
     next_action_at: Timestamp | None = None
     unread_reply: bool = False
     followup_approved: bool = False
+    suggested_status: BoardStatus | None = None
+    suggestion_state: str = "none"
+    suggestion_decided_at: Timestamp | None = None
     created_at: Timestamp
     updated_at: Timestamp
 
@@ -902,7 +906,8 @@ class Counts(_P):
     outreach_replies_unread: int = Field(default=0, description="Outreach threads with a reply the user has not opened (Needs You > Replies).")
     outreach_unknown: int = Field(default=0, description="Emails that may or may not have gone out (Needs You > Possibly sent).")
     application_replies_unread: int = Field(
-        default=0, description="Employer replies with a suggested board move waiting for Accept / Dismiss (application_replies).")
+        default=0, description="Employer replies (application_replies) that are unread (read_at NULL) or whose suggested board "
+                               "move is waiting for Accept / Dismiss; each row counts once.")
 
 
 class CapsStatus(_P):
@@ -1460,6 +1465,18 @@ class DeleteContactPayload(_P):
     suppress: bool = Field(default=True, description="Also put the address on the do-not-contact list.")
 
 
+class DeleteContactsPayload(_P):
+    """Bulk delete (Settings > Outreach > Data). Filters combine (AND); at least one is required.
+    Contacts you typed or imported are only deleted when listed in ``ids`` or with ``all``;
+    contacts of a live conversation (active thread, or an email approved / scheduled / sending /
+    unknown) are always skipped."""
+
+    ids: list[int] | None = Field(default=None, description="Exactly these contacts (any origin).")
+    older_than_days: int | None = Field(default=None, ge=0, description="Contacts created more than this many days ago.")
+    all: bool = Field(default=False, description="Every contact (any origin).")
+    suppress: bool = Field(default=False, description="Also put each deleted address on the do-not-contact list.")
+
+
 class ImportContactsPayload(_P):
     file_path: str = Field(description="CSV with columns name,email,company,title,linkedin_url,notes (header row).")
 
@@ -1549,6 +1566,25 @@ class DismissReplySuggestionPayload(_P):
     reply_id: int
 
 
+class MarkApplicationReplyReadPayload(_P):
+    """Set ``application_replies.read_at`` (idempotent)."""
+
+    reply_id: int
+
+
+class AcceptOutreachSuggestionPayload(_P):
+    """Apply the board move an outreach reply suggested (``outreach_threads.suggested_status``) to the
+    thread's application (``set_status``, actor user)."""
+
+    thread_id: int
+
+
+class DismissOutreachSuggestionPayload(_P):
+    """Keep the board as it is (the reply and the thread are unchanged)."""
+
+    thread_id: int
+
+
 class SetThreadOutcomePayload(_P):
     thread_id: int
     outcome: ThreadOutcome | None = None
@@ -1583,7 +1619,8 @@ class AddProspectPayload(_P):
 class UpdateProspectPayload(_P):
     id: int
     status: ProspectStatus | None = Field(default=None, description="'shortlisted' starts a scout; 'dismissed' never suggests it again.")
-    watch: bool = Field(default=False, description="Also add the company to the job watchlist.")
+    watch: bool | None = Field(default=None, description="true adds the company to the job watchlist, false removes it "
+                                                     "(its jobs and history stay); null/absent leaves it as it is.")
 
 
 class SuggestReferrersPayload(_P):
@@ -1694,6 +1731,7 @@ COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "add_contact": AddContactPayload,
     "update_contact": UpdateContactPayload,
     "delete_contact": DeleteContactPayload,
+    "delete_contacts": DeleteContactsPayload,
     "import_contacts": ImportContactsPayload,
     "import_linkedin_connections": ImportLinkedinConnectionsPayload,
     "draft_outreach": DraftOutreachPayload,
@@ -1717,6 +1755,9 @@ COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "set_provider_key": SetProviderKeyPayload,
     "accept_reply_suggestion": AcceptReplySuggestionPayload,
     "dismiss_reply_suggestion": DismissReplySuggestionPayload,
+    "mark_application_reply_read": MarkApplicationReplyReadPayload,
+    "accept_outreach_suggestion": AcceptOutreachSuggestionPayload,
+    "dismiss_outreach_suggestion": DismissOutreachSuggestionPayload,
     "generate_interview_prep": GenerateInterviewPrepPayload,
     "get_interview_prep": GetInterviewPrepPayload,
     "interview_debrief": InterviewDebriefPayload,
@@ -1892,7 +1933,9 @@ class OutreachReplyPayload(_P):
     label: ReplyLabel
     snippet: str = ""
     application_id: int | None = None
-    suggested_status: BoardStatus | None = Field(default=None, description="A board move the reply suggests (never applied by itself).")
+    suggested_status: BoardStatus | None = Field(
+        default=None, description="A board move the reply suggests (never applied by itself). Stored as "
+                                  "outreach_threads.suggested_status with suggestion_state 'pending'.")
 
 
 class ApplicationReplyPayload(_P):

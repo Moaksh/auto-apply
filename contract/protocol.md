@@ -116,7 +116,7 @@ An `error` without `reply_to` is an unsolicited daemon problem (login expired, C
 | `open_agent_chrome` | `url?` | `null` | brings the visible agent Chrome window forward |
 | `onboarding_system_check` | `{}` | `SystemCheckResult` `{items:[{name, ok, required, version?, detail?, fix_command?}], all_required_ok}` | names: `claude_cli`, `uv`, `node`, `autoapplyd`, `chrome` |
 | `onboarding_parse_resume` | `file_path`, `label?` | `ParseResumeResult` `{resume_variant_id, profile, uncertain_fields}` | adds the variant and pre-fills the profile |
-| `set_mail_account` | `email`, `app_password` | `{email, connected, error}` | logs in over IMAP to check; password → macOS Keychain only; used to read emailed security codes |
+| `set_mail_account` | `email`, `app_password` | `{email, connected, error}` | logs in over IMAP to check; password → macOS Keychain only; used to read emailed security codes. Rewrites `meta.mail_account`: reconnecting the **same** address (case-insensitive) keeps `send_enabled` (and `send_enabled_at`) as they were; a **different** address turns `send_enabled` off, so cold-email sending needs a new `enable_sending` test send |
 | `get_mail_account` | `test` (bool) | `{email, connected, error}` | `test` re-checks the login |
 | `suggest_preferences` | — | `SuggestedPreferences` `{roles, seniority, locations, years_experience}` | from the stored profile; nothing is saved |
 | `clear_mail_account` | — | `{email: null, connected: false}` | removes the Keychain item |
@@ -141,22 +141,25 @@ Nothing is ever sent without `approve_outreach`. Sending stays off until `enable
 | `add_contact` | `company_id?`, `company_name?`, `full_name`, `email?`, `title?`, `linkedin_url?`, `relationship?` (`friend`\|`ex_colleague`\|`alumni`\|`met`\|`other`), `notes?`, `share_ok` (false) | `{contact_id, merged}` | a typed email is status `user`, confidence 100 |
 | `update_contact` | `id` + any of `company_id`, `full_name`, `email`, `title`, `linkedin_url`, `relationship`, `notes`, `share_ok` (only keys present; null clears) | `null` | |
 | `delete_contact` | `id`, `suppress` (true) | `null` | with `suppress` the address goes on the do-not-contact list; its pending drafts are cancelled |
+| `delete_contacts` | `ids?` [int], `older_than_days?` (≥ 0), `all` (false), `suppress` (false) | `{deleted, skipped_active}` | bulk delete (Settings ▸ Outreach ▸ Data). `all` selects every contact; otherwise the given filters combine (AND): `ids` = exactly those contacts, `older_than_days` = `created_at` more than N days ago. At least one filter, else `invalid_payload`; `ids: []` deletes nothing. **Retention rule:** contacts with `origin` `user` / `import` are only deleted when listed in `ids` or with `all` (never by `older_than_days` alone). **Live conversations are never touched:** a contact whose thread is `active`, or has an outgoing email `approved` / `scheduled` / `sending` / `unknown`, is skipped and counted in `skipped_active`. Draft-only threads lose their pending drafts (as `delete_contact`); threads keep their history with `contact_id` NULL. `suppress` puts each deleted address on the do-not-contact list |
 | `import_contacts` | `file_path` (CSV `name,email,company,title,linkedin_url,notes`) | `{added, merged, skipped}` | deduplicated by normalized email |
 | `import_linkedin_connections` | `file_path` (the user's own LinkedIn export `Connections.csv`) | `{imported, merged, skipped, matched_companies: [{company_id, name, why, connections}], referral_suggestions}` | see §5.1.1; LinkedIn is never opened |
 | `draft_outreach` | `contact_id`, `kind` (`application`\|`prospect`\|`referral_email`), `application_id?` (required for `application`), `instructions?` | `{thread_id, message_id, grounded, unsupported_claims}` | grounded + fact-checked; re-drafting / switching contact replaces the open draft |
 | `edit_outreach_draft` | `message_id`, `subject?`, `body`, `confirm_claims` (false) | `{grounded, unsupported_claims}` | re-checked; `confirm_claims` ("These are true") allows approval despite unsupported claims |
-| `approve_outreach` | `message_ids[]`, `include_followups` (false), `send_anyway[]` (message ids OK'd below the confidence bar) | `{batch_uid, scheduled: [{message_id, send_at}], days: [{date, count}]}` | the only path to sending; never fails because of caps (spills to later days) |
+| `approve_outreach` | `message_ids[]`, `include_followups` (false), `send_anyway[]` (message ids OK'd below the confidence bar) | `{batch_uid, scheduled: [{message_id, send_at}], days: [{date, count}]}` | the only path to sending; never fails because of caps (spills to later days). All-or-nothing: on any problem nothing is scheduled and the `conflict` error's `details` maps each problem to message ids: `ungrounded`, `no_address` (the draft has no recipient address), `do_not_contact` (the recipient is on the do-not-contact list), `thread_closed`, `low_confidence` |
 | `cancel_outreach` | `message_ids[]` | `{cancelled}` | approved / scheduled → draft |
 | `discard_outreach` | `thread_id` | `null` | only before anything was sent |
 | `resolve_outreach_unknown` | `message_id`, `sent` | `null` | `unknown` → `sent` / `failed` (never resent automatically) |
 | `mark_reply_read` | `thread_id` | `null` | clears `unread_reply` |
+| `accept_outreach_suggestion` | `thread_id` | `{thread_id, application_id, status}` | applies the thread's stored `suggested_status` (§6.2.2) to its application through `set_status` (actor `user`; emits `application_status`; may queue interview prep like `accept_reply_suggestion`). `conflict` when there is no pending suggestion; `illegal_transition` when the application is no longer `submitted` |
+| `dismiss_outreach_suggestion` | `thread_id` | `null` | keeps the board as it is; idempotent. The reply and the thread are unchanged |
 | `set_thread_outcome` | `thread_id`, `outcome?` (`positive`\|`referred`\|`not_interested`\|`question`\|`other`), `close` (false) | `null` | closing cancels pending follow-ups; an unanswered prospect thread starts a 60-day cooldown |
 | `suppress` | `email?` \| `domain?`, `reason` (`opt_out`\|`hard_bounce`\|`user`\|`shared_removal`\|`complaint`, default `user`) | `null` | cancels pending emails to it |
 | `unsuppress` | `email?` \| `domain?` | `null` | `conflict` for an opt-out (never removable) |
 | `enable_sending` | `enabled` | `{send_enabled, test_sent_to}` | `true` sends a test email to yourself first (Gmail / Workspace only) |
 | `search_prospects` | `query`, `location?` | `{search_id}` | company search on Google when the browser is free; results land in `prospects` |
 | `add_prospect` | `company_name?`, `url?` | `{prospect_id, company_id}` | a typed company: enriched, scored and scouted in the background |
-| `update_prospect` | `id`, `status?` (`suggested`\|`shortlisted`\|`contacted`\|`dismissed`), `watch` (false) | `null` | `shortlisted` starts a scout; `watch` adds it to the job watchlist |
+| `update_prospect` | `id`, `status?` (`suggested`\|`shortlisted`\|`contacted`\|`dismissed`), `watch?` (bool, absent / null = unchanged) | `null` | `shortlisted` starts a scout; `watch: true` adds the company to the job watchlist, `watch: false` removes it (`companies.watch = 0`; the company, its jobs, applications, prospect row and outreach history stay) |
 | `suggest_referrers` | `company_id`, `job_id?` | `{queued_google}` | alumni / ex-colleagues / same function via Google results only (LinkedIn is never opened) |
 | `add_referral` | `company_id?`, `job_id?`, `contact_id?`, `person_name?`, `title?`, `linkedin_url?`, `basis` (`alumni`\|`ex_colleague`\|`same_function`\|`user`\|`other`, default `user`), `basis_detail?` | `{referral_id, created}` | "could refer me" |
 | `draft_referral` | `id`, `instructions?` | `{connect_note, referral_dm, grounded, unsupported_claims}` | note ≤ 300 characters, message ≤ 120 words; stored on the referral |
@@ -181,12 +184,13 @@ A small profile stored in `meta` (`voice_profile`) shapes generated cover letter
 | `get_voice_profile` | — | `VoiceProfile` `{sign_off, formality, max_words, avoid_phrases, writing_sample}` | defaults: `"Best regards"`, `neutral`, 250, `[]`, `null` |
 | `update_voice_profile` | any of `sign_off` (≤ 40), `formality` (`casual`\|`neutral`\|`formal`), `max_words` (60-600), `avoid_phrases[]` (≤ 20, each ≤ 80), `writing_sample` (≤ 1500) | `VoiceProfile` | only keys present; null resets a field to its default |
 
-#### 5.2 Employer reply commands (schema v11; `engine/autoapply/mail/replywatch.py`)
+#### 5.2 Employer reply commands (schema v11, read flag v12; `engine/autoapply/mail/replywatch.py`)
 
 | type | payload | ack `result` | notes |
 |---|---|---|---|
 | `accept_reply_suggestion` | `reply_id` | `{reply_id, application_id, status}` | applies the reply's `suggested_status` through `set_status` (actor `user`; emits `application_status`). `conflict` when there is no pending suggestion (already accepted or dismissed, or nothing suggested) |
 | `dismiss_reply_suggestion` | `reply_id` | `null` | keeps the board as it is; idempotent. The reply stays as evidence and still counts as "heard back" |
+| `mark_application_reply_read` | `reply_id` | `null` | sets `application_replies.read_at` (schema v12; the first time is kept, idempotent). A pending suggestion stays pending. Accepting or dismissing a suggestion also marks the reply read |
 
 #### 5.3 Insights: learning from outcomes (`engine/autoapply/insights.py`)
 
@@ -264,7 +268,7 @@ the protocol schema `$defs` (`InterviewPrepPack`, `InterviewDebrief`).
 | `source_status` | `source`: `SourceStatus` `{source, enabled, connected, checked_at?, detail?}` | login detection / session health |
 | `nudge_due` | `application_id`, `job_id`, `day`, `company`, `title` | day-7 / day-14 "Heard back?" |
 | `outreach_state` | `thread_id`, `message_id?`, `entity` (`message`\|`thread`), `from_state?`, `to_state`, `reason?`, `at` | a cold-email message or thread changed state (states per §7.1); re-read the tables |
-| `outreach_reply` | `thread_id`, `message_id?`, `contact_name`, `company`, `label` (`positive`\|`referred`\|`not_interested`\|`opt_out`\|`question`\|`other`\|`ooo`\|`bounce`), `snippet`, `application_id?`, `suggested_status?` (`interview`\|`rejected`) | someone replied (Needs You ▸ Replies); a board move is only suggested |
+| `outreach_reply` | `thread_id`, `message_id?`, `contact_name`, `company`, `label` (`positive`\|`referred`\|`not_interested`\|`opt_out`\|`question`\|`other`\|`ooo`\|`bounce`), `snippet`, `application_id?`, `suggested_status?` (`interview`\|`rejected`) | someone replied (Needs You ▸ Replies); a board move is only suggested, and is also stored on the thread (`outreach_threads.suggested_status`, `suggestion_state = 'pending'`, §6.2.2) so it survives a relaunch |
 | `application_reply` | `reply_id`, `application_id`, `job_id`, `company`, `title?`, `label` (`interview_invite`\|`assessment`\|`rejection`\|`offer`\|`received_ack`\|`other`), `suggested_status?` (`interview`\|`assessment`\|`rejected`\|`offer`), `ambiguous`, `from_email`, `from_name?`, `subject`, `snippet`, `received_at`, `message_id` | an employer / ATS email about a submitted application was read (§6.2.3). A board move is only suggested; the user accepts or dismisses it |
 | `scout_finished` | `company_id`, `purpose`, `application_id?`, `found`, `with_email`, `best_confidence?`, `queued_google`, `thread_id?` | a scout's HTTP phase ended (`thread_id`: the automatic draft) |
 | `log` | `level` (`debug`\|`info`\|`warning`\|`error`), `message`, `logger?`, `job_id?`, `application_id?`, `at` | human-readable daemon log line |
@@ -327,7 +331,16 @@ verified ATS board the agent watched by itself; Dismiss unwatches it), `accepted
   when sending (what was sent = `body` + blank line + `footer`). `direction = 'in'` rows are replies,
   auto-replies (`classification = 'ooo'`) and bounces (`'bounce'`).
 - Email confidence tiers: Verified ≥ 90, Likely 70–89, Guess 40–69, Unknown < 40.
-- `meta.mail_account.send_enabled` (bool) says whether sending is on.
+- `meta.mail_account.send_enabled` (bool) says whether sending is on. `set_mail_account` keeps it for
+  the same address and turns it off for a different one (§5).
+- **Reply suggestion (schema v12).** When a reply on a thread with an application suggests a board
+  move (`outreach_reply.suggested_status`), it is stored on the thread:
+  `outreach_threads.suggested_status` (`interview` \| `rejected` today; the CHECK also allows
+  `assessment` \| `offer`), `suggestion_state` (`none` \| `pending` \| `accepted` \| `dismissed`) and
+  `suggestion_decided_at`. Only for a `submitted` application that does not already have that
+  status (otherwise nothing is stored and the event's `suggested_status` is null). A newer reply
+  with a suggestion replaces the old one (back to `pending`); a reply without one leaves it as it is.
+  The user decides with `accept_outreach_suggestion` / `dismiss_outreach_suggestion`.
 - Open in Gmail: `https://mail.google.com/mail/u/0/#search/rfc822msgid%3A<message_id_header without <>>`.
 
 ### 6.2.3 Employer replies (schema v11, table `application_replies`)
@@ -348,7 +361,12 @@ applications**. Replies to cold-outreach threads are not included (they are `out
   `offer` → `offer`; `received_ack` and `other` suggest nothing. No suggestion either when the
   application already has that status.
 - One row per Message-ID (`message_id`, dedupe). `suggestion_state`: `none` \| `pending` \|
-  `accepted` \| `dismissed`. `counts.application_replies_unread` = rows with `pending`.
+  `accepted` \| `dismissed`.
+- **Read flag (schema v12).** `read_at` is NULL until `mark_application_reply_read` (or accepting /
+  dismissing the suggestion) sets it. The v12 upgrade marks rows that were already decided (or had
+  nothing to decide) as read, so the badge does not jump.
+  `counts.application_replies_unread` = rows where `read_at IS NULL` **or**
+  `suggestion_state = 'pending'` (each row counted once).
 - Evidence: `from_email`, `from_name`, `subject`, `snippet` (≤ 240 characters), `received_at`.
   Open in Gmail: `https://mail.google.com/mail/u/0/#search/rfc822msgid%3A<message_id without <>>`.
 - Any row means the employer wrote ("heard back"): the application is never auto-ghosted and gets

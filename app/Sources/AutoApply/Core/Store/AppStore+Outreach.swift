@@ -405,15 +405,16 @@ extension AppStore {
     }
 
     @discardableResult
-    func updateProspect(id: Int, status: ProspectStatus?, watch: Bool = false) async -> Bool {
+    /// `watch`: true watches the company, false unwatches it (history kept), nil leaves it as it is.
+    func updateProspect(id: Int, status: ProspectStatus?, watch: Bool? = nil) async -> Bool {
         let previous = outreach.prospect(id: id)
         let result = await perform(
             .updateProspect(UpdateProspectPayload(id: id, status: status, watch: watch)),
-            optimistic: { [outreach] in outreach.mutateProspect(id) { p in if let status { p.status = status }; if watch { p.watched = true } } },
+            optimistic: { [outreach] in outreach.mutateProspect(id) { p in if let status { p.status = status }; if let watch { p.watched = watch } } },
             rollback: { [outreach] in if let previous { outreach.mutateProspect(id) { $0 = previous } } })
         guard case .success = result else { return false }
         if status == .shortlisted, let companyID = previous?.companyID { outreach.beginScouting(companyID: companyID) }
-        if watch, let name = previous?.company { toasts.show("Watching \(name) for new roles", symbol: "eye", style: .info) }
+        if watch == true, let name = previous?.company { toasts.show("Watching \(name) for new roles", symbol: "eye", style: .info) }
         return true
     }
 

@@ -265,7 +265,7 @@ The household exemption probably does not cover job seeking, so don't rely on it
 - The library operator needs: a notice, a grievance contact, erasure on request, breach notification to the Data Protection Board and to affected people, reasonable security, and a deletion schedule.
 - Host the data in India (Supabase `ap-south-1`, Mumbai) to avoid cross-border questions.
 - **Honest identity and AI.** Every email is sent as the user, from the user's mailbox, after the user approved the exact text. No pretending to be a recruiter or referrer, no fake urgency. AI drafting needs no disclosure because the user is the author of record, and the fact-check keeps it truthful.
-- **Deletion.** Settings ▸ Outreach ▸ Data has "Delete all contacts", "Delete contacts older than…", and per-contact delete (with "never email"). Deleting a contact keeps only the hash entry in the do-not-contact list.
+- **Deletion.** Settings ▸ Outreach ▸ Data has "Delete all contacts", "Delete contacts older than…" (both `delete_contacts`; "older than" never deletes contacts the user typed or imported, and neither touches a contact in a live conversation), and per-contact delete (with "never email"). Deleting a contact keeps only the hash entry in the do-not-contact list.
 
 ### D.1 The shared library: plainly stated risks
 
@@ -658,6 +658,7 @@ Commands:
 | `add_contact` | `company_id?`, `company_name?`, `full_name`, `email?`, `title?`, `linkedin_url?`, `relationship?`, `notes?`, `share_ok` (false) | `{contact_id, merged}` |
 | `update_contact` | `id` + partial fields | `null` |
 | `delete_contact` | `id`, `suppress` (true) | `null` |
+| `delete_contacts` | `ids?`, `older_than_days?`, `all` (false), `suppress` (false) | `{deleted, skipped_active}`; typed / imported contacts only by `ids` or `all`; live conversations skipped (protocol.md §5.1) |
 | `import_contacts` (P2) | `file_path` | `{added, merged, skipped}` |
 | `draft_outreach` | `contact_id`, `kind`, `application_id?`, `instructions?` | `{thread_id, message_id, grounded, unsupported_claims}` |
 | `edit_outreach_draft` | `message_id`, `subject?`, `body`, `confirm_claims` (false) | `{grounded, unsupported_claims}` |

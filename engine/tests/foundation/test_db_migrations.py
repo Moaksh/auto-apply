@@ -164,7 +164,8 @@ def _v9_schema_sql() -> str:
     end = sql.rindex("-- -", 0, sql.index("-- updated_at maintenance"))
     sql = sql[:start] + sql[end:]
     return "\n".join(line for line in sql.splitlines()
-                     if "-- v10" not in line and "VALUES (10)" not in line and "VALUES (11)" not in line)
+                     if "-- v10" not in line and "-- v12" not in line
+                     and not any(f"VALUES ({v})" in line for v in range(10, db.SCHEMA_VERSION + 1)))
 
 
 def _v10_schema_sql() -> str:
@@ -173,7 +174,15 @@ def _v10_schema_sql() -> str:
     start = sql.rindex("-- =", 0, sql.index("-- Employer replies (v11)"))
     end = sql.rindex("-- -", 0, sql.index("-- updated_at maintenance"))
     sql = sql[:start] + sql[end:]
-    return "\n".join(line for line in sql.splitlines() if "VALUES (11)" not in line)
+    return "\n".join(line for line in sql.splitlines()
+                     if "-- v12" not in line and not any(f"VALUES ({v})" in line for v in range(11, db.SCHEMA_VERSION + 1)))
+
+
+def _v11_schema_sql() -> str:
+    """schema.sql as it was at v11: without the v12 columns and row."""
+    sql = schema_sql_path().read_text()
+    return "\n".join(line for line in sql.splitlines()
+                     if "-- v12" not in line and not any(f"VALUES ({v})" in line for v in range(12, db.SCHEMA_VERSION + 1)))
 
 
 def test_v10_database_upgrades_to_v11(tmp_path, conn):
@@ -182,7 +191,7 @@ def test_v10_database_upgrades_to_v11(tmp_path, conn):
     assert db.current_schema_version(c) == 10
     assert "application_replies" not in tables(c)
     c.execute("INSERT INTO companies(name, normalized_name, domain) VALUES ('Acme', 'acme', 'acme.com')")
-    assert db.migrate(c) == db.SCHEMA_VERSION == 11
+    assert db.migrate(c) == db.SCHEMA_VERSION
     assert _shape(c, "application_replies") == _shape(conn, "application_replies")
     assert c.execute("SELECT domain FROM companies WHERE name = 'Acme'").fetchone()[0] == "acme.com"
     assert db.migrate(c) == db.SCHEMA_VERSION  # idempotent
@@ -246,3 +255,34 @@ def test_v10_check_lists_match_enums(table, column, enum_name):
     m = re.search(rf"CHECK \(\s*(?:{column} IS NULL OR )?{column} IN \(([^)]*)\)", block.group(1))
     assert m, f"{table}.{column}"
     assert set(re.findall(r"'([^']+)'", m.group(1))) == {e.value for e in getattr(enums, enum_name)}
+
+
+# ---- v12 (outreach thread suggestion, employer reply read flag) ---------------------------------
+
+
+def test_v11_database_upgrades_to_v12(tmp_path, conn):
+    c = db.connect(tmp_path / "v11.db")
+    c.executescript("BEGIN;\n" + _v11_schema_sql() + "\nCOMMIT;")
+    assert db.current_schema_version(c) == 11
+    assert "suggestion_state" not in {r[1] for r in c.execute("PRAGMA table_info(outreach_threads)")}
+    assert "read_at" not in {r[1] for r in c.execute("PRAGMA table_info(application_replies)")}
+    co = db.upsert_company(c, "Acme")
+    job, _ = db.insert_job(c, company_id=co.id, source="lever", title="SWE")
+    app = db.get_application_by_job(c, job.id)
+    c.execute("INSERT INTO outreach_threads(kind, company_id, application_id, state) VALUES ('application', ?, ?, 'replied')",
+              (co.id, app.id))
+    for i, state in enumerate(("pending", "dismissed", "none")):
+        c.execute("INSERT INTO application_replies(application_id, message_id, from_email, received_at, label, match_basis, "
+                  "suggested_status, suggestion_state) VALUES (?, ?, 'hr@acme.com', '2026-10-01T00:00:00.000Z', 'other', 'domain', ?, ?)",
+                  (app.id, f"<m{i}@acme.com>", "interview" if state != "none" else None, state))
+    assert db.migrate(c) == db.SCHEMA_VERSION == 12
+    for table in ("outreach_threads", "application_replies"):
+        assert _shape(c, table) == _shape(conn, table), table
+    t = c.execute("SELECT suggested_status, suggestion_state, suggestion_decided_at FROM outreach_threads").fetchone()
+    assert tuple(t) == (None, "none", None)
+    reads = {r[0]: r[1] for r in c.execute("SELECT suggestion_state, read_at FROM application_replies")}
+    # Rows already decided (or with nothing to decide) count as read; a pending one stays unread.
+    assert reads["pending"] is None and reads["dismissed"] and reads["none"]
+    assert db.compute_counts(c).application_replies_unread == 1  # unchanged by the upgrade
+    assert db.migrate(c) == db.SCHEMA_VERSION  # idempotent
+    c.close()

@@ -99,7 +99,7 @@ from autoapply.models import (
 )
 
 #: Must equal MAX(version) seeded by contract/schema.sql.
-SCHEMA_VERSION = 11
+SCHEMA_VERSION = 12
 
 #: Forward migrations: version -> SQL to go from (version-1) to version. Append-only.
 #: Version 1 is the baseline created by contract/schema.sql itself.
@@ -170,6 +170,10 @@ CREATE TABLE IF NOT EXISTS application_replies (
 CREATE INDEX IF NOT EXISTS ix_application_replies_app ON application_replies(application_id, received_at);
 CREATE INDEX IF NOT EXISTS ix_application_replies_suggestion ON application_replies(suggestion_state);
 """,
+    # v12: the board move an outreach reply suggests is stored on its thread (accept / dismiss
+    # with accept_outreach_suggestion / dismiss_outreach_suggestion); employer replies get a
+    # read flag (mark_application_reply_read).
+    12: "python:_migrate_v12",
 }
 
 
@@ -462,6 +466,36 @@ def _migrate_v10(conn: sqlite3.Connection) -> None:
             if name not in cols:
                 conn.execute(f"ALTER TABLE preferences ADD COLUMN {name} {definition}")
         conn.execute("INSERT INTO schema_version(version) VALUES (10)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+#: v12 columns: (table, name, definition). Added only when missing (idempotent).
+_V12_COLUMNS: tuple[tuple[str, str, str], ...] = (
+    ("outreach_threads", "suggested_status",
+     "TEXT CHECK (suggested_status IS NULL OR suggested_status IN ('assessment','interview','offer','rejected'))"),
+    ("outreach_threads", "suggestion_state",
+     "TEXT NOT NULL DEFAULT 'none' CHECK (suggestion_state IN ('none','pending','accepted','dismissed'))"),
+    ("outreach_threads", "suggestion_decided_at", "TEXT"),
+    ("application_replies", "read_at", "TEXT"),
+)
+
+
+def _migrate_v12(conn: sqlite3.Connection) -> None:
+    """v12: ``outreach_threads.suggested_status / suggestion_state / suggestion_decided_at`` and
+    ``application_replies.read_at``. Replies stored before v12 whose suggestion is no longer
+    pending count as read (so the unread badge does not jump on upgrade). Idempotent."""
+    conn.execute("BEGIN")
+    try:
+        for table, name, definition in _V12_COLUMNS:
+            cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
+            if name not in cols:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
+        conn.execute("UPDATE application_replies SET read_at = COALESCE(decided_at, created_at) "
+                     "WHERE read_at IS NULL AND suggestion_state <> 'pending'")
+        conn.execute("INSERT INTO schema_version(version) VALUES (12)")
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")
@@ -1966,15 +2000,25 @@ def decide_reply_suggestion(conn: sqlite3.Connection, reply_id: int, accept: boo
         r = get_application_reply(conn, reply_id)
         if not accept and r.suggestion_state in ("dismissed", "none"):
             if r.suggestion_state == "none":
-                conn.execute("UPDATE application_replies SET suggestion_state = 'dismissed', decided_at = ? WHERE id = ?",
-                             (now_ts(), reply_id))
+                ts = now_ts()
+                conn.execute("UPDATE application_replies SET suggestion_state = 'dismissed', decided_at = ?, "
+                             "read_at = COALESCE(read_at, ?) WHERE id = ?", (ts, ts, reply_id))
             return get_application_reply(conn, reply_id), None
         if r.suggestion_state != "pending" or r.suggested_status is None:
             raise Conflict(f"reply {reply_id} has no pending suggestion (is {r.suggestion_state})")
         payload = set_status(conn, r.application_id, r.suggested_status, actor=Actor.USER) if accept else None
-        conn.execute("UPDATE application_replies SET suggestion_state = ?, decided_at = ? WHERE id = ?",
-                     ("accepted" if accept else "dismissed", now_ts(), reply_id))
+        ts = now_ts()
+        conn.execute("UPDATE application_replies SET suggestion_state = ?, decided_at = ?, read_at = COALESCE(read_at, ?) WHERE id = ?",
+                     ("accepted" if accept else "dismissed", ts, ts, reply_id))
     return get_application_reply(conn, reply_id), payload
+
+
+def mark_application_reply_read(conn: sqlite3.Connection, reply_id: int) -> ApplicationReply:
+    """Set ``read_at`` (kept from the first time; idempotent). A pending suggestion stays pending."""
+    with transaction(conn):
+        get_application_reply(conn, reply_id)
+        conn.execute("UPDATE application_replies SET read_at = COALESCE(read_at, ?) WHERE id = ?", (now_ts(), reply_id))
+    return get_application_reply(conn, reply_id)
 
 
 def record_nudge_sent(conn: sqlite3.Connection, application_id: int) -> None:
@@ -2494,7 +2538,7 @@ def compute_counts(conn: sqlite3.Connection, now: datetime | None = None) -> Cou
         outreach_replies_unread=int(conn.execute("SELECT COUNT(*) FROM outreach_threads WHERE unread_reply = 1").fetchone()[0]),
         outreach_unknown=int(conn.execute("SELECT COUNT(*) FROM outreach_messages WHERE state = 'unknown'").fetchone()[0]),
         application_replies_unread=int(conn.execute(
-            "SELECT COUNT(*) FROM application_replies WHERE suggestion_state = 'pending'").fetchone()[0]),
+            "SELECT COUNT(*) FROM application_replies WHERE read_at IS NULL OR suggestion_state = 'pending'").fetchone()[0]),
     )
 
 

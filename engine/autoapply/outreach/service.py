@@ -419,6 +419,48 @@ class OutreachService:
         contacts.delete_contact(self.conn, contact_id, suppress=suppress)
         await self._emit_all(events, "outreach_state")
 
+    async def delete_contacts(self, ids: list[int] | None, older_than_days: int | None, all_: bool,
+                              suppress: bool) -> dict[str, int]:
+        """Bulk delete. Filters combine (AND). Contacts the user typed / imported are only
+        selected by ``ids`` or ``all_`` (retention rule); contacts of a live conversation are
+        skipped and counted in ``skipped_active``. Pending drafts of deleted contacts are cancelled."""
+        if not all_ and ids is None and older_than_days is None:
+            raise ValueError("give ids, older_than_days or all")
+        where: list[str] = []
+        params: list[Any] = []
+        if not all_:
+            if ids is not None:
+                uniq = list(dict.fromkeys(int(i) for i in ids))
+                if not uniq:
+                    return {"deleted": 0, "skipped_active": 0}
+                where.append(f"id IN ({','.join('?' * len(uniq))})")
+                params += uniq
+            else:
+                where.append("origin NOT IN ('user','import')")
+            if older_than_days is not None:
+                where.append("created_at < ?")
+                params.append(format_ts(self.now() - timedelta(days=older_than_days)))
+        sql = "SELECT id FROM contacts" + (" WHERE " + " AND ".join(where) if where else "")
+        selected = [int(r[0]) for r in self.conn.execute(sql, params)]
+        live = {int(r[0]) for r in self.conn.execute(
+            "SELECT DISTINCT t.contact_id FROM outreach_threads t WHERE t.contact_id IS NOT NULL AND (t.state = 'active' "
+            "OR EXISTS (SELECT 1 FROM outreach_messages m WHERE m.thread_id = t.id AND m.direction = 'out' "
+            "AND m.state IN ('approved','scheduled','sending','unknown')))")}
+        events: list[Any] = []
+        deleted = skipped = 0
+        for cid in selected:
+            if cid in live:
+                skipped += 1
+                continue
+            for r in self.conn.execute("SELECT id FROM outreach_threads WHERE contact_id = ? AND state = 'draft'", (cid,)).fetchall():
+                events += threads.cancel_pending(self.conn, int(r["id"]), "contact deleted", actor=Actor.USER)
+            contacts.delete_contact(self.conn, cid, suppress=suppress, log=False)
+            deleted += 1
+        db.log_event(self.conn, "user", f"deleted {deleted} contact(s)" + (f", kept {skipped} in a live conversation" if skipped else ""),
+                     actor=Actor.USER, payload={"deleted": deleted, "skipped_active": skipped, "suppress": suppress})
+        await self._emit_all(events, "outreach_state")
+        return {"deleted": deleted, "skipped_active": skipped}
+
     def import_contacts(self, file_path: str) -> dict[str, int]:
         path = Path(file_path).expanduser()
         if not path.is_file():
@@ -606,7 +648,10 @@ class OutreachService:
             if not m.grounded and not m.claims_overridden:
                 problems.setdefault("ungrounded", []).append(m.id)
                 continue
-            if not m.to_email or suppression.check(self.conn, m.to_email) is not None:
+            if not m.to_email:
+                problems.setdefault("no_address", []).append(m.id)
+                continue
+            if suppression.check(self.conn, m.to_email) is not None:
                 problems.setdefault("do_not_contact", []).append(m.id)
                 continue
             t = threads.get_thread(self.conn, m.thread_id)
@@ -630,6 +675,8 @@ class OutreachService:
                 parts.append("some drafts have claims the fact check could not find (edit them, or confirm they are true)")
             if "low_confidence" in problems:
                 parts.append("some addresses are below your confidence bar (use 'Send anyway' for each)")
+            if "no_address" in problems:
+                parts.append("some drafts have no recipient address (give the contact an email first)")
             if "do_not_contact" in problems:
                 parts.append("some recipients are on the do-not-contact list")
             if "thread_closed" in problems:
@@ -698,6 +745,21 @@ class OutreachService:
         else:
             t = db.transition_outreach(self.conn, message_id, MessageState.FAILED, reason="not sent (you checked)", actor=Actor.USER)
             await self.emit("outreach_state", t.to_payload())
+
+    def decide_suggestion(self, thread_id: int, accept: bool) -> tuple[OutreachThread, Any]:
+        """Accept (``set_status`` actor user on the thread's application) or dismiss the board move
+        an outreach reply suggested. Dismissing is idempotent; accepting needs a pending suggestion."""
+        with db.transaction(self.conn):
+            t = threads.get_thread(self.conn, thread_id)
+            if not accept and t.suggestion_state in ("dismissed", "none"):
+                return t, None
+            if t.suggestion_state != "pending" or t.suggested_status is None or t.application_id is None:
+                raise OutreachError(ErrorCode.CONFLICT, f"thread {thread_id} has no pending suggestion (is {t.suggestion_state})",
+                                    {"thread_id": thread_id, "suggestion_state": t.suggestion_state})
+            status = db.set_status(self.conn, t.application_id, t.suggested_status, actor=Actor.USER) if accept else None
+            threads.update_thread(self.conn, thread_id, suggestion_state="accepted" if accept else "dismissed",
+                                  suggestion_decided_at=now_ts())
+        return threads.get_thread(self.conn, thread_id), status
 
     def mark_reply_read(self, thread_id: int) -> None:
         threads.get_thread(self.conn, thread_id)
@@ -772,7 +834,7 @@ class OutreachService:
             log.exception("prospect enrichment failed for %s", company_id)
         await self.scout_and_draft(company_id, ScoutPurpose.PROSPECT, force=True)
 
-    async def update_prospect(self, prospect_id: int, status: ProspectStatus | None, watch: bool) -> None:
+    async def update_prospect(self, prospect_id: int, status: ProspectStatus | None, watch: bool | None) -> None:
         p = prospects.get(self.conn, prospect_id)
         company = db.get_company(self.conn, p.company_id)
         if status is not None and status is not p.status:
@@ -790,6 +852,10 @@ class OutreachService:
                 db.upsert_company(self.conn, company.name, watch=True,
                                   careers_url=company.careers_url or (f"https://{company.domain}/careers" if company.domain else None))
             db.log_event(self.conn, "user", f"added {company.name} to the watched companies", actor=Actor.USER)
+        elif watch is False and company.watch:
+            # Unwatch only: the company row, its jobs, applications and outreach history stay.
+            db.upsert_company(self.conn, company.name, watch=False)
+            db.log_event(self.conn, "user", f"removed {company.name} from the watched companies", actor=Actor.USER)
 
     # =================================================================================
     # Referrals

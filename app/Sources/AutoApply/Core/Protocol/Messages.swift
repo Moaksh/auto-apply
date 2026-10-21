@@ -410,6 +410,23 @@ extension AcceptCompanySuggestionPayload {
     }
 }
 
+/// Apply the board move an outreach reply suggested (``outreach_threads.suggested_status``) to the
+/// thread's application (``set_status``, actor user).
+struct AcceptOutreachSuggestionPayload: Codable, Sendable, Hashable {
+    var threadId: Int
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case threadId = "thread_id"
+    }
+}
+
+extension AcceptOutreachSuggestionPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        threadId = try c.decode(Int.self, forKey: .threadId)
+    }
+}
+
 /// Apply an employer reply's suggested board status (``set_status``, actor user).
 struct AcceptReplySuggestionPayload: Codable, Sendable, Hashable {
     var replyId: Int
@@ -1094,6 +1111,34 @@ extension DeleteContactPayload {
     }
 }
 
+/// Bulk delete (Settings > Outreach > Data). Filters combine (AND); at least one is required.
+/// Contacts you typed or imported are only deleted when listed in ``ids`` or with ``all``;
+/// contacts of a live conversation (active thread, or an email approved / scheduled / sending /
+/// unknown) are always skipped.
+struct DeleteContactsPayload: Codable, Sendable, Hashable {
+    var ids: [Int]? = nil
+    var olderThanDays: Int? = nil
+    var all: Bool = false
+    var suppress: Bool = false
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case ids
+        case olderThanDays = "older_than_days"
+        case all
+        case suppress
+    }
+}
+
+extension DeleteContactsPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        ids = try c.decodeIfPresent([Int].self, forKey: .ids)
+        olderThanDays = try c.decodeIfPresent(Int.self, forKey: .olderThanDays)
+        all = try c.decodeIfPresent(Bool.self, forKey: .all) ?? false
+        suppress = try c.decodeIfPresent(Bool.self, forKey: .suppress) ?? false
+    }
+}
+
 struct DeleteSiteAccountPayload: Codable, Sendable, Hashable {
     var host: String
 
@@ -1166,6 +1211,22 @@ extension DismissEasyApplyPayload {
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         jobId = try c.decode(Int.self, forKey: .jobId)
+    }
+}
+
+/// Keep the board as it is (the reply and the thread are unchanged).
+struct DismissOutreachSuggestionPayload: Codable, Sendable, Hashable {
+    var threadId: Int
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case threadId = "thread_id"
+    }
+}
+
+extension DismissOutreachSuggestionPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        threadId = try c.decode(Int.self, forKey: .threadId)
     }
 }
 
@@ -1856,6 +1917,22 @@ extension LogPayload {
         jobId = try c.decodeIfPresent(Int.self, forKey: .jobId)
         applicationId = try c.decodeIfPresent(Int.self, forKey: .applicationId)
         at = try c.decode(Date.self, forKey: .at)
+    }
+}
+
+/// Set ``application_replies.read_at`` (idempotent).
+struct MarkApplicationReplyReadPayload: Codable, Sendable, Hashable {
+    var replyId: Int
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case replyId = "reply_id"
+    }
+}
+
+extension MarkApplicationReplyReadPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        replyId = try c.decode(Int.self, forKey: .replyId)
     }
 }
 
@@ -3638,7 +3715,7 @@ extension UpdateProfilePayload {
 struct UpdateProspectPayload: Codable, Sendable, Hashable {
     var id: Int
     var status: ProspectStatus? = nil
-    var watch: Bool = false
+    var watch: Bool? = nil
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case id
@@ -3652,7 +3729,7 @@ extension UpdateProspectPayload {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(Int.self, forKey: .id)
         status = try c.decodeIfPresent(ProspectStatus.self, forKey: .status)
-        watch = try c.decodeIfPresent(Bool.self, forKey: .watch) ?? false
+        watch = try c.decodeIfPresent(Bool.self, forKey: .watch)
     }
 }
 
@@ -4100,6 +4177,7 @@ enum Command: Sendable, Hashable {
     case addContact(AddContactPayload)
     case updateContact(UpdateContactPayload)
     case deleteContact(DeleteContactPayload)
+    case deleteContacts(DeleteContactsPayload)
     case importContacts(ImportContactsPayload)
     case importLinkedinConnections(ImportLinkedinConnectionsPayload)
     case draftOutreach(DraftOutreachPayload)
@@ -4123,6 +4201,9 @@ enum Command: Sendable, Hashable {
     case setProviderKey(SetProviderKeyPayload)
     case acceptReplySuggestion(AcceptReplySuggestionPayload)
     case dismissReplySuggestion(DismissReplySuggestionPayload)
+    case markApplicationReplyRead(MarkApplicationReplyReadPayload)
+    case acceptOutreachSuggestion(AcceptOutreachSuggestionPayload)
+    case dismissOutreachSuggestion(DismissOutreachSuggestionPayload)
     case generateInterviewPrep(GenerateInterviewPrepPayload)
     case getInterviewPrep(GetInterviewPrepPayload)
     case interviewDebrief(InterviewDebriefPayload)
@@ -4186,6 +4267,7 @@ enum Command: Sendable, Hashable {
         case .addContact: "add_contact"
         case .updateContact: "update_contact"
         case .deleteContact: "delete_contact"
+        case .deleteContacts: "delete_contacts"
         case .importContacts: "import_contacts"
         case .importLinkedinConnections: "import_linkedin_connections"
         case .draftOutreach: "draft_outreach"
@@ -4209,6 +4291,9 @@ enum Command: Sendable, Hashable {
         case .setProviderKey: "set_provider_key"
         case .acceptReplySuggestion: "accept_reply_suggestion"
         case .dismissReplySuggestion: "dismiss_reply_suggestion"
+        case .markApplicationReplyRead: "mark_application_reply_read"
+        case .acceptOutreachSuggestion: "accept_outreach_suggestion"
+        case .dismissOutreachSuggestion: "dismiss_outreach_suggestion"
         case .generateInterviewPrep: "generate_interview_prep"
         case .getInterviewPrep: "get_interview_prep"
         case .interviewDebrief: "interview_debrief"
@@ -4272,6 +4357,7 @@ enum Command: Sendable, Hashable {
         "add_contact",
         "update_contact",
         "delete_contact",
+        "delete_contacts",
         "import_contacts",
         "import_linkedin_connections",
         "draft_outreach",
@@ -4295,6 +4381,9 @@ enum Command: Sendable, Hashable {
         "set_provider_key",
         "accept_reply_suggestion",
         "dismiss_reply_suggestion",
+        "mark_application_reply_read",
+        "accept_outreach_suggestion",
+        "dismiss_outreach_suggestion",
         "generate_interview_prep",
         "get_interview_prep",
         "interview_debrief",
@@ -4461,6 +4550,7 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case "add_contact": command = .addContact(try c.decode(AddContactPayload.self, forKey: .payload))
         case "update_contact": command = .updateContact(try c.decode(UpdateContactPayload.self, forKey: .payload))
         case "delete_contact": command = .deleteContact(try c.decode(DeleteContactPayload.self, forKey: .payload))
+        case "delete_contacts": command = .deleteContacts(try c.decode(DeleteContactsPayload.self, forKey: .payload))
         case "import_contacts": command = .importContacts(try c.decode(ImportContactsPayload.self, forKey: .payload))
         case "import_linkedin_connections": command = .importLinkedinConnections(try c.decode(ImportLinkedinConnectionsPayload.self, forKey: .payload))
         case "draft_outreach": command = .draftOutreach(try c.decode(DraftOutreachPayload.self, forKey: .payload))
@@ -4484,6 +4574,9 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case "set_provider_key": command = .setProviderKey(try c.decode(SetProviderKeyPayload.self, forKey: .payload))
         case "accept_reply_suggestion": command = .acceptReplySuggestion(try c.decode(AcceptReplySuggestionPayload.self, forKey: .payload))
         case "dismiss_reply_suggestion": command = .dismissReplySuggestion(try c.decode(DismissReplySuggestionPayload.self, forKey: .payload))
+        case "mark_application_reply_read": command = .markApplicationReplyRead(try c.decode(MarkApplicationReplyReadPayload.self, forKey: .payload))
+        case "accept_outreach_suggestion": command = .acceptOutreachSuggestion(try c.decode(AcceptOutreachSuggestionPayload.self, forKey: .payload))
+        case "dismiss_outreach_suggestion": command = .dismissOutreachSuggestion(try c.decode(DismissOutreachSuggestionPayload.self, forKey: .payload))
         case "generate_interview_prep": command = .generateInterviewPrep(try c.decode(GenerateInterviewPrepPayload.self, forKey: .payload))
         case "get_interview_prep": command = .getInterviewPrep(try c.decode(GetInterviewPrepPayload.self, forKey: .payload))
         case "interview_debrief": command = .interviewDebrief(try c.decode(InterviewDebriefPayload.self, forKey: .payload))
@@ -4554,6 +4647,7 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case .addContact(let p): try c.encode(p, forKey: .payload)
         case .updateContact(let p): try c.encode(p, forKey: .payload)
         case .deleteContact(let p): try c.encode(p, forKey: .payload)
+        case .deleteContacts(let p): try c.encode(p, forKey: .payload)
         case .importContacts(let p): try c.encode(p, forKey: .payload)
         case .importLinkedinConnections(let p): try c.encode(p, forKey: .payload)
         case .draftOutreach(let p): try c.encode(p, forKey: .payload)
@@ -4577,6 +4671,9 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case .setProviderKey(let p): try c.encode(p, forKey: .payload)
         case .acceptReplySuggestion(let p): try c.encode(p, forKey: .payload)
         case .dismissReplySuggestion(let p): try c.encode(p, forKey: .payload)
+        case .markApplicationReplyRead(let p): try c.encode(p, forKey: .payload)
+        case .acceptOutreachSuggestion(let p): try c.encode(p, forKey: .payload)
+        case .dismissOutreachSuggestion(let p): try c.encode(p, forKey: .payload)
         case .generateInterviewPrep(let p): try c.encode(p, forKey: .payload)
         case .getInterviewPrep(let p): try c.encode(p, forKey: .payload)
         case .interviewDebrief(let p): try c.encode(p, forKey: .payload)

@@ -59,6 +59,7 @@
     "add_contact",
     "update_contact",
     "delete_contact",
+    "delete_contacts",
     "import_contacts",
     "import_linkedin_connections",
     "draft_outreach",
@@ -82,6 +83,9 @@
     "set_provider_key",
     "accept_reply_suggestion",
     "dismiss_reply_suggestion",
+    "mark_application_reply_read",
+    "accept_outreach_suggestion",
+    "dismiss_outreach_suggestion",
     "generate_interview_prep",
     "get_interview_prep",
     "interview_debrief",
@@ -247,6 +251,21 @@
         "suggestion_id"
       ],
       "title": "AcceptCompanySuggestionPayload",
+      "type": "object"
+    },
+    "AcceptOutreachSuggestionPayload": {
+      "additionalProperties": false,
+      "description": "Apply the board move an outreach reply suggested (``outreach_threads.suggested_status``) to the\nthread's application (``set_status``, actor user).",
+      "properties": {
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "title": "AcceptOutreachSuggestionPayload",
       "type": "object"
     },
     "AcceptReplySuggestionPayload": {
@@ -1458,7 +1477,7 @@
         },
         "application_replies_unread": {
           "default": 0,
-          "description": "Employer replies with a suggested board move waiting for Accept / Dismiss (application_replies).",
+          "description": "Employer replies (application_replies) that are unread (read_at NULL) or whose suggested board move is waiting for Accept / Dismiss; each row counts once.",
           "title": "Application Replies Unread",
           "type": "integer"
         }
@@ -1509,6 +1528,56 @@
         "id"
       ],
       "title": "DeleteContactPayload",
+      "type": "object"
+    },
+    "DeleteContactsPayload": {
+      "additionalProperties": false,
+      "description": "Bulk delete (Settings > Outreach > Data). Filters combine (AND); at least one is required.\nContacts you typed or imported are only deleted when listed in ``ids`` or with ``all``;\ncontacts of a live conversation (active thread, or an email approved / scheduled / sending /\nunknown) are always skipped.",
+      "properties": {
+        "ids": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Exactly these contacts (any origin).",
+          "title": "Ids"
+        },
+        "older_than_days": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Contacts created more than this many days ago.",
+          "title": "Older Than Days"
+        },
+        "all": {
+          "default": false,
+          "description": "Every contact (any origin).",
+          "title": "All",
+          "type": "boolean"
+        },
+        "suppress": {
+          "default": false,
+          "description": "Also put each deleted address on the do-not-contact list.",
+          "title": "Suppress",
+          "type": "boolean"
+        }
+      },
+      "title": "DeleteContactsPayload",
       "type": "object"
     },
     "DeleteSiteAccountPayload": {
@@ -1580,6 +1649,21 @@
         "job_id"
       ],
       "title": "DismissEasyApplyPayload",
+      "type": "object"
+    },
+    "DismissOutreachSuggestionPayload": {
+      "additionalProperties": false,
+      "description": "Keep the board as it is (the reply and the thread are unchanged).",
+      "properties": {
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "title": "DismissOutreachSuggestionPayload",
       "type": "object"
     },
     "DismissReplySuggestionPayload": {
@@ -2785,6 +2869,21 @@
       "title": "LogPayload",
       "type": "object"
     },
+    "MarkApplicationReplyReadPayload": {
+      "additionalProperties": false,
+      "description": "Set ``application_replies.read_at`` (idempotent).",
+      "properties": {
+        "reply_id": {
+          "title": "Reply Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "reply_id"
+      ],
+      "title": "MarkApplicationReplyReadPayload",
+      "type": "object"
+    },
     "MarkAppliedPayload": {
       "additionalProperties": false,
       "description": "Board: \"I applied myself\" — a job the agent never submitted, dropped on Applied or a later column.",
@@ -3419,7 +3518,7 @@
             }
           ],
           "default": null,
-          "description": "A board move the reply suggests (never applied by itself)."
+          "description": "A board move the reply suggests (never applied by itself). Stored as outreach_threads.suggested_status with suggestion_state 'pending'."
         }
       },
       "required": [
@@ -6873,10 +6972,17 @@
           "description": "'shortlisted' starts a scout; 'dismissed' never suggests it again."
         },
         "watch": {
-          "default": false,
-          "description": "Also add the company to the job watchlist.",
-          "title": "Watch",
-          "type": "boolean"
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "true adds the company to the job watchlist, false removes it (its jobs and history stay); null/absent leaves it as it is.",
+          "title": "Watch"
         }
       },
       "required": [
@@ -8821,6 +8927,32 @@
       ],
       "additionalProperties": false
     },
+    "CommandDeleteContacts": {
+      "type": "object",
+      "title": "Command: delete_contacts",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "delete_contacts"
+        },
+        "payload": {
+          "$ref": "#/$defs/DeleteContactsPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
     "CommandImportContacts": {
       "type": "object",
       "title": "Command: import_contacts",
@@ -9409,6 +9541,84 @@
         },
         "payload": {
           "$ref": "#/$defs/DismissReplySuggestionPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandMarkApplicationReplyRead": {
+      "type": "object",
+      "title": "Command: mark_application_reply_read",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "mark_application_reply_read"
+        },
+        "payload": {
+          "$ref": "#/$defs/MarkApplicationReplyReadPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandAcceptOutreachSuggestion": {
+      "type": "object",
+      "title": "Command: accept_outreach_suggestion",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "accept_outreach_suggestion"
+        },
+        "payload": {
+          "$ref": "#/$defs/AcceptOutreachSuggestionPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandDismissOutreachSuggestion": {
+      "type": "object",
+      "title": "Command: dismiss_outreach_suggestion",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "dismiss_outreach_suggestion"
+        },
+        "payload": {
+          "$ref": "#/$defs/DismissOutreachSuggestionPayload"
         }
       },
       "required": [
@@ -10345,6 +10555,9 @@
           "$ref": "#/$defs/CommandDeleteContact"
         },
         {
+          "$ref": "#/$defs/CommandDeleteContacts"
+        },
+        {
           "$ref": "#/$defs/CommandImportContacts"
         },
         {
@@ -10412,6 +10625,15 @@
         },
         {
           "$ref": "#/$defs/CommandDismissReplySuggestion"
+        },
+        {
+          "$ref": "#/$defs/CommandMarkApplicationReplyRead"
+        },
+        {
+          "$ref": "#/$defs/CommandAcceptOutreachSuggestion"
+        },
+        {
+          "$ref": "#/$defs/CommandDismissOutreachSuggestion"
         },
         {
           "$ref": "#/$defs/CommandGenerateInterviewPrep"

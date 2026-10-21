@@ -414,6 +414,10 @@ async def _apply_reply(conn: sqlite3.Connection, thread_id: int, msg: Message, l
     label, suggested = await classify(llm, body)
     if is_opt_out(body):
         label = ReplyLabel.OPT_OUT
+    suggested = _usable_suggestion(conn, t.application_id, suggested)
+    # Stored on the thread (schema v12) so the app can show it after a relaunch; a newer
+    # suggestion replaces an older one, a reply without one leaves it as it is.
+    sugg = {"suggested_status": suggested.value, "suggestion_state": "pending", "suggestion_decided_at": None} if suggested else {}
     inbound_id = _record_inbound(conn, thread_id, msg, body, label)
     rep.replies += 1
     for p in threads.cancel_pending(conn, thread_id, "reply received"):
@@ -429,10 +433,11 @@ async def _apply_reply(conn: sqlite3.Connection, thread_id: int, msg: Message, l
         suppression.add(conn, email=sender_address(msg), reason=SuppressionReason.OPT_OUT, source=f"reply on thread {thread_id}")
         if contact and contact.email_norm and contact.email_norm != sender_address(msg):
             suppression.add(conn, email=contact.email_norm, reason=SuppressionReason.OPT_OUT, source=f"reply on thread {thread_id}")
-        p = threads.set_thread_state(conn, thread_id, ThreadState.OPTED_OUT, reason="asked not to be contacted", unread_reply=1)
+        p = threads.set_thread_state(conn, thread_id, ThreadState.OPTED_OUT, reason="asked not to be contacted", unread_reply=1,
+                                     **sugg)
     else:
         p = threads.set_thread_state(conn, thread_id, ThreadState.REPLIED, reason=f"reply: {label.value}",
-                                     outcome=_LABEL_OUTCOME.get(label), unread_reply=1)
+                                     outcome=_LABEL_OUTCOME.get(label), unread_reply=1, **sugg)
     if p is not None:
         rep.events.append(("outreach_state", p))
     if contact is not None and contact.email_norm == sender_address(msg):
@@ -445,6 +450,16 @@ async def _apply_reply(conn: sqlite3.Connection, thread_id: int, msg: Message, l
         thread_id=thread_id, message_id=inbound_id, contact_name=name, company=company, label=label, snippet=snippet,
         application_id=t.application_id, suggested_status=suggested,
     )))
+
+
+def _usable_suggestion(conn: sqlite3.Connection, application_id: int | None, suggested: BoardStatus | None) -> BoardStatus | None:
+    """A board move is only suggested for a submitted application that does not have that status yet."""
+    if suggested is None or application_id is None:
+        return None
+    row = conn.execute("SELECT state, status FROM applications WHERE id = ?", (application_id,)).fetchone()
+    if row is None or row["state"] != "submitted" or row["status"] == suggested.value:
+        return None
+    return suggested
 
 
 def _apply_bounce(conn: sqlite3.Connection, msg: Message, rep: ApplyReport) -> None:

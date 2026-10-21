@@ -460,10 +460,12 @@ enum MockCommandHandler {
             return Handled(reply: ack(["run_id": .null]))
 
         // Cold outreach and employer replies (protocol.md §5.1–5.2): stateful, in MockOutreach.
-        case .scoutContacts, .addContact, .updateContact, .deleteContact, .importContacts, .draftOutreach, .editOutreachDraft,
-             .approveOutreach, .cancelOutreach, .discardOutreach, .resolveOutreachUnknown, .markReplyRead, .setThreadOutcome,
+        case .scoutContacts, .addContact, .updateContact, .deleteContact, .deleteContacts, .importContacts, .draftOutreach,
+             .editOutreachDraft, .approveOutreach, .cancelOutreach, .discardOutreach, .resolveOutreachUnknown, .markReplyRead,
+             .acceptOutreachSuggestion, .dismissOutreachSuggestion, .setThreadOutcome,
              .suppress, .unsuppress, .enableSending, .searchProspects, .addProspect, .updateProspect, .suggestReferrers,
-             .addReferral, .draftReferral, .updateReferral, .setProviderKey, .acceptReplySuggestion, .dismissReplySuggestion:
+             .addReferral, .draftReferral, .updateReferral, .setProviderKey, .acceptReplySuggestion, .dismissReplySuggestion,
+             .markApplicationReplyRead:
             return MockOutreach.handle(command, world: world) ?? Handled(reply: ack())
         case .generateInterviewPrep, .getInterviewPrep, .interviewDebrief:
             return MockCareer.handle(command, world: world)

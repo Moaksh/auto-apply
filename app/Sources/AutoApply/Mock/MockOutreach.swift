@@ -335,6 +335,38 @@ enum MockOutreach {
             }
             return Handled(reply: found ? ack() : error(.notFound, "contact \(p.id) not found"))
 
+        case .deleteContacts(let p):
+            // Same selection rules as the daemon (protocol.md §5.1): filters AND; typed / imported
+            // contacts only by id or `all`; contacts in a live conversation are skipped.
+            guard p.all || p.ids != nil || p.olderThanDays != nil else {
+                return Handled(reply: error(.invalidPayload, "give ids, older_than_days or all"))
+            }
+            let counts: (Int, Int) = repo.update { data in
+                let cutoff = p.olderThanDays.map { Date().addingTimeInterval(-Double($0) * 86_400) }
+                let live = Set(data.outreach.threads.filter { $0.state == .active }.compactMap(\.contactID))
+                var deleted = 0, skipped = 0
+                data.outreach.contacts.removeAll { c in
+                    let selected = p.all || ((p.ids.map { $0.contains(c.id) } ?? (c.origin != .user && c.origin != .import))
+                        && (cutoff.map { c.createdAt < $0 } ?? true))
+                    guard selected else { return false }
+                    if live.contains(c.id) { skipped += 1; return false }
+                    deleted += 1
+                    return true
+                }
+                return (deleted, skipped)
+            }
+            return Handled(reply: ack(["deleted": .int(counts.0), "skipped_active": .int(counts.1)]))
+
+        case .acceptOutreachSuggestion(let p):
+            // The mock world keeps no thread suggestions yet.
+            return Handled(reply: error(.conflict, "thread \(p.threadId) has no pending suggestion"))
+
+        case .dismissOutreachSuggestion:
+            return Handled(reply: ack())
+
+        case .markApplicationReplyRead:
+            return Handled(reply: ack())
+
         case .importContacts(let p):
             guard p.filePath.lowercased().hasSuffix(".csv") else { return Handled(reply: error(.invalidPayload, "choose a .csv file")) }
             return Handled(reply: ack(["added": .int(0), "merged": .int(0), "skipped": .int(0)]))
@@ -605,7 +637,7 @@ enum MockOutreach {
             let found: Bool = repo.update { data in
                 guard let i = data.outreach.prospects.firstIndex(where: { $0.id == p.id }) else { return false }
                 if let s = p.status { data.outreach.prospects[i].status = s }
-                if p.watch { data.outreach.prospects[i].watched = true }
+                if let watch = p.watch { data.outreach.prospects[i].watched = watch }
                 return true
             }
             return Handled(reply: found ? ack() : error(.notFound, "prospect \(p.id) not found"))

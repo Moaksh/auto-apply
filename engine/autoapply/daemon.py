@@ -1510,9 +1510,16 @@ class Daemon:
         except imap_codes.MailError as e:
             raise CommandError(ErrorCode.UNAVAILABLE, str(e)) from e
         old = imap_codes.account(self.conn)
-        if old and old["email"] != address:
+        same = bool(old) and str(old["email"]).strip().lower() == address.lower()
+        if old and not same:
             await asyncio.to_thread(imap_codes.keychain_delete, old["email"])
-        db.set_meta(self.conn, imap_codes.META_KEY, {"email": address, "enabled": True, "connected_at": utcnow().isoformat()})
+        acc: dict[str, Any] = {"email": address, "enabled": True, "connected_at": utcnow().isoformat()}
+        # Reconnecting the same address keeps sending as it was; a different address needs a new
+        # test send (enable_sending), so sending is off until then.
+        acc["send_enabled"] = bool(old.get("send_enabled", False)) if same and old else False
+        if same and old and old.get("send_enabled_at"):
+            acc["send_enabled_at"] = old["send_enabled_at"]
+        db.set_meta(self.conn, imap_codes.META_KEY, acc)
         db.log_event(self.conn, "user", f"connected mailbox {address} for security codes", actor=Actor.USER)
         if self.pipeline is not None:
             self._spawn(self.pipeline.retry_account_walls(), name="retry-account-walls")
@@ -1626,6 +1633,9 @@ class Daemon:
     async def _cmd_delete_contact(self, p: Any) -> None:
         await self._out.delete_contact(p.id, p.suppress)
 
+    async def _cmd_delete_contacts(self, p: Any) -> dict[str, Any]:
+        return await self._out.delete_contacts(p.ids, p.older_than_days, p.all, p.suppress)
+
     async def _cmd_import_contacts(self, p: Any) -> dict[str, Any]:
         return self._out.import_contacts(p.file_path)
 
@@ -1668,6 +1678,17 @@ class Daemon:
 
     async def _cmd_mark_reply_read(self, p: Any) -> None:
         self._out.mark_reply_read(p.thread_id)
+
+    async def _cmd_accept_outreach_suggestion(self, p: Any) -> dict[str, Any]:
+        thread, status = self._out.decide_suggestion(p.thread_id, accept=True)
+        if status is not None:
+            await self.emit("application_status", status)
+            self._maybe_queue_interview_prep(thread.application_id, status.status)
+        return {"thread_id": thread.id, "application_id": thread.application_id,
+                "status": thread.suggested_status.value if thread.suggested_status else None}
+
+    async def _cmd_dismiss_outreach_suggestion(self, p: Any) -> None:
+        self._out.decide_suggestion(p.thread_id, accept=False)
 
     async def _cmd_set_thread_outcome(self, p: Any) -> None:
         await self._out.set_outcome(p.thread_id, p.outcome, p.close)
@@ -1721,6 +1742,9 @@ class Daemon:
 
     async def _cmd_dismiss_reply_suggestion(self, p: Any) -> None:
         db.decide_reply_suggestion(self.conn, p.reply_id, accept=False)
+
+    async def _cmd_mark_application_reply_read(self, p: Any) -> None:
+        db.mark_application_reply_read(self.conn, p.reply_id)
 
     # ---- interview prep (autoapply/interview.py) -------------------------------------------
 

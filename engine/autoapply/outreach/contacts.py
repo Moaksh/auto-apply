@@ -464,7 +464,7 @@ def update_contact(conn: sqlite3.Connection, contact_id: int, patch: dict[str, A
     return get_contact(conn, contact_id)
 
 
-def delete_contact(conn: sqlite3.Connection, contact_id: int, *, suppress: bool = True) -> Contact:
+def delete_contact(conn: sqlite3.Connection, contact_id: int, *, suppress: bool = True, log: bool = True) -> Contact:
     """Delete a contact (threads keep their history with ``contact_id`` NULL). With
     ``suppress`` the address goes on the do-not-contact list first."""
     from autoapply.enums import SuppressionReason
@@ -475,7 +475,8 @@ def delete_contact(conn: sqlite3.Connection, contact_id: int, *, suppress: bool 
         if suppress and c.email_norm:
             suppression.add(conn, email=c.email_norm, reason=SuppressionReason.USER, source="deleted contact")
         conn.execute("DELETE FROM contacts WHERE id = ?", (contact_id,))
-        db.log_event(conn, "outreach", f"deleted contact {c.full_name}", actor="user", payload={"contact_id": contact_id})
+        if log:
+            db.log_event(conn, "outreach", f"deleted contact {c.full_name}", actor="user", payload={"contact_id": contact_id})
     return c
 
 

@@ -176,7 +176,8 @@ async def test_scan_records_and_suggests(world: World):
     assert by_label[L.RECEIVED_ACK].suggested_status is None
     # Never changes the board by itself.
     assert db.get_application(world.conn, app_id).status is BoardStatus.APPLIED
-    assert db.compute_counts(world.conn).application_replies_unread == 1
+    # Unread rows (the acknowledgement) plus pending suggestions (the invite), each once.
+    assert db.compute_counts(world.conn).application_replies_unread == 2
     assert replywatch.gmail_link(p.message_id).endswith("#search/rfc822msgid%3Awd-interview-1%40myworkday.com")
 
 
@@ -262,6 +263,39 @@ async def test_accept_and_dismiss(world: World):
     assert db.get_application(world.conn, app_id).status is BoardStatus.INTERVIEW
     assert db.compute_counts(world.conn).application_replies_unread == 0
     assert (await world.cmd("accept_reply_suggestion", {"reply_id": 999}))["code"] == "not_found"
+
+
+async def test_read_flag_and_unread_count(world: World):
+    _co, _job, _app_id = seed_submitted_application(world.conn)
+    world.mailbox.folders["INBOX"] += [reply_eml("workday_interview.eml"), reply_eml("ack.eml", hours=0.5)]
+    await scan(world)
+    ids = {p.label: p.reply_id for p in replies(world)}
+    assert all(r.read_at is None for r in db.list_application_replies(world.conn))
+    assert db.compute_counts(world.conn).application_replies_unread == 2
+    # Reading the acknowledgement clears it; reading is idempotent and keeps the first time.
+    assert await world.ok("mark_application_reply_read", {"reply_id": ids[L.RECEIVED_ACK]}) is None
+    first = db.get_application_reply(world.conn, ids[L.RECEIVED_ACK]).read_at
+    await world.ok("mark_application_reply_read", {"reply_id": ids[L.RECEIVED_ACK]})
+    assert first is not None and db.get_application_reply(world.conn, ids[L.RECEIVED_ACK]).read_at == first
+    assert db.compute_counts(world.conn).application_replies_unread == 1
+    # A read reply with a pending suggestion still counts until it is accepted or dismissed.
+    await world.ok("mark_application_reply_read", {"reply_id": ids[L.INTERVIEW_INVITE]})
+    invite = db.get_application_reply(world.conn, ids[L.INTERVIEW_INVITE])
+    assert invite.read_at is not None and invite.suggestion_state == "pending"
+    assert db.compute_counts(world.conn).application_replies_unread == 1
+    await world.ok("dismiss_reply_suggestion", {"reply_id": ids[L.INTERVIEW_INVITE]})
+    assert db.compute_counts(world.conn).application_replies_unread == 0
+    assert (await world.cmd("mark_application_reply_read", {"reply_id": 999}))["code"] == "not_found"
+
+
+async def test_deciding_a_suggestion_marks_the_reply_read(world: World):
+    seed_submitted_application(world.conn)
+    world.mailbox.folders["INBOX"].append(reply_eml("workday_interview.eml"))
+    await scan(world)
+    [p] = replies(world)
+    await world.ok("accept_reply_suggestion", {"reply_id": p.reply_id})
+    assert db.get_application_reply(world.conn, p.reply_id).read_at is not None
+    assert db.compute_counts(world.conn).application_replies_unread == 0
 
 
 async def test_pause_and_no_mailbox(world: World):

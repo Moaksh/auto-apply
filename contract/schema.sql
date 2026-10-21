@@ -1,6 +1,6 @@
 -- =====================================================================================
 -- AutoApply SQLite schema — SINGLE SOURCE OF TRUTH for the database.
--- Contract version: schema_version = 10  (keep in sync with autoapply.db.SCHEMA_VERSION)
+-- Contract version: schema_version = 12  (keep in sync with autoapply.db.SCHEMA_VERSION)
 --
 -- Location: ~/Library/Application Support/AutoApply/autoapply.db (AUTOAPPLY_HOME overrides)
 --
@@ -521,6 +521,9 @@ CREATE TABLE IF NOT EXISTS outreach_threads (
     next_action_at    TEXT,                                 -- earliest follow-up (pushed back by an out-of-office reply)
     unread_reply      INTEGER NOT NULL DEFAULT 0 CHECK (unread_reply IN (0, 1)),
     followup_approved INTEGER NOT NULL DEFAULT 0 CHECK (followup_approved IN (0, 1)),  -- pre-approved in the first batch
+    suggested_status  TEXT CHECK (suggested_status IS NULL OR suggested_status IN ('assessment','interview','offer','rejected')),  -- v12: board move a reply suggests
+    suggestion_state  TEXT NOT NULL DEFAULT 'none' CHECK (suggestion_state IN ('none','pending','accepted','dismissed')),  -- v12
+    suggestion_decided_at TEXT,                             -- v12: when the user accepted / dismissed it
     created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
@@ -644,6 +647,7 @@ CREATE TABLE IF NOT EXISTS application_replies (
     suggestion_state  TEXT NOT NULL DEFAULT 'none' CHECK (suggestion_state IN ('none','pending','accepted','dismissed')),
     tokens_in         INTEGER NOT NULL DEFAULT 0,
     tokens_out        INTEGER NOT NULL DEFAULT 0,
+    read_at           TEXT,                                 -- v12: NULL = unread (mark_application_reply_read)
     created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     decided_at        TEXT
 );
@@ -670,3 +674,4 @@ INSERT OR IGNORE INTO schema_version (version) VALUES (8);
 INSERT OR IGNORE INTO schema_version (version) VALUES (9);
 INSERT OR IGNORE INTO schema_version (version) VALUES (10);
 INSERT OR IGNORE INTO schema_version (version) VALUES (11);
+INSERT OR IGNORE INTO schema_version (version) VALUES (12);
