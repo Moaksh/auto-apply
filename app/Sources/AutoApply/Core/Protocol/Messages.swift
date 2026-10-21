@@ -1310,6 +1310,24 @@ extension FormQuestion {
     }
 }
 
+struct GetInsightsPayload: Codable, Sendable, Hashable {
+    var force: Bool = false
+    var summarize: Bool = false
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case force
+        case summarize
+    }
+}
+
+extension GetInsightsPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        force = try c.decodeIfPresent(Bool.self, forKey: .force) ?? false
+        summarize = try c.decodeIfPresent(Bool.self, forKey: .summarize) ?? false
+    }
+}
+
 struct GetMailAccountPayload: Codable, Sendable, Hashable {
     var test: Bool = false
 
@@ -1363,6 +1381,44 @@ extension ImportContactsPayload {
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         filePath = try c.decode(String.self, forKey: .filePath)
+    }
+}
+
+/// ``ack.result`` for ``get_insights``: advisory "learning from outcomes" report computed from the
+/// user's own data (engine/autoapply/insights.py). It never changes any setting.
+struct Insights: Codable, Sendable, Hashable {
+    var computedAt: Date
+    var cached: Bool = false
+    var calibration: ScoreCalibration
+    var skipBlockers: SkipBlockers
+    var upskill: UpskillHints
+    var variants: VariantInsights
+    var tokensIn: Int = 0
+    var tokensOut: Int = 0
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case computedAt = "computed_at"
+        case cached
+        case calibration
+        case skipBlockers = "skip_blockers"
+        case upskill
+        case variants
+        case tokensIn = "tokens_in"
+        case tokensOut = "tokens_out"
+    }
+}
+
+extension Insights {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        computedAt = try c.decode(Date.self, forKey: .computedAt)
+        cached = try c.decodeIfPresent(Bool.self, forKey: .cached) ?? false
+        calibration = try c.decode(ScoreCalibration.self, forKey: .calibration)
+        skipBlockers = try c.decode(SkipBlockers.self, forKey: .skipBlockers)
+        upskill = try c.decode(UpskillHints.self, forKey: .upskill)
+        variants = try c.decode(VariantInsights.self, forKey: .variants)
+        tokensIn = try c.decodeIfPresent(Int.self, forKey: .tokensIn) ?? 0
+        tokensOut = try c.decodeIfPresent(Int.self, forKey: .tokensOut) ?? 0
     }
 }
 
@@ -2256,6 +2312,39 @@ extension RejectPayload {
     }
 }
 
+/// A requirement the scorer flagged as a concern on several skipped jobs (scores.reasons.concerns).
+struct RequirementBlocker: Codable, Sendable, Hashable {
+    enum Kind: String, Codable, Sendable, CaseIterable, Hashable {
+        case skill
+        case theme
+        case requirement
+    }
+    var label: String
+    var kind: Kind
+    var count: Int
+    var wordings: [String] = []
+    var examples: [String] = []
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case label
+        case kind
+        case count
+        case wordings
+        case examples
+    }
+}
+
+extension RequirementBlocker {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        label = try c.decode(String.self, forKey: .label)
+        kind = try c.decode(Kind.self, forKey: .kind)
+        count = try c.decode(Int.self, forKey: .count)
+        wordings = try c.decodeIfPresent([String].self, forKey: .wordings) ?? []
+        examples = try c.decodeIfPresent([String].self, forKey: .examples) ?? []
+    }
+}
+
 struct ResetSourceCapPayload: Codable, Sendable, Hashable {
     enum Source: String, Codable, Sendable, CaseIterable, Hashable {
         case linkedin
@@ -2469,6 +2558,89 @@ extension RunStats {
     }
 }
 
+/// One match-score band of the calibration table (insights.py).
+struct ScoreBand: Codable, Sendable, Hashable {
+    var label: String
+    var minScore: Int
+    var maxScore: Int
+    var applications: Int = 0
+    var responses: Int = 0
+    var interviews: Int = 0
+    var responseRate: Double? = nil
+    var interviewRate: Double? = nil
+    var enoughData: Bool = false
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case label
+        case minScore = "min_score"
+        case maxScore = "max_score"
+        case applications
+        case responses
+        case interviews
+        case responseRate = "response_rate"
+        case interviewRate = "interview_rate"
+        case enoughData = "enough_data"
+    }
+}
+
+extension ScoreBand {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        label = try c.decode(String.self, forKey: .label)
+        minScore = try c.decode(Int.self, forKey: .minScore)
+        maxScore = try c.decode(Int.self, forKey: .maxScore)
+        applications = try c.decodeIfPresent(Int.self, forKey: .applications) ?? 0
+        responses = try c.decodeIfPresent(Int.self, forKey: .responses) ?? 0
+        interviews = try c.decodeIfPresent(Int.self, forKey: .interviews) ?? 0
+        responseRate = try c.decodeIfPresent(Double.self, forKey: .responseRate)
+        interviewRate = try c.decodeIfPresent(Double.self, forKey: .interviewRate)
+        enoughData = try c.decodeIfPresent(Bool.self, forKey: .enoughData) ?? false
+    }
+}
+
+/// Does the match score predict replies? Advisory; nothing is changed.
+struct ScoreCalibration: Codable, Sendable, Hashable {
+    enum Verdict: String, Codable, Sendable, CaseIterable, Hashable {
+        case insufficient
+        case separating
+        case flat
+        case inverted
+    }
+    var bands: [ScoreBand] = []
+    var minBandSample: Int
+    var matchThreshold: Int
+    var resolved: Int = 0
+    var inFlight: Int = 0
+    var unscored: Int = 0
+    var verdict: Verdict = .insufficient
+    var finding: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case bands
+        case minBandSample = "min_band_sample"
+        case matchThreshold = "match_threshold"
+        case resolved
+        case inFlight = "in_flight"
+        case unscored
+        case verdict
+        case finding
+    }
+}
+
+extension ScoreCalibration {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        bands = try c.decodeIfPresent([ScoreBand].self, forKey: .bands) ?? []
+        minBandSample = try c.decode(Int.self, forKey: .minBandSample)
+        matchThreshold = try c.decode(Int.self, forKey: .matchThreshold)
+        resolved = try c.decodeIfPresent(Int.self, forKey: .resolved) ?? 0
+        inFlight = try c.decodeIfPresent(Int.self, forKey: .inFlight) ?? 0
+        unscored = try c.decodeIfPresent(Int.self, forKey: .unscored) ?? 0
+        verdict = try c.decodeIfPresent(Verdict.self, forKey: .verdict) ?? .insufficient
+        finding = try c.decode(String.self, forKey: .finding)
+    }
+}
+
 /// Find people to email at a company (HTTP sources now; Google results when the browser is free).
 struct ScoutContactsPayload: Codable, Sendable, Hashable {
     var companyId: Int? = nil
@@ -2662,6 +2834,30 @@ extension SetThreadOutcomePayload {
     }
 }
 
+struct SkipBlockers: Codable, Sendable, Hashable {
+    var windowDays: Int
+    var skipped: Int = 0
+    var reasons: [SkipReasonCount] = []
+    var requirements: [RequirementBlocker] = []
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case windowDays = "window_days"
+        case skipped
+        case reasons
+        case requirements
+    }
+}
+
+extension SkipBlockers {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        windowDays = try c.decode(Int.self, forKey: .windowDays)
+        skipped = try c.decodeIfPresent(Int.self, forKey: .skipped) ?? 0
+        reasons = try c.decodeIfPresent([SkipReasonCount].self, forKey: .reasons) ?? []
+        requirements = try c.decodeIfPresent([RequirementBlocker].self, forKey: .requirements) ?? []
+    }
+}
+
 struct SkipQuestionPayload: Codable, Sendable, Hashable {
     var clusterId: String
     var reason: String? = nil
@@ -2677,6 +2873,30 @@ extension SkipQuestionPayload {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         clusterId = try c.decode(String.self, forKey: .clusterId)
         reason = try c.decodeIfPresent(String.self, forKey: .reason)
+    }
+}
+
+struct SkipReasonCount: Codable, Sendable, Hashable {
+    var reason: String
+    var label: String
+    var count: Int
+    var examples: [String] = []
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case reason
+        case label
+        case count
+        case examples
+    }
+}
+
+extension SkipReasonCount {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        reason = try c.decode(String.self, forKey: .reason)
+        label = try c.decode(String.self, forKey: .label)
+        count = try c.decode(Int.self, forKey: .count)
+        examples = try c.decodeIfPresent([String].self, forKey: .examples) ?? []
     }
 }
 
@@ -3182,6 +3402,117 @@ extension UpsertStoryPayload {
     }
 }
 
+struct UpskillHint: Codable, Sendable, Hashable {
+    var skill: String
+    var jobs: Int
+    var skipped: Int = 0
+    var rejected: Int = 0
+    var examples: [String] = []
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case skill
+        case jobs
+        case skipped
+        case rejected
+        case examples
+    }
+}
+
+extension UpskillHint {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        skill = try c.decode(String.self, forKey: .skill)
+        jobs = try c.decode(Int.self, forKey: .jobs)
+        skipped = try c.decodeIfPresent(Int.self, forKey: .skipped) ?? 0
+        rejected = try c.decodeIfPresent(Int.self, forKey: .rejected) ?? 0
+        examples = try c.decodeIfPresent([String].self, forKey: .examples) ?? []
+    }
+}
+
+/// Skills that keep appearing in jobs you were skipped for or rejected from but are not in your
+/// profile. Advisory: learn them if they fit your direction; never claim a skill you don't have.
+struct UpskillHints: Codable, Sendable, Hashable {
+    var windowDays: Int
+    var jobsConsidered: Int = 0
+    var minJobs: Int
+    var hints: [UpskillHint] = []
+    var summary: String? = nil
+    var note: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case windowDays = "window_days"
+        case jobsConsidered = "jobs_considered"
+        case minJobs = "min_jobs"
+        case hints
+        case summary
+        case note
+    }
+}
+
+extension UpskillHints {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        windowDays = try c.decode(Int.self, forKey: .windowDays)
+        jobsConsidered = try c.decodeIfPresent(Int.self, forKey: .jobsConsidered) ?? 0
+        minJobs = try c.decode(Int.self, forKey: .minJobs)
+        hints = try c.decodeIfPresent([UpskillHint].self, forKey: .hints) ?? []
+        summary = try c.decodeIfPresent(String.self, forKey: .summary)
+        note = try c.decode(String.self, forKey: .note)
+    }
+}
+
+struct VariantInsights: Codable, Sendable, Hashable {
+    var variants: [VariantPerformance] = []
+    var finding: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case variants
+        case finding
+    }
+}
+
+extension VariantInsights {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        variants = try c.decodeIfPresent([VariantPerformance].self, forKey: .variants) ?? []
+        finding = try c.decode(String.self, forKey: .finding)
+    }
+}
+
+/// Per resume variant, same measures as the dashboard's "By resume variant" card.
+struct VariantPerformance: Codable, Sendable, Hashable {
+    var resumeVariantId: Int
+    var label: String
+    var applications: Int
+    var responses: Int
+    var interviews: Int
+    var responseRate: Double
+    var lowSample: Bool
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case resumeVariantId = "resume_variant_id"
+        case label
+        case applications
+        case responses
+        case interviews
+        case responseRate = "response_rate"
+        case lowSample = "low_sample"
+    }
+}
+
+extension VariantPerformance {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        resumeVariantId = try c.decode(Int.self, forKey: .resumeVariantId)
+        label = try c.decode(String.self, forKey: .label)
+        applications = try c.decode(Int.self, forKey: .applications)
+        responses = try c.decode(Int.self, forKey: .responses)
+        interviews = try c.decode(Int.self, forKey: .interviews)
+        responseRate = try c.decode(Double.self, forKey: .responseRate)
+        lowSample = try c.decode(Bool.self, forKey: .lowSample)
+    }
+}
+
 struct WorkHistoryItem: Codable, Sendable, Hashable {
     var company: String
     var title: String
@@ -3363,6 +3694,7 @@ enum Command: Sendable, Hashable {
     case setMailAccount(SetMailAccountPayload)
     case getMailAccount(GetMailAccountPayload)
     case suggestPreferences(SuggestPreferencesPayload)
+    case getInsights(GetInsightsPayload)
     case clearMailAccount(ClearMailAccountPayload)
     case listSiteAccounts(ListSiteAccountsPayload)
     case revealSiteAccountPassword(RevealSiteAccountPasswordPayload)
@@ -3442,6 +3774,7 @@ enum Command: Sendable, Hashable {
         case .setMailAccount: "set_mail_account"
         case .getMailAccount: "get_mail_account"
         case .suggestPreferences: "suggest_preferences"
+        case .getInsights: "get_insights"
         case .clearMailAccount: "clear_mail_account"
         case .listSiteAccounts: "list_site_accounts"
         case .revealSiteAccountPassword: "reveal_site_account_password"
@@ -3521,6 +3854,7 @@ enum Command: Sendable, Hashable {
         "set_mail_account",
         "get_mail_account",
         "suggest_preferences",
+        "get_insights",
         "clear_mail_account",
         "list_site_accounts",
         "reveal_site_account_password",
@@ -3703,6 +4037,7 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case "set_mail_account": command = .setMailAccount(try c.decode(SetMailAccountPayload.self, forKey: .payload))
         case "get_mail_account": command = .getMailAccount(try c.decode(GetMailAccountPayload.self, forKey: .payload))
         case "suggest_preferences": command = .suggestPreferences(try c.decode(SuggestPreferencesPayload.self, forKey: .payload))
+        case "get_insights": command = .getInsights(try c.decode(GetInsightsPayload.self, forKey: .payload))
         case "clear_mail_account": command = .clearMailAccount(try c.decode(ClearMailAccountPayload.self, forKey: .payload))
         case "list_site_accounts": command = .listSiteAccounts(try c.decode(ListSiteAccountsPayload.self, forKey: .payload))
         case "reveal_site_account_password": command = .revealSiteAccountPassword(try c.decode(RevealSiteAccountPasswordPayload.self, forKey: .payload))
@@ -3789,6 +4124,7 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case .setMailAccount(let p): try c.encode(p, forKey: .payload)
         case .getMailAccount(let p): try c.encode(p, forKey: .payload)
         case .suggestPreferences(let p): try c.encode(p, forKey: .payload)
+        case .getInsights(let p): try c.encode(p, forKey: .payload)
         case .clearMailAccount(let p): try c.encode(p, forKey: .payload)
         case .listSiteAccounts(let p): try c.encode(p, forKey: .payload)
         case .revealSiteAccountPassword(let p): try c.encode(p, forKey: .payload)

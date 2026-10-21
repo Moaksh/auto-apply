@@ -410,6 +410,15 @@ enum MockCommandHandler {
         case .suggestPreferences:
             return Handled(reply: ack(encoding: Self.mockSuggestion))
 
+        case .getInsights:
+            let none = "Not enough data yet."
+            return Handled(reply: ack(encoding: Insights(
+                computedAt: Date(),
+                calibration: ScoreCalibration(minBandSample: 8, matchThreshold: 70, finding: none),
+                skipBlockers: SkipBlockers(windowDays: 30),
+                upskill: UpskillHints(windowDays: 90, minJobs: 3, note: none),
+                variants: VariantInsights(finding: none))))
+
         case .onboardingConnectSource(let p):
             let source: SourceName = p.source == .linkedin ? .linkedin : .glassdoor
             return Handled(reply: ack()) { world in

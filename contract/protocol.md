@@ -169,6 +169,19 @@ Nothing is ever sent without `approve_outreach`. Sending stays off until `enable
 | `accept_reply_suggestion` | `reply_id` | `{reply_id, application_id, status}` | applies the reply's `suggested_status` through `set_status` (actor `user`; emits `application_status`). `conflict` when there is no pending suggestion (already accepted or dismissed, or nothing suggested) |
 | `dismiss_reply_suggestion` | `reply_id` | `null` | keeps the board as it is; idempotent. The reply stays as evidence and still counts as "heard back" |
 
+#### 5.3 Insights: learning from outcomes (`engine/autoapply/insights.py`)
+
+An advisory report computed from the user's own data. It never changes a threshold or any other setting. No schema change: the result is cached as JSON in `meta` (key `insights_cache`) for 6 hours.
+
+| type | payload | ack `result` | notes |
+|---|---|---|---|
+| `get_insights` | `force` (false), `summarize` (false) | `Insights` `{computed_at, cached, calibration, skip_blockers, upskill, variants, tokens_in, tokens_out}` | served from the 6-hour cache unless `force` (`cached` says which). `summarize` also asks the fast model for a short `upskill.summary`; its tokens land in `tokens_in` / `tokens_out` and an `insights` event, and the summary is cached with the report |
+
+- **`calibration`** (`ScoreCalibration`): scored, submitted applications in bands `<60`, `60–69`, `70–79`, `80–89`, `90+`, with `applications`, `responses`, `interviews` and the matching rates per band. A **response** is board status `assessment` / `interview` / `offer` / `rejected`, or any `application_replies` row except `received_ack`. An **interview** is `assessment` / `interview` / `offer` (status or reply label). Applications submitted under 14 days ago with no reply are **in flight** and not counted (`in_flight`); unscored ones are counted in `unscored`. Below 8 applications in a band, `response_rate` / `interview_rate` are `null` and `enough_data` is false. `verdict`: `insufficient` (fewer than two bands at the floor), `separating` (highest rated band ≥ 10 points above the lowest), `inverted` (≥ 10 points below) or `flat`; `finding` is one plain sentence (a flat result at or near `match_threshold` says the threshold may be higher than needed).
+- **`skip_blockers`** (`SkipBlockers`): jobs skipped in the last 30 days, `reasons[]` `{reason, label, count, examples}` (the stored `state_reason`, else `scores.skip_reason`; up to 8, examples are "Title · Company", newest first), and `requirements[]` `{label, kind: skill|theme|requirement, count, wordings, examples}`: the scorer's `scores.reasons.concerns` on those jobs, grouped by skill, then theme, then wording, listed once 2 jobs share one.
+- **`upskill`** (`UpskillHints`): skills (fixed vocabulary) named in the descriptions of jobs skipped after scoring or rejected (status `rejected` or a rejection reply) in the last 90 days, that the profile does not mention anywhere (skills, headline, summary, roles, resume text). Listed from 3 jobs, up to 10: `hints[]` `{skill, jobs, skipped, rejected, examples}`, plus `note` (advisory wording) and the optional `summary`.
+- **`variants`** (`VariantInsights`): `variants[]` `{resume_variant_id, label, applications, responses, interviews, response_rate, low_sample (< 10)}`, the dashboard's "By resume variant" shape counted with the response rule above, and a one-line `finding`.
+
 ## 6. Events (daemon → app)
 
 | type | payload | when |

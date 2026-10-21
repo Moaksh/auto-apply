@@ -16,14 +16,24 @@ from autoapply.models import (
     CapsStatus,
     Counts,
     Envelope,
+    Insights,
     JobSummary,
     OnboardingState,
     Progress,
     QuestionCluster,
+    RequirementBlocker,
     RunInfo,
     RunStats,
+    ScoreBand,
+    ScoreCalibration,
+    SkipBlockers,
+    SkipReasonCount,
     SourceStatus,
     StatePayload,
+    UpskillHint,
+    UpskillHints,
+    VariantInsights,
+    VariantPerformance,
     make_command,
     make_event,
 )
@@ -33,6 +43,31 @@ EXAMPLES_PATH: Path = CONTRACT_DIR / "protocol.examples.ndjson"
 
 TS = "2026-10-10T09:00:00.000Z"
 CMD = "c0000000000000000000000000000001"
+
+_insights = Insights(
+    computed_at=TS,
+    calibration=ScoreCalibration(
+        bands=[ScoreBand(label="70–79", min_score=70, max_score=79, applications=12, responses=4, interviews=2,
+                         response_rate=4 / 12, interview_rate=2 / 12, enough_data=True),
+               ScoreBand(label="80–89", min_score=80, max_score=89, applications=9, responses=3, interviews=2,
+                         response_rate=3 / 9, interview_rate=2 / 9, enough_data=True)],
+        min_band_sample=8, match_threshold=70, resolved=21, in_flight=5, unscored=1, verdict="flat",
+        finding="Jobs scored 70–79 got replies about as often as 80–89 (33% vs 33%), so your threshold (70) may be "
+                "higher than it needs to be."),
+    skip_blockers=SkipBlockers(
+        window_days=30, skipped=14,
+        reasons=[SkipReasonCount(reason="below_threshold", label="Match score below your threshold (70)", count=9,
+                                 examples=["ML Engineer · Acme"])],
+        requirements=[RequirementBlocker(label="Kubernetes", kind="skill", count=4,
+                                         wordings=["No Kubernetes experience"], examples=["SRE · Globex"])]),
+    upskill=UpskillHints(window_days=90, jobs_considered=17, min_jobs=3,
+                         hints=[UpskillHint(skill="Terraform", jobs=5, skipped=4, rejected=1, examples=["SRE · Globex"])],
+                         note="Skills these jobs asked for that your profile doesn't mention."),
+    variants=VariantInsights(
+        variants=[VariantPerformance(resume_variant_id=1, label="Backend", applications=14, responses=5, interviews=3,
+                                     response_rate=5 / 14, low_sample=False)],
+        finding="Not enough data yet to compare resumes: each needs at least 10 applications."),
+)
 
 _cluster = QuestionCluster(
     cluster_id="9f2c4b1e0d8a4c6b9e1f2a3b4c5d6e7f",
@@ -115,6 +150,7 @@ def samples() -> list[Envelope]:
     c("set_mail_account", {"email": "jane@gmail.com", "app_password": "abcd efgh ijkl mnop"})
     c("get_mail_account", {"test": False})
     c("suggest_preferences", {})
+    c("get_insights", {"force": False, "summarize": False})
     c("clear_mail_account", {})
     c("list_site_accounts", {})
     c("reveal_site_account_password", {"host": "acme.wd5.myworkdayjobs.com"})
@@ -156,6 +192,7 @@ def samples() -> list[Envelope]:
     # ---- events
     e("ack", {"ok": True, "result": {"application_ids": [11, 12]}}, reply_to=CMD)
     e("ack", {"ok": True, "result": None}, reply_to=CMD)
+    e("ack", {"ok": True, "result": _insights.model_dump(mode="json")}, reply_to=CMD)
     e("error", {"code": "illegal_transition", "message": "application 13 is not awaiting review",
                 "details": {"state": "queued"}, "application_id": 13}, reply_to=CMD)
     e("snapshot", {

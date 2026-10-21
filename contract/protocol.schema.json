@@ -48,6 +48,7 @@
     "set_mail_account",
     "get_mail_account",
     "suggest_preferences",
+    "get_insights",
     "clear_mail_account",
     "list_site_accounts",
     "reveal_site_account_password",
@@ -1839,6 +1840,25 @@
       "title": "FormQuestion",
       "type": "object"
     },
+    "GetInsightsPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "force": {
+          "default": false,
+          "description": "Recompute instead of serving the 6-hour cache.",
+          "title": "Force",
+          "type": "boolean"
+        },
+        "summarize": {
+          "default": false,
+          "description": "Also ask the fast model for a short upskill summary (spends tokens).",
+          "title": "Summarize",
+          "type": "boolean"
+        }
+      },
+      "title": "GetInsightsPayload",
+      "type": "object"
+    },
     "GetMailAccountPayload": {
       "additionalProperties": false,
       "properties": {
@@ -1899,6 +1919,57 @@
         "file_path"
       ],
       "title": "ImportContactsPayload",
+      "type": "object"
+    },
+    "Insights": {
+      "additionalProperties": false,
+      "description": "``ack.result`` for ``get_insights``: advisory \"learning from outcomes\" report computed from the\nuser's own data (engine/autoapply/insights.py). It never changes any setting.",
+      "properties": {
+        "computed_at": {
+          "format": "date-time",
+          "title": "Computed At",
+          "type": "string"
+        },
+        "cached": {
+          "default": false,
+          "description": "Served from the 6-hour cache (meta 'insights_cache').",
+          "title": "Cached",
+          "type": "boolean"
+        },
+        "calibration": {
+          "$ref": "#/$defs/ScoreCalibration"
+        },
+        "skip_blockers": {
+          "$ref": "#/$defs/SkipBlockers"
+        },
+        "upskill": {
+          "$ref": "#/$defs/UpskillHints"
+        },
+        "variants": {
+          "$ref": "#/$defs/VariantInsights"
+        },
+        "tokens_in": {
+          "default": 0,
+          "description": "Tokens spent on the optional model summary.",
+          "minimum": 0,
+          "title": "Tokens In",
+          "type": "integer"
+        },
+        "tokens_out": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Tokens Out",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "computed_at",
+        "calibration",
+        "skip_blockers",
+        "upskill",
+        "variants"
+      ],
+      "title": "Insights",
       "type": "object"
     },
     "JobDiscoveredPayload": {
@@ -4601,6 +4672,56 @@
       "title": "ReplyLabel",
       "type": "string"
     },
+    "RequirementBlocker": {
+      "additionalProperties": false,
+      "description": "A requirement the scorer flagged as a concern on several skipped jobs (scores.reasons.concerns).",
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "skill",
+            "theme",
+            "requirement"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "count": {
+          "description": "Skipped jobs whose concerns name it.",
+          "minimum": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "wordings": {
+          "description": "Up to 2 concern texts as the scorer wrote them.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Wordings",
+          "type": "array",
+          "default": []
+        },
+        "examples": {
+          "description": "Up to 3 \"Title · Company\" examples.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Examples",
+          "type": "array",
+          "default": []
+        }
+      },
+      "required": [
+        "label",
+        "kind",
+        "count"
+      ],
+      "title": "RequirementBlocker",
+      "type": "object"
+    },
     "ResetSourceCapPayload": {
       "additionalProperties": false,
       "properties": {
@@ -4883,6 +5004,161 @@
       ],
       "title": "RunTrigger",
       "type": "string"
+    },
+    "ScoreBand": {
+      "additionalProperties": false,
+      "description": "One match-score band of the calibration table (insights.py).",
+      "properties": {
+        "label": {
+          "description": "\"<60\", \"60–69\", \"70–79\", \"80–89\" or \"90+\".",
+          "title": "Label",
+          "type": "string"
+        },
+        "min_score": {
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Min Score",
+          "type": "integer"
+        },
+        "max_score": {
+          "description": "Inclusive upper bound.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Max Score",
+          "type": "integer"
+        },
+        "applications": {
+          "default": 0,
+          "description": "Submitted applications in this band that have an outcome (in-flight ones are left out).",
+          "minimum": 0,
+          "title": "Applications",
+          "type": "integer"
+        },
+        "responses": {
+          "default": 0,
+          "description": "Of those, how many heard back (board status assessment / interview / offer / rejected, or an employer reply other than an automatic acknowledgement).",
+          "minimum": 0,
+          "title": "Responses",
+          "type": "integer"
+        },
+        "interviews": {
+          "default": 0,
+          "description": "Of those, how many reached assessment, interview or offer.",
+          "minimum": 0,
+          "title": "Interviews",
+          "type": "integer"
+        },
+        "response_rate": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "responses ÷ applications; null below the per-band sample floor.",
+          "title": "Response Rate"
+        },
+        "interview_rate": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "interviews ÷ applications; null below the per-band sample floor.",
+          "title": "Interview Rate"
+        },
+        "enough_data": {
+          "default": false,
+          "title": "Enough Data",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "label",
+        "min_score",
+        "max_score"
+      ],
+      "title": "ScoreBand",
+      "type": "object"
+    },
+    "ScoreCalibration": {
+      "additionalProperties": false,
+      "description": "Does the match score predict replies? Advisory; nothing is changed.",
+      "properties": {
+        "bands": {
+          "items": {
+            "$ref": "#/$defs/ScoreBand"
+          },
+          "title": "Bands",
+          "type": "array",
+          "default": []
+        },
+        "min_band_sample": {
+          "description": "Applications a band needs before its rates are shown.",
+          "title": "Min Band Sample",
+          "type": "integer"
+        },
+        "match_threshold": {
+          "description": "The user's current preferences.match_threshold (for context only).",
+          "title": "Match Threshold",
+          "type": "integer"
+        },
+        "resolved": {
+          "default": 0,
+          "description": "Scored, submitted applications with an outcome.",
+          "minimum": 0,
+          "title": "Resolved",
+          "type": "integer"
+        },
+        "in_flight": {
+          "default": 0,
+          "description": "Submitted recently with no reply yet: not counted.",
+          "minimum": 0,
+          "title": "In Flight",
+          "type": "integer"
+        },
+        "unscored": {
+          "default": 0,
+          "description": "Submitted applications without a match score (added by link, applied manually).",
+          "minimum": 0,
+          "title": "Unscored",
+          "type": "integer"
+        },
+        "verdict": {
+          "default": "insufficient",
+          "enum": [
+            "insufficient",
+            "separating",
+            "flat",
+            "inverted"
+          ],
+          "title": "Verdict",
+          "type": "string"
+        },
+        "finding": {
+          "description": "One plain-language sentence for the user.",
+          "title": "Finding",
+          "type": "string"
+        }
+      },
+      "required": [
+        "min_band_sample",
+        "match_threshold",
+        "finding"
+      ],
+      "title": "ScoreCalibration",
+      "type": "object"
     },
     "ScoutContactsPayload": {
       "additionalProperties": false,
@@ -5187,6 +5463,43 @@
       "title": "SetThreadOutcomePayload",
       "type": "object"
     },
+    "SkipBlockers": {
+      "additionalProperties": false,
+      "properties": {
+        "window_days": {
+          "title": "Window Days",
+          "type": "integer"
+        },
+        "skipped": {
+          "default": 0,
+          "description": "Jobs skipped in the window (deferrals are not skips).",
+          "minimum": 0,
+          "title": "Skipped",
+          "type": "integer"
+        },
+        "reasons": {
+          "items": {
+            "$ref": "#/$defs/SkipReasonCount"
+          },
+          "title": "Reasons",
+          "type": "array",
+          "default": []
+        },
+        "requirements": {
+          "items": {
+            "$ref": "#/$defs/RequirementBlocker"
+          },
+          "title": "Requirements",
+          "type": "array",
+          "default": []
+        }
+      },
+      "required": [
+        "window_days"
+      ],
+      "title": "SkipBlockers",
+      "type": "object"
+    },
     "SkipQuestionPayload": {
       "additionalProperties": false,
       "properties": {
@@ -5211,6 +5524,42 @@
         "cluster_id"
       ],
       "title": "SkipQuestionPayload",
+      "type": "object"
+    },
+    "SkipReasonCount": {
+      "additionalProperties": false,
+      "properties": {
+        "reason": {
+          "description": "Stored reason, e.g. \"below_threshold\" or \"excluded_keyword:crypto\".",
+          "title": "Reason",
+          "type": "string"
+        },
+        "label": {
+          "description": "Human wording of the reason.",
+          "title": "Label",
+          "type": "string"
+        },
+        "count": {
+          "minimum": 0,
+          "title": "Count",
+          "type": "integer"
+        },
+        "examples": {
+          "description": "Up to 3 \"Title · Company\" examples, newest first.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Examples",
+          "type": "array",
+          "default": []
+        }
+      },
+      "required": [
+        "reason",
+        "label",
+        "count"
+      ],
+      "title": "SkipReasonCount",
       "type": "object"
     },
     "SnapshotPayload": {
@@ -6155,6 +6504,174 @@
         "title"
       ],
       "title": "UpsertStoryPayload",
+      "type": "object"
+    },
+    "UpskillHint": {
+      "additionalProperties": false,
+      "properties": {
+        "skill": {
+          "title": "Skill",
+          "type": "string"
+        },
+        "jobs": {
+          "description": "Jobs (skipped or rejected) whose description asks for it.",
+          "minimum": 0,
+          "title": "Jobs",
+          "type": "integer"
+        },
+        "skipped": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Skipped",
+          "type": "integer"
+        },
+        "rejected": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Rejected",
+          "type": "integer"
+        },
+        "examples": {
+          "description": "Up to 3 \"Title · Company\" examples.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Examples",
+          "type": "array",
+          "default": []
+        }
+      },
+      "required": [
+        "skill",
+        "jobs"
+      ],
+      "title": "UpskillHint",
+      "type": "object"
+    },
+    "UpskillHints": {
+      "additionalProperties": false,
+      "description": "Skills that keep appearing in jobs you were skipped for or rejected from but are not in your\nprofile. Advisory: learn them if they fit your direction; never claim a skill you don't have.",
+      "properties": {
+        "window_days": {
+          "title": "Window Days",
+          "type": "integer"
+        },
+        "jobs_considered": {
+          "default": 0,
+          "minimum": 0,
+          "title": "Jobs Considered",
+          "type": "integer"
+        },
+        "min_jobs": {
+          "description": "A skill must appear in at least this many jobs to be listed.",
+          "title": "Min Jobs",
+          "type": "integer"
+        },
+        "hints": {
+          "items": {
+            "$ref": "#/$defs/UpskillHint"
+          },
+          "title": "Hints",
+          "type": "array",
+          "default": []
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Optional model-written summary (get_insights summarize=true).",
+          "title": "Summary"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "window_days",
+        "min_jobs",
+        "note"
+      ],
+      "title": "UpskillHints",
+      "type": "object"
+    },
+    "VariantInsights": {
+      "additionalProperties": false,
+      "properties": {
+        "variants": {
+          "items": {
+            "$ref": "#/$defs/VariantPerformance"
+          },
+          "title": "Variants",
+          "type": "array",
+          "default": []
+        },
+        "finding": {
+          "title": "Finding",
+          "type": "string"
+        }
+      },
+      "required": [
+        "finding"
+      ],
+      "title": "VariantInsights",
+      "type": "object"
+    },
+    "VariantPerformance": {
+      "additionalProperties": false,
+      "description": "Per resume variant, same measures as the dashboard's \"By resume variant\" card.",
+      "properties": {
+        "resume_variant_id": {
+          "title": "Resume Variant Id",
+          "type": "integer"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "applications": {
+          "minimum": 0,
+          "title": "Applications",
+          "type": "integer"
+        },
+        "responses": {
+          "minimum": 0,
+          "title": "Responses",
+          "type": "integer"
+        },
+        "interviews": {
+          "minimum": 0,
+          "title": "Interviews",
+          "type": "integer"
+        },
+        "response_rate": {
+          "maximum": 1,
+          "minimum": 0,
+          "title": "Response Rate",
+          "type": "number"
+        },
+        "low_sample": {
+          "description": "Fewer than 10 applications.",
+          "title": "Low Sample",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "resume_variant_id",
+        "label",
+        "applications",
+        "responses",
+        "interviews",
+        "response_rate",
+        "low_sample"
+      ],
+      "title": "VariantPerformance",
       "type": "object"
     },
     "WorkHistoryItem": {
@@ -7328,6 +7845,32 @@
         },
         "payload": {
           "$ref": "#/$defs/SuggestPreferencesPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandGetInsights": {
+      "type": "object",
+      "title": "Command: get_insights",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "get_insights"
+        },
+        "payload": {
+          "$ref": "#/$defs/GetInsightsPayload"
         }
       },
       "required": [
@@ -8931,6 +9474,9 @@
         },
         {
           "$ref": "#/$defs/CommandSuggestPreferences"
+        },
+        {
+          "$ref": "#/$defs/CommandGetInsights"
         },
         {
           "$ref": "#/$defs/CommandClearMailAccount"

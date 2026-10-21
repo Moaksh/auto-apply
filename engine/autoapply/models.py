@@ -965,6 +965,108 @@ class ParseResumeResult(_P):
     suggested_preferences: SuggestedPreferences | None = None
 
 
+class ScoreBand(_P):
+    """One match-score band of the calibration table (insights.py)."""
+
+    label: str = Field(description='"<60", "60–69", "70–79", "80–89" or "90+".')
+    min_score: int = Field(ge=0, le=100)
+    max_score: int = Field(ge=0, le=100, description="Inclusive upper bound.")
+    applications: int = Field(default=0, ge=0, description="Submitted applications in this band that have an outcome (in-flight ones are left out).")
+    responses: int = Field(default=0, ge=0, description="Of those, how many heard back (board status assessment / interview / offer / rejected, or an employer reply other than an automatic acknowledgement).")
+    interviews: int = Field(default=0, ge=0, description="Of those, how many reached assessment, interview or offer.")
+    response_rate: float | None = Field(default=None, ge=0, le=1, description="responses ÷ applications; null below the per-band sample floor.")
+    interview_rate: float | None = Field(default=None, ge=0, le=1, description="interviews ÷ applications; null below the per-band sample floor.")
+    enough_data: bool = False
+
+
+class ScoreCalibration(_P):
+    """Does the match score predict replies? Advisory; nothing is changed."""
+
+    bands: list[ScoreBand] = Field(default_factory=list)
+    min_band_sample: int = Field(description="Applications a band needs before its rates are shown.")
+    match_threshold: int = Field(description="The user's current preferences.match_threshold (for context only).")
+    resolved: int = Field(default=0, ge=0, description="Scored, submitted applications with an outcome.")
+    in_flight: int = Field(default=0, ge=0, description="Submitted recently with no reply yet: not counted.")
+    unscored: int = Field(default=0, ge=0, description="Submitted applications without a match score (added by link, applied manually).")
+    verdict: Literal["insufficient", "separating", "flat", "inverted"] = "insufficient"
+    finding: str = Field(description="One plain-language sentence for the user.")
+
+
+class SkipReasonCount(_P):
+    reason: str = Field(description='Stored reason, e.g. "below_threshold" or "excluded_keyword:crypto".')
+    label: str = Field(description="Human wording of the reason.")
+    count: int = Field(ge=0)
+    examples: list[str] = Field(default_factory=list, description='Up to 3 "Title · Company" examples, newest first.')
+
+
+class RequirementBlocker(_P):
+    """A requirement the scorer flagged as a concern on several skipped jobs (scores.reasons.concerns)."""
+
+    label: str
+    kind: Literal["skill", "theme", "requirement"]
+    count: int = Field(ge=0, description="Skipped jobs whose concerns name it.")
+    wordings: list[str] = Field(default_factory=list, description="Up to 2 concern texts as the scorer wrote them.")
+    examples: list[str] = Field(default_factory=list, description='Up to 3 "Title · Company" examples.')
+
+
+class SkipBlockers(_P):
+    window_days: int
+    skipped: int = Field(default=0, ge=0, description="Jobs skipped in the window (deferrals are not skips).")
+    reasons: list[SkipReasonCount] = Field(default_factory=list)
+    requirements: list[RequirementBlocker] = Field(default_factory=list)
+
+
+class UpskillHint(_P):
+    skill: str
+    jobs: int = Field(ge=0, description="Jobs (skipped or rejected) whose description asks for it.")
+    skipped: int = Field(default=0, ge=0)
+    rejected: int = Field(default=0, ge=0)
+    examples: list[str] = Field(default_factory=list, description='Up to 3 "Title · Company" examples.')
+
+
+class UpskillHints(_P):
+    """Skills that keep appearing in jobs you were skipped for or rejected from but are not in your
+    profile. Advisory: learn them if they fit your direction; never claim a skill you don't have."""
+
+    window_days: int
+    jobs_considered: int = Field(default=0, ge=0)
+    min_jobs: int = Field(description="A skill must appear in at least this many jobs to be listed.")
+    hints: list[UpskillHint] = Field(default_factory=list)
+    summary: str | None = Field(default=None, description="Optional model-written summary (get_insights summarize=true).")
+    note: str
+
+
+class VariantPerformance(_P):
+    """Per resume variant, same measures as the dashboard's "By resume variant" card."""
+
+    resume_variant_id: int
+    label: str
+    applications: int = Field(ge=0)
+    responses: int = Field(ge=0)
+    interviews: int = Field(ge=0)
+    response_rate: float = Field(ge=0, le=1)
+    low_sample: bool = Field(description="Fewer than 10 applications.")
+
+
+class VariantInsights(_P):
+    variants: list[VariantPerformance] = Field(default_factory=list)
+    finding: str
+
+
+class Insights(_P):
+    """``ack.result`` for ``get_insights``: advisory "learning from outcomes" report computed from the
+    user's own data (engine/autoapply/insights.py). It never changes any setting."""
+
+    computed_at: Timestamp
+    cached: bool = Field(default=False, description="Served from the 6-hour cache (meta 'insights_cache').")
+    calibration: ScoreCalibration
+    skip_blockers: SkipBlockers
+    upskill: UpskillHints
+    variants: VariantInsights
+    tokens_in: int = Field(default=0, ge=0, description="Tokens spent on the optional model summary.")
+    tokens_out: int = Field(default=0, ge=0)
+
+
 class PerJobAnswer(_P):
     job_id: int
     answer: str
@@ -1200,6 +1302,11 @@ class SuggestPreferencesPayload(_P):
     pass
 
 
+class GetInsightsPayload(_P):
+    force: bool = Field(default=False, description="Recompute instead of serving the 6-hour cache.")
+    summarize: bool = Field(default=False, description="Also ask the fast model for a short upskill summary (spends tokens).")
+
+
 class ResetSourceCapPayload(_P):
     source: Literal["linkedin", "glassdoor"]
 
@@ -1433,6 +1540,7 @@ COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "set_mail_account": SetMailAccountPayload,
     "get_mail_account": GetMailAccountPayload,
     "suggest_preferences": SuggestPreferencesPayload,
+    "get_insights": GetInsightsPayload,
     "clear_mail_account": ClearMailAccountPayload,
     "list_site_accounts": ListSiteAccountsPayload,
     "reveal_site_account_password": RevealSiteAccountPasswordPayload,
@@ -1837,6 +1945,7 @@ def decode_line(line: str | bytes, *, expect: Literal["command", "event", "any"]
 _EXTRA_DEFS: tuple[type[BaseModel], ...] = (
     SystemCheckResult,
     ParseResumeResult,
+    Insights,
     NeverGuess,
     Profile,
     FormQuestion,

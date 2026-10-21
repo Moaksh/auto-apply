@@ -1437,6 +1437,21 @@ class Daemon:
 
         return (await suggest_preferences(db.get_profile(self.conn), self.llm)).model_dump(mode="json")
 
+    async def _cmd_get_insights(self, p: Any) -> Any:
+        """Advisory "learning from outcomes" report (insights.py); cached 6 h in ``meta``."""
+        from autoapply import insights
+        from autoapply.models import utcnow
+
+        now = utcnow()
+        result = insights.get_insights(self.conn, now=now, force=p.force)
+        if p.summarize and result.upskill.summary is None and result.upskill.hints and self.llm is not None:
+            result = await insights.summarize_upskill(result, self.llm)
+            if result.tokens_in or result.tokens_out:
+                insights.store_insights(self.conn, result)
+                db.log_event(self.conn, "insights", "insights summary written", actor=Actor.SYSTEM,
+                             payload={"tokens_in": result.tokens_in, "tokens_out": result.tokens_out})
+        return result
+
     def make_source(self, name: str) -> BrowserListingBase:
         if self._source_factory is not None:
             return self._source_factory(name)
