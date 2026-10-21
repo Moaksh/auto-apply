@@ -64,7 +64,9 @@ def is_deferral(reason: str | None) -> bool:
 class ScoreResult:
     job_id: int
     score: int | None  # None when skipped by a hard filter (or on error)
-    reasons: dict[str, Any] = field(default_factory=dict)  # {"summary": str, "factors": {name: 0..100}, "concerns": [..]}
+    # {"summary": str, "factors": {name: 0..100}, "concerns": [..], "requirements": [..], "grounding": {..}}
+    # ("requirements"/"grounding" are newer and optional; see ground_requirements).
+    reasons: dict[str, Any] = field(default_factory=dict)
     skip_reason: str | None = None  # e.g. "below_threshold", "excluded_keyword:crypto", "company_cooldown"
     tokens_in: int = 0
     tokens_out: int = 0
@@ -488,6 +490,11 @@ def _location_reason(job: Job, p: Preferences, home: str | None = None) -> str |
 # LLM scoring
 # =====================================================================================
 
+#: Requirement-level evidence (``reasons["requirements"]``): at most this many per job.
+MAX_REQUIREMENTS = 6
+REQ_STATUSES: tuple[str, ...] = ("met", "partial", "missing")
+REQ_CONFIDENCE: tuple[str, ...] = ("high", "medium", "low")
+
 SCORE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
@@ -513,6 +520,26 @@ SCORE_SCHEMA: dict[str, Any] = {
                         },
                     },
                     "concerns": {"type": "array", "items": {"type": "string", "maxLength": 200}, "maxItems": 5},
+                    # Optional so older/fake responses stay valid; SCORE_SYSTEM asks for it every time.
+                    # Field order is deliberate: what the JD asks (and whether it is mandatory)
+                    # comes before the candidate's match, so the match doesn't colour the requirement.
+                    "requirements": {
+                        "type": "array",
+                        "maxItems": MAX_REQUIREMENTS,
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "required": ["requirement", "dealbreaker", "status", "evidence", "confidence"],
+                            "properties": {
+                                "requirement": {"type": "string", "maxLength": 120},
+                                "dealbreaker": {"type": "boolean"},
+                                "jd_quote": {"type": "string", "maxLength": 160},
+                                "status": {"enum": list(REQ_STATUSES)},
+                                "evidence": {"type": "string", "maxLength": 160},
+                                "confidence": {"enum": list(REQ_CONFIDENCE)},
+                            },
+                        },
+                    },
                 },
             },
         }
@@ -527,7 +554,11 @@ SCORE_SYSTEM = (
     "(target-role fit), domain (industry/product familiarity). Read the target roles as the candidate "
     "means them given their background: a job in a different discipline that merely shares a word "
     "(e.g. electrical, industrial or sales engineering for a software/AI candidate) is a poor fit, "
-    "under 30, whatever its title. Return one result per job_id."
+    "under 30, whatever its title. Return one result per job_id. "
+    "Always include requirements: the job's key requirements (most important first), each with "
+    "status met/partial/missing and evidence = a short verbatim quote from the candidate profile "
+    "(empty if none; never invent). dealbreaker=true only when the job text clearly states it as "
+    "mandatory, with jd_quote = the exact job text saying so."
 )
 
 
@@ -567,6 +598,95 @@ def build_score_prompt(profile: Profile, preferences: Preferences, batch: list[t
     )
 
 
+# ---- grounding guard ----------------------------------------------------------------
+
+_ELLIPSIS = re.compile(r"\.\.\.+|…")
+
+
+def candidate_texts(profile: Profile, extra: Iterable[str | None] = ()) -> list[str]:
+    """Everything the candidate has written about themselves (profile fields, resume text,
+    stories): the only text an evidence quote may come from."""
+    texts: list[str | None] = [profile.headline, profile.summary, profile.raw_text, *profile.skills]
+    if profile.years_experience is not None:
+        y = profile.years_experience
+        texts.append(f"{int(y) if float(y).is_integer() else y} years")
+    for w in profile.work_history:
+        texts += [w.title, w.company, f"{w.title} at {w.company}", *w.highlights]
+    for e in profile.education:
+        texts += [e.school, e.degree, e.field, " ".join(x for x in (e.degree, e.field) if x)]
+    texts += list(extra)
+    return [n for n in (_norm(t) for t in texts if t) if n]
+
+
+def is_grounded(quote: str | None, haystacks: Iterable[str]) -> bool:
+    """True when ``quote`` occurs in one of the (already normalised) ``haystacks``: a
+    whole-word, case/punctuation/whitespace-insensitive substring match. A quote elided with
+    "..." matches when every fragment occurs in the same text."""
+    frags = [f for f in (_norm(p) for p in _ELLIPSIS.split(quote or "")) if f]
+    if not frags:
+        return False
+    return any(all(_has_phrase(h, f) for f in frags) for h in haystacks)
+
+
+def ground_requirements(
+    raw: Any, *, candidate: list[str], jd_text: str
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Validate the model's requirement list against the source texts.
+
+    * Evidence must occur in the candidate's own text (:func:`is_grounded`); otherwise it is
+      blanked, confidence drops to ``low`` and the status is downgraded one notch
+      (met -> partial, partial -> missing). ``met`` with no evidence at all also becomes partial.
+    * A dealbreaker must carry a ``jd_quote`` that occurs in the job text; otherwise it is
+      demoted to an ordinary requirement.
+
+    Returns ``(requirements, {"evidence_dropped": n, "dealbreakers_dropped": m})``.
+    """
+    jd = [_norm(jd_text)]
+    out: list[dict[str, Any]] = []
+    stats = {"evidence_dropped": 0, "dealbreakers_dropped": 0}
+    for r in raw if isinstance(raw, list) else []:
+        if not isinstance(r, dict) or not str(r.get("requirement") or "").strip():
+            continue
+        status = r.get("status") if r.get("status") in REQ_STATUSES else "missing"
+        conf = r.get("confidence") if r.get("confidence") in REQ_CONFIDENCE else "low"
+        evidence = str(r.get("evidence") or "").strip()
+        if evidence and not is_grounded(evidence, candidate):
+            stats["evidence_dropped"] += 1
+            evidence, conf = "", "low"
+            status = {"met": "partial", "partial": "missing"}.get(status, status)
+        elif not evidence and status == "met":
+            status = "partial"
+        item: dict[str, Any] = {
+            "requirement": str(r["requirement"]).strip(),
+            "status": status,
+            "evidence": evidence,
+            "confidence": conf,
+            "dealbreaker": False,
+        }
+        if r.get("dealbreaker") is True:
+            quote = str(r.get("jd_quote") or "").strip()
+            if quote and is_grounded(quote, jd):
+                item["dealbreaker"] = True
+                item["jd_quote"] = quote
+            else:
+                stats["dealbreakers_dropped"] += 1
+        out.append(item)
+        if len(out) >= MAX_REQUIREMENTS:
+            break
+    return out, stats
+
+
+def _build_reasons(r: dict[str, Any], *, candidate: list[str], job: Job) -> dict[str, Any]:
+    reasons: dict[str, Any] = {"summary": r.get("summary", ""), "factors": r.get("factors", {}), "concerns": r.get("concerns", [])}
+    if "requirements" in r:
+        reqs, stats = ground_requirements(r["requirements"], candidate=candidate, jd_text=f"{job.title}\n{job.description or ''}")
+        reasons["requirements"] = reqs
+        if any(stats.values()):
+            reasons["grounding"] = stats
+            log.info("scoring: job %s grounding dropped %s", job.id, stats)
+    return reasons
+
+
 async def score_jobs(
     llm: LLMProvider,
     *,
@@ -575,6 +695,7 @@ async def score_jobs(
     jobs: list[tuple[Job, Company]],
     batch_size: int = 8,
     max_desc_chars: int = 3000,
+    evidence_texts: Iterable[str | None] = (),
 ) -> list[ScoreResult]:
     """LLM match scores for jobs that survived hard filters. Applies
     ``preferences.match_threshold`` (score < threshold -> skip_reason 'below_threshold').
@@ -582,13 +703,18 @@ async def score_jobs(
     Batches of ``batch_size`` jobs share one call; a batch that fails or omits jobs is
     retried job-by-job once. Jobs that still fail get ``score=None`` and ``error`` set.
     Results are returned in input order.
+
+    Each result's ``reasons["requirements"]`` passes :func:`ground_requirements`: evidence is
+    checked against the profile plus ``evidence_texts`` (resume text, stories).
     """
     results: dict[int, ScoreResult] = {}
+    candidate = candidate_texts(profile, evidence_texts)
+    job_by_id = {job.id: job for job, _ in jobs}
 
     async def run_batch(batch: list[tuple[Job, Company]], *, allow_split: bool) -> None:
         prompt = build_score_prompt(profile, preferences, batch, max_desc_chars=max_desc_chars)
         try:
-            res = await llm.complete(prompt, system=SCORE_SYSTEM, schema=SCORE_SCHEMA, max_tokens=300 + 220 * len(batch))
+            res = await llm.complete(prompt, system=SCORE_SYSTEM, schema=SCORE_SCHEMA, max_tokens=300 + 520 * len(batch))
         except LLMError as e:
             if allow_split and len(batch) > 1:
                 for item in batch:
@@ -610,7 +736,7 @@ async def score_jobs(
             results[jid] = ScoreResult(
                 job_id=jid,
                 score=score,
-                reasons={"summary": r.get("summary", ""), "factors": r.get("factors", {}), "concerns": r.get("concerns", [])},
+                reasons=_build_reasons(r, candidate=candidate, job=job_by_id[jid]),
                 skip_reason=SKIP_BELOW_THRESHOLD if score < preferences.match_threshold else None,
                 tokens_in=tin // n + (tin % n if i == 0 else 0),
                 tokens_out=tout // n + (tout % n if i == 0 else 0),
@@ -700,7 +826,10 @@ async def score_pending(
                                      skip_reason=reason, queued=False, run_id=run_id))
 
     if survivors:
-        scored = await score_jobs(llm, profile=profile, preferences=prefs, jobs=survivors, batch_size=batch_size)
+        evidence = [v.text for v in db.list_resume_variants(conn, enabled_only=True)]
+        evidence += [" ".join((s.title, s.situation, s.task, s.action, s.result)) for s in db.list_stories(conn)]
+        scored = await score_jobs(llm, profile=profile, preferences=prefs, jobs=survivors, batch_size=batch_size,
+                                  evidence_texts=evidence)
         for res in scored:
             app_id = app_by_job[res.job_id]
             report.results.append(res)

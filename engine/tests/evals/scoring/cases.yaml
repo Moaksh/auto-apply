@@ -1,0 +1,468 @@
+# Labelled scoring eval cases. Everything here is SYNTHETIC: invented people, invented
+# companies, invented postings. Do not paste real job descriptions or real profiles.
+#
+# Bands (see harness.band_for): strong >= 80, borderline 60-79, poor < 60.
+# dealbreakers: requirements the JD states as mandatory. Each has a `keyword` (matched,
+# normalised, against the model's dealbreaker requirement/jd_quote text in live mode) and the
+# verbatim `jd_quote` (must occur in the JD; the offline test enforces that).
+
+profiles:
+  priya_backend:
+    headline: Senior backend engineer, payments and high-throughput Go services
+    summary: >-
+      Backend engineer with 6 years building payment and inventory systems for Indian
+      fintech and retail startups. Comfortable owning services end to end, from schema
+      design to on-call.
+    years_experience: 6
+    skills: [Go, Python, PostgreSQL, Kafka, Redis, gRPC, Kubernetes, AWS, Django]
+    work_history:
+      - title: Senior Software Engineer
+        company: Fintrail Payments
+        start: "2021"
+        highlights:
+          - Built a UPI reconciliation service in Go processing 4M transactions a day
+          - Cut Postgres p95 query latency by 60% with table partitioning
+          - Mentored four engineers and ran the payments on-call rotation
+      - title: Software Engineer
+        company: Kirana Cloud
+        start: "2018"
+        end: "2021"
+        highlights:
+          - Shipped inventory sync APIs in Python and Django for 3,000 retail stores
+    education:
+      - {school: NIT Tiruchirappalli, degree: B.Tech, field: Computer Science}
+    roles: [Backend Engineer, Senior Software Engineer]
+    seniority: [senior, mid]
+
+  arjun_frontend:
+    headline: Frontend engineer, React and TypeScript
+    summary: >-
+      Frontend engineer with 3 years on consumer web apps. Cares about performance,
+      accessibility and design systems.
+    years_experience: 3
+    skills: [React, TypeScript, JavaScript, Next.js, Redux, CSS, Tailwind, Jest, Node.js]
+    work_history:
+      - title: Frontend Engineer
+        company: Chaiwala Commerce
+        start: "2022"
+        highlights:
+          - Rebuilt the checkout in Next.js and cut Largest Contentful Paint from 4.1s to 1.8s
+          - Built a shared React component library used by 5 product teams
+          - Wrote small Node.js BFF endpoints for the cart page
+    education:
+      - {school: Pune Institute of Computer Technology, degree: B.E., field: Information Technology}
+    roles: [Frontend Engineer, Software Engineer]
+    seniority: [mid, junior]
+
+  meera_ds:
+    headline: Data scientist, churn and engagement modelling
+    summary: >-
+      Data scientist with 4 years in ed-tech. Builds churn, engagement and recommendation
+      models and runs A/B tests with product teams.
+    years_experience: 4
+    skills: [Python, pandas, scikit-learn, XGBoost, SQL, PyTorch, A/B testing, Airflow, Tableau]
+    work_history:
+      - title: Data Scientist
+        company: Padhai Labs
+        start: "2021"
+        highlights:
+          - Built a learner churn model with XGBoost that lifted renewal rate by 7%
+          - Designed and analysed 30+ A/B tests on the course recommendation feed
+          - Trained a PyTorch sequence model for next-lesson recommendations
+    education:
+      - {school: University of Hyderabad, degree: M.Sc., field: Statistics}
+    roles: [Data Scientist, Machine Learning Engineer]
+    seniority: [mid, senior]
+
+  rahul_fresher:
+    headline: Computer science graduate (2025), Java backend
+    summary: >-
+      2025 B.E. Computer Science graduate. Six-month backend internship building Spring Boot
+      APIs. Strong in data structures and algorithms.
+    years_experience: 0.5
+    skills: [Java, Spring Boot, MySQL, Data Structures, Algorithms, Git, REST APIs, C++]
+    work_history:
+      - title: Software Engineering Intern
+        company: Velan Software
+        start: "2024"
+        end: "2025"
+        highlights:
+          - Built Spring Boot REST APIs for an internal leave-management tool
+          - Wrote JUnit tests that raised module coverage from 40% to 75%
+    education:
+      - {school: Anna University, degree: B.E., field: Computer Science}
+    roles: [Software Engineer, Backend Developer]
+    seniority: [junior]
+
+  sana_pm:
+    headline: Senior product manager, B2B SaaS
+    summary: >-
+      Product manager with 8 years in B2B SaaS, mostly HR-tech and payroll. Owns roadmaps,
+      runs discovery with enterprise customers and works closely with engineering.
+    years_experience: 8
+    skills: [Product Management, Roadmapping, User Research, SQL, B2B SaaS, Stakeholder Management, Jira, Amplitude]
+    work_history:
+      - title: Senior Product Manager
+        company: Vetan HR
+        start: "2020"
+        highlights:
+          - Launched a payroll compliance module adopted by 1,200 enterprise customers
+          - Grew net revenue retention from 104% to 118% through an onboarding redesign
+      - title: Product Manager
+        company: Sutra SaaS
+        start: "2017"
+        end: "2020"
+        highlights:
+          - Ran discovery interviews with 60 HR admins to shape the leave-policy engine
+    education:
+      - {school: IIM Lucknow, degree: MBA}
+      - {school: Delhi Technological University, degree: B.Tech, field: Electronics}
+    roles: [Senior Product Manager, Product Manager]
+    seniority: [senior, staff]
+
+  dev_sre:
+    headline: Site reliability engineer, AWS and Kubernetes
+    summary: >-
+      SRE with 5 years running Kubernetes platforms on AWS. Certified Kubernetes Administrator
+      (CKA). Builds observability, incident response and infrastructure-as-code.
+    years_experience: 5
+    skills: [AWS, Kubernetes, Terraform, Prometheus, Grafana, Linux, Bash, Jenkins, Helm, Python]
+    work_history:
+      - title: Site Reliability Engineer
+        company: Dhruv Logistics Tech
+        start: "2020"
+        highlights:
+          - Migrated 120 services from EC2 to EKS with Terraform and Helm
+          - Built Prometheus and Grafana alerting that cut mean time to recovery by 45%
+          - Led the incident review process across 9 teams
+    education:
+      - {school: Amity University Noida, degree: B.Tech, field: Computer Science}
+    roles: [Site Reliability Engineer, DevOps Engineer, Platform Engineer]
+    seniority: [mid, senior]
+
+cases:
+  - id: priya_go_payments
+    profile: priya_backend
+    company: Rupeeflow
+    title: Senior Backend Engineer (Go)
+    location: Bengaluru, India
+    band: strong
+    dealbreakers: []
+    jd: |
+      Rupeeflow builds payment rails for small merchants across India. We are hiring a Senior
+      Backend Engineer to own our settlement and reconciliation services.
+      What you will do:
+      - Design and build Go services that move money reliably at high volume
+      - Own PostgreSQL schemas and Kafka pipelines for settlement events
+      - Take part in on-call and mentor engineers
+      What we look for:
+      - 5+ years of backend engineering, ideally in payments or fintech
+      - Strong Go; Python is a plus
+      - Experience with Kafka, PostgreSQL and running services on Kubernetes
+
+  - id: priya_python_healthtech
+    profile: priya_backend
+    company: Arogya Health Systems
+    title: Senior Software Engineer, Backend
+    location: Bengaluru, India
+    band: borderline
+    dealbreakers: []
+    jd: |
+      Arogya Health Systems builds hospital management software used by 400 clinics.
+      You will build backend services for patient records and billing.
+      Requirements:
+      - 5+ years building backend services in Python (Django or FastAPI)
+      - Experience with HL7 or FHIR healthcare data standards
+      - Experience with MongoDB and Elasticsearch
+      - Familiarity with HIPAA or Indian DPDP data-protection practices
+      Nice to have: Kubernetes, AWS.
+
+  - id: priya_java_bank
+    profile: priya_backend
+    company: Sahyadri Cooperative Bank
+    title: Senior Java Developer, Core Banking
+    location: Mumbai, India
+    band: poor
+    dealbreakers:
+      - keyword: Java
+        jd_quote: At least 7 years of hands-on Java and Spring Boot experience is mandatory.
+    jd: |
+      Join the core banking modernisation team at Sahyadri Cooperative Bank.
+      Responsibilities: maintain and extend core banking modules, write Oracle PL/SQL
+      procedures, and support month-end batch jobs.
+      Eligibility:
+      - At least 7 years of hands-on Java and Spring Boot experience is mandatory.
+      - Strong Oracle PL/SQL and experience with Finacle or a similar core banking product.
+      - Experience with IBM MQ and WebLogic.
+
+  - id: priya_electrical
+    profile: priya_backend
+    company: Urja Grid Solutions
+    title: Senior Electrical Engineer, Substations
+    location: Bengaluru, India
+    band: poor
+    dealbreakers: []
+    jd: |
+      Urja Grid Solutions designs 220 kV substations for state utilities. The Senior
+      Electrical Engineer will prepare single-line diagrams, protection relay settings and
+      earthing studies, and review vendor drawings. You should have 6+ years in power systems
+      design, working knowledge of ETAP and AutoCAD Electrical, and a B.E. in Electrical
+      Engineering.
+
+  - id: priya_go_mumbai_onsite
+    profile: priya_backend
+    company: Tijori Wealth
+    title: Backend Engineer (Go)
+    location: Mumbai, India
+    band: strong
+    dealbreakers:
+      - keyword: Mumbai office
+        jd_quote: Candidates must be willing to work from our Mumbai office five days a week.
+    jd: |
+      Tijori Wealth runs a mutual fund investment app. We need a Backend Engineer to build
+      order-routing services in Go, with PostgreSQL and Redis, and event pipelines on Kafka.
+      Requirements:
+      - 4+ years of backend experience in Go or a similar language
+      - Experience with payments, brokerage or other money-movement systems
+      - Candidates must be willing to work from our Mumbai office five days a week.
+
+  - id: arjun_react_d2c
+    profile: arjun_frontend
+    company: Khadi Threads
+    title: Frontend Engineer
+    location: Pune, India
+    band: strong
+    dealbreakers: []
+    jd: |
+      Khadi Threads is a direct-to-consumer apparel brand. Our Frontend Engineer will own the
+      storefront built with Next.js, React and TypeScript.
+      You will: build product, cart and checkout pages; improve Core Web Vitals; contribute
+      to our component library.
+      You have: 2-4 years of React and TypeScript, experience with Next.js, a feel for
+      performance and accessibility, and testing with Jest or React Testing Library.
+
+  - id: arjun_fullstack_node
+    profile: arjun_frontend
+    company: Ghar Rentals
+    title: Full Stack Engineer
+    location: Pune, India
+    band: borderline
+    dealbreakers: []
+    jd: |
+      Ghar Rentals is a rental marketplace. As a Full Stack Engineer you will split time between
+      our React web app and Node.js microservices.
+      Requirements:
+      - 3+ years of professional experience
+      - Strong backend skills in Node.js and Express, with PostgreSQL schema design
+      - Experience designing REST APIs and background job queues (BullMQ or similar)
+      - React experience is a plus
+
+  - id: arjun_ios
+    profile: arjun_frontend
+    company: Yatra Pods
+    title: iOS Engineer
+    location: Pune, India
+    band: poor
+    dealbreakers:
+      - keyword: App Store
+        jd_quote: You must have shipped at least two native iOS apps to the App Store.
+    jd: |
+      Yatra Pods makes a travel podcast app. We are hiring an iOS Engineer to build features in
+      Swift and SwiftUI, own audio playback with AVFoundation, and improve offline downloads.
+      Requirements:
+      - 3+ years of native iOS development in Swift
+      - You must have shipped at least two native iOS apps to the App Store.
+      - Experience with Core Data and background audio.
+
+  - id: meera_ds_edtech
+    profile: meera_ds
+    company: Gurukul Online
+    title: Data Scientist, Learner Analytics
+    location: Hyderabad, India
+    band: strong
+    dealbreakers: []
+    jd: |
+      Gurukul Online teaches coding to 2 million learners. The Learner Analytics team needs a
+      Data Scientist to model retention and engagement.
+      You will: build churn and engagement models, design and analyse experiments with the
+      product team, and ship features to the recommendation system.
+      You have: 3+ years in applied data science, strong Python and SQL, experience with
+      gradient boosting models and A/B testing; PyTorch is a plus.
+
+  - id: meera_llm_platform
+    profile: meera_ds
+    company: Bhasha AI
+    title: Machine Learning Engineer, LLM Platform
+    location: Bengaluru, India
+    band: borderline
+    dealbreakers: []
+    jd: |
+      Bhasha AI builds speech and language models for Indian languages. The ML Engineer will
+      fine-tune and serve LLMs in production.
+      Requirements:
+      - 3+ years of machine learning experience with PyTorch
+      - Experience deploying models to production with Triton, vLLM or similar
+      - Experience with Kubernetes, Docker and GPU cost optimisation
+      - Familiarity with LoRA fine-tuning and evaluation of language models
+
+  - id: meera_research_phd
+    profile: meera_ds
+    company: Vigyan Research Labs
+    title: Research Scientist, Computer Vision
+    location: Bengaluru, India
+    band: poor
+    dealbreakers:
+      - keyword: PhD
+        jd_quote: A PhD in Computer Science, Electrical Engineering or a related field is required.
+    jd: |
+      Vigyan Research Labs publishes at CVPR and ICCV. The Research Scientist will lead
+      research on 3D scene understanding and publish at top venues.
+      Requirements:
+      - A PhD in Computer Science, Electrical Engineering or a related field is required.
+      - First-author publications at CVPR, ICCV, ECCV or NeurIPS
+      - Deep expertise in 3D vision, NeRFs or Gaussian splatting
+
+  - id: rahul_sde1_java
+    profile: rahul_fresher
+    company: Tamil Cloud Works
+    title: Software Engineer I (Java)
+    location: Chennai, India
+    band: strong
+    dealbreakers: []
+    jd: |
+      Tamil Cloud Works builds accounting software for SMEs. We are hiring 2024 and 2025
+      graduates as Software Engineer I.
+      You will build Java and Spring Boot microservices with MySQL, write unit tests and learn
+      from senior engineers.
+      You have: a B.E./B.Tech in Computer Science or a related field, strong data structures
+      and algorithms, Java, and an internship or projects with REST APIs.
+
+  - id: rahul_associate_python
+    profile: rahul_fresher
+    company: Neel Analytics
+    title: Associate Software Engineer (Python)
+    location: Chennai, India
+    band: borderline
+    dealbreakers: []
+    jd: |
+      Neel Analytics builds reporting dashboards for retail chains. Associate Software
+      Engineers build data APIs in Python with FastAPI and work on ETL jobs.
+      We look for: 0-2 years of experience, Python and SQL, familiarity with pandas, and an
+      interest in data engineering. Training is provided.
+
+  - id: rahul_senior_backend
+    profile: rahul_fresher
+    company: Kaveri Logistics
+    title: Senior Backend Engineer
+    location: Chennai, India
+    band: poor
+    dealbreakers:
+      - keyword: 6 years
+        jd_quote: Minimum 6 years of professional backend development experience.
+    jd: |
+      Kaveri Logistics runs a freight marketplace. The Senior Backend Engineer will lead the
+      design of our pricing and dispatch services and mentor a team of five.
+      Requirements:
+      - Minimum 6 years of professional backend development experience.
+      - Led the design of distributed systems at scale
+      - Java or Kotlin, Kafka, and cloud experience on AWS or GCP
+
+  - id: sana_pm_hrtech
+    profile: sana_pm
+    company: Kaamgar Cloud
+    title: Senior Product Manager, Payroll
+    location: Gurugram, India
+    band: strong
+    dealbreakers: []
+    jd: |
+      Kaamgar Cloud sells HR and payroll software to mid-size Indian companies. The Senior
+      Product Manager will own the payroll and statutory compliance roadmap.
+      You will: run discovery with enterprise HR teams, write specs, prioritise with
+      engineering and track adoption.
+      You have: 6+ years of B2B SaaS product management, payroll or HR-tech domain knowledge,
+      and comfort with SQL and product analytics tools.
+
+  - id: sana_pm_gaming
+    profile: sana_pm
+    company: Khel Studios
+    title: Senior Product Manager, Live Ops
+    location: Gurugram, India
+    band: borderline
+    dealbreakers: []
+    jd: |
+      Khel Studios makes mobile casual games with 20 million monthly players. The Senior
+      Product Manager, Live Ops will plan in-game events, tune monetisation and run
+      experiments on player retention.
+      Requirements: 5+ years of product management, ideally in consumer mobile or gaming;
+      strong experimentation and analytics skills; experience with in-app purchases and
+      live-ops event design.
+
+  - id: sana_enterprise_sales
+    profile: sana_pm
+    company: Lekha ERP
+    title: Enterprise Account Executive
+    location: Gurugram, India
+    band: poor
+    dealbreakers:
+      - keyword: quota
+        jd_quote: Must have a proven track record of closing a 1 crore annual quota.
+    jd: |
+      Lekha ERP is hiring an Enterprise Account Executive to sell ERP licences to
+      manufacturing companies in North India. You will prospect, run demos, negotiate and
+      close deals.
+      Requirements:
+      - 6+ years of enterprise software sales
+      - Must have a proven track record of closing a 1 crore annual quota.
+      - Willingness to travel 50% of the time.
+
+  - id: dev_sre_k8s
+    profile: dev_sre
+    company: Setu Infra
+    title: Senior Site Reliability Engineer
+    location: Noida, India
+    band: strong
+    dealbreakers:
+      - keyword: CKA
+        jd_quote: A valid Certified Kubernetes Administrator (CKA) certification is mandatory.
+    jd: |
+      Setu Infra runs a B2B logistics platform on AWS. The Senior SRE will own our EKS
+      clusters, observability stack and incident process.
+      Requirements:
+      - 4+ years in SRE or DevOps roles
+      - Kubernetes, Terraform, Helm and AWS in production
+      - Prometheus and Grafana monitoring, on-call experience
+      - A valid Certified Kubernetes Administrator (CKA) certification is mandatory.
+
+  - id: dev_devops_azure
+    profile: dev_sre
+    company: Nirmaan Digital
+    title: DevOps Engineer (Azure)
+    location: Noida, India
+    band: borderline
+    dealbreakers: []
+    jd: |
+      Nirmaan Digital builds construction-management software on Microsoft Azure. The DevOps
+      Engineer will run AKS clusters and Azure DevOps pipelines.
+      Requirements:
+      - 4+ years of DevOps experience, primarily on Azure
+      - Azure DevOps Pipelines, ARM or Bicep templates, and AKS
+      - PowerShell scripting and Windows Server administration
+      - Terraform is a plus
+
+  - id: dev_network_engineer
+    profile: dev_sre
+    company: Pragati Telecom
+    title: Senior Network Engineer
+    location: Noida, India
+    band: poor
+    dealbreakers:
+      - keyword: CCNP
+        jd_quote: CCNP or CCIE certification is mandatory for this role.
+    jd: |
+      Pragati Telecom runs enterprise WAN networks for banks. The Senior Network Engineer will
+      design and troubleshoot MPLS, BGP and OSPF networks and manage Cisco and Juniper
+      routers and Fortinet firewalls.
+      Requirements:
+      - 6+ years in network engineering
+      - CCNP or CCIE certification is mandatory for this role.
+      - Hands-on experience with SD-WAN rollouts

@@ -271,3 +271,102 @@ async def test_score_pending_llm_error_leaves_discovered(conn, profile) -> None:
     app = db.get_application_by_job(conn, job.id)
     assert app.state is AppState.DISCOVERED and report.errors == [app.id]
     assert db.get_score(conn, job.id) is None
+
+
+# =====================================================================================
+# Requirement-level evidence + grounding guard
+# =====================================================================================
+
+
+def _req(requirement: str, status: str, evidence: str = "", *, dealbreaker: bool = False, jd_quote: str | None = None,
+         confidence: str = "high") -> dict[str, Any]:
+    r: dict[str, Any] = {"requirement": requirement, "dealbreaker": dealbreaker, "status": status,
+                         "evidence": evidence, "confidence": confidence}
+    if jd_quote is not None:
+        r["jd_quote"] = jd_quote
+    return r
+
+
+def _one(job_id: int, reqs: list[dict[str, Any]]) -> dict[str, Any]:
+    return {"results": [{"job_id": job_id, "score": 82, "summary": "s",
+                         "factors": {"skills": 80, "seniority": 80, "role": 80, "domain": 80},
+                         "requirements": reqs}]}
+
+
+def test_is_grounded_normalises_and_needs_whole_words() -> None:
+    from autoapply.scoring import _norm, is_grounded
+
+    hay = [_norm("Built Kafka-based ingestion at Analytical Engines; 7 years in Go.")]
+    assert is_grounded("built KAFKA based ingestion", hay)
+    assert is_grounded("Built Kafka ... Analytical Engines", hay)  # elided quote: every fragment present
+    assert not is_grounded("Built Kafka ... Google", hay)
+    assert not is_grounded("Engine", [_norm("Engines")])  # whole words only
+    assert not is_grounded("", hay) and not is_grounded("...", hay)
+
+
+async def test_requirements_grounding_drops_hallucinated_evidence(conn, profile) -> None:  # type: ignore[no-untyped-def]
+    job, company = mk(conn, title="Senior Backend Engineer",
+                      description="You will build Go services. Must have 5+ years of backend experience. "
+                                  "Candidates must be based in the US.")
+    reqs = [
+        _req("Go services", "met", "Go"),                                            # grounded (skills)
+        _req("5+ years backend", "met", "7 years"),                                  # grounded (years_experience)
+        _req("Kubernetes at scale", "met", "Ran Kubernetes clusters for 200 services at Google"),  # hallucinated
+        _req("Kafka", "partial", "Led Kafka migration at Netflix"),                  # hallucinated
+        _req("Postgres", "met", ""),                                                 # met without evidence
+        _req("US based", "met", "Senior Backend Engineer at Analytical Engines", dealbreaker=True,
+             jd_quote="Candidates must be based in the US."),                        # real JD quote
+    ]
+    reqs_extra = _req("Rust", "missing", dealbreaker=True, jd_quote="Rust experience is mandatory")  # not in JD
+    llm = FakeLLMProvider(default=_one(job.id, reqs[:5] + [reqs_extra]))
+    [res] = await score_jobs(llm, profile=profile, preferences=Preferences(), jobs=[(job, company)])
+
+    got = {r["requirement"]: r for r in res.reasons["requirements"]}
+    assert got["Go services"]["status"] == "met" and got["Go services"]["evidence"] == "Go"
+    assert got["5+ years backend"]["evidence"] == "7 years"
+    k8s = got["Kubernetes at scale"]
+    assert k8s["evidence"] == "" and k8s["status"] == "partial" and k8s["confidence"] == "low"
+    assert got["Kafka"]["evidence"] == "" and got["Kafka"]["status"] == "missing"
+    assert got["Postgres"]["status"] == "partial"
+    assert got["Rust"]["dealbreaker"] is False and "jd_quote" not in got["Rust"]
+    assert res.reasons["grounding"] == {"evidence_dropped": 2, "dealbreakers_dropped": 1}
+    # Old keys are still there, unchanged, so older readers keep working.
+    assert res.reasons["summary"] == "s" and res.reasons["factors"]["skills"] == 80 and res.score == 82
+    assert "requirements" in (llm.calls[0].system or "") and llm.calls[0].schema == SCORE_SCHEMA
+
+    # A dealbreaker quoted verbatim from the JD survives (case/punctuation-insensitive).
+    llm = FakeLLMProvider(default=_one(job.id, [reqs[5]]))
+    [res] = await score_jobs(llm, profile=profile, preferences=Preferences(), jobs=[(job, company)])
+    [us] = res.reasons["requirements"]
+    assert us["dealbreaker"] is True and us["jd_quote"] == "Candidates must be based in the US."
+    assert us["status"] == "met" and "grounding" not in res.reasons
+
+
+async def test_requirements_absent_keeps_old_reasons_shape(conn, profile) -> None:  # type: ignore[no-untyped-def]
+    job, company = mk(conn)
+    llm = FakeLLMProvider(default={"results": [{"job_id": job.id, "score": 70, "summary": "ok",
+                                                "factors": {"skills": 1, "seniority": 1, "role": 1, "domain": 1}}]})
+    [res] = await score_jobs(llm, profile=profile, preferences=Preferences(), jobs=[(job, company)])
+    assert res.reasons == {"summary": "ok", "factors": {"skills": 1, "seniority": 1, "role": 1, "domain": 1}, "concerns": []}
+
+
+async def test_score_pending_grounds_against_stories(conn, profile) -> None:  # type: ignore[no-untyped-def]
+    db.upsert_story(conn, title="Payments outage", action="Cut p99 latency of the ledger API from 900ms to 120ms")
+    job, _ = mk(conn, title="Backend Engineer", description="Low-latency APIs.")
+    reqs = [_req("Low-latency APIs", "met", "cut p99 latency of the ledger API"),
+            _req("Scala", "met", "Wrote Scala at Twitter")]
+    llm = FakeLLMProvider(default=_one(job.id, reqs))
+    await score_pending(conn, llm)
+    stored = db.get_score(conn, job.id).reasons
+    got = {r["requirement"]: r for r in stored["requirements"]}
+    assert got["Low-latency APIs"]["status"] == "met" and got["Low-latency APIs"]["evidence"]
+    assert got["Scala"]["evidence"] == "" and got["Scala"]["status"] == "partial"
+    assert stored["grounding"]["evidence_dropped"] == 1
+
+
+def test_score_schema_requirements_contract() -> None:
+    item = SCORE_SCHEMA["properties"]["results"]["items"]
+    assert "requirements" not in item["required"]  # optional: older/fake responses stay valid
+    req = item["properties"]["requirements"]["items"]
+    assert set(req["required"]) == {"requirement", "dealbreaker", "status", "evidence", "confidence"}
+    assert req["properties"]["status"]["enum"] == ["met", "partial", "missing"]
