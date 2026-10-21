@@ -37,6 +37,14 @@ def _no_outreach_automation(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(service, "AUTO_ENABLED", False)
 
 
+@pytest.fixture(autouse=True)
+def _no_liveness_network(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Posting liveness checks (plain HTTP GETs) are off unless a test turns them on with a mock transport."""
+    from autoapply import liveness
+
+    monkeypatch.setattr(liveness, "ENABLED", False)
+
+
 @pytest.fixture
 def autoapply_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Paths:
     home = tmp_path / "AutoApplyHome"

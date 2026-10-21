@@ -41,7 +41,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel
 
-from autoapply import db, workers
+from autoapply import db, legitimacy, liveness, workers
 from autoapply.apply.base import Adapter, ApplyContext, EmitFn, FillResult, PausedError, UnresolvedField, close_session
 from autoapply.config import Preferences
 from autoapply.discovery.base import DiscoveredJob, DiscoveryContext, Source
@@ -266,6 +266,8 @@ def skip_tag(reason: str | None, score: int | None = None, threshold: int | None
         "no_apply_url": "no company apply link (LinkedIn/Glassdoor only)",
         "unscored": "couldn't be scored",
         "role_off_field": f"a {detail} job, not your field" if detail else "not your field",
+        "posting_closed": "the posting has closed",
+        "asks_candidate_to_pay": "asks you to pay a fee (a common scam)",
     }
     return table.get(key) or (reason or "other").replace("_", " ")
 
@@ -725,6 +727,10 @@ class Pipeline:
                 reason: str | None = "no_apply_url"
             else:
                 reason = await self._hard_filter(job, company, prefs)
+            if not reason:
+                # Legitimacy (autoapply.legitimacy): computed once per job, stored in jobs.raw["risk"].
+                # Only a fee asked of the candidate is a hard skip; other signals act at apply time.
+                reason = await self._assess_risk(app, job, company)
             if reason and self.hooks.is_deferral(reason):
                 continue  # "not now" (e.g. daily cap): stays discovered for a later run
             if reason:
@@ -843,6 +849,36 @@ class Pipeline:
                 ),
             )
             await self._state(DaemonActivity.SCORING, f"Scored {done}/{total}", progress=(done, total))
+
+    async def _assess_risk(self, app: Application, job: Job, company: Company) -> str | None:
+        """Store the job's risk and log it; returns the skip reason for a fee ask, else None."""
+        try:
+            risk = legitimacy.ensure(self.conn, job, company, now=self._now())
+        except Exception:  # noqa: BLE001 - a risk check must never block scoring
+            log.warning("risk check failed for job %s", job.id, exc_info=True)
+            return None
+        if risk.level != legitimacy.NONE:
+            level = LogLevel.WARNING if risk.level == legitimacy.HIGH else LogLevel.INFO
+            await self._log(
+                level, f"Risk {risk.level} for {job.title} · {company.name}: {risk.summary()}", job_id=job.id, application_id=app.id,
+            )
+        return legitimacy.SKIP_ASKS_TO_PAY if risk.asks_to_pay else None
+
+    async def _skip_if_closed(self, app: Application, job: Job, company: Company) -> bool:
+        """Liveness gate (autoapply.liveness): a queued job whose posting has closed is skipped
+        before any agent run. Unknown counts as open. User-queued (user_*) jobs are checked too:
+        a closed posting can't be applied to anyway."""
+        res = await liveness.ensure(self.conn, job, now=self._now())
+        if not res.closed:
+            return False
+        await self._transition(app.id, AppState.SKIPPED, reason=liveness.SKIP_POSTING_CLOSED, expected_from=AppState.QUEUED)
+        db.remove_job_from_questions(self.conn, job.id)
+        user = (app.state_reason or "").startswith("user_")
+        await self._log(
+            LogLevel.INFO, liveness.closed_message(job.title, company.name, res, user_queued=user),
+            job_id=job.id, application_id=app.id,
+        )
+        return True
 
     def _credit_search(self, job: Job) -> None:
         """Tell the search planner which search produced a match, so it is revisited first."""
@@ -1157,6 +1193,9 @@ class Pipeline:
         # after a preference change or a filter fix (location, seniority, excludes, salary).
         if await self._skip_if_stale(app, job, company, prefs):
             return AppState.SKIPPED
+        # Liveness gate: don't spend an agent run on a closed posting (cached 12h; unknown = open).
+        if await self._skip_if_closed(app, job, company):
+            return AppState.SKIPPED
 
         adapter = self._select_adapter(job)
         if adapter is None:
@@ -1164,6 +1203,14 @@ class Pipeline:
             return AppState.FAILED
 
         mode = prefs.effective_mode(job.ats, company.id, job.mode_override)
+        # Legitimacy gate: a high-risk posting never auto-submits, whatever the mode says.
+        risk = legitimacy.ensure(self.conn, job, company, now=self._now())
+        if risk.level == legitimacy.HIGH and mode is not Mode.REVIEW:
+            mode = Mode.REVIEW
+            await self._log(
+                LogLevel.WARNING, f"{job.title} · {company.name} goes to your review, not auto-submit: {risk.summary()}",
+                job_id=job.id, application_id=app.id,
+            )
         variant_id, pick_score = self._pick_resume(job)
         fields: dict[str, Any] = {"mode": mode.value}
         if variant_id is not None:
@@ -1176,8 +1223,13 @@ class Pipeline:
             application_id=app.id, job_id=job.id,
         )
         ctx = self.build_context(app.id)
+        review_reason = "review_mode"
+        if risk.level == legitimacy.HIGH:
+            # Adapters read the mode from ctx.job.mode_override: make them agree (not persisted).
+            ctx.job = ctx.job.model_copy(update={"mode_override": Mode.REVIEW})
+            review_reason = legitimacy.REVIEW_REASON
         try:
-            return await self._fill_and_submit(app, job, company, mode, adapter, ctx)
+            return await self._fill_and_submit(app, job, company, mode, adapter, ctx, review_reason=review_reason)
         finally:
             # Whatever happened (needs-you, review, gate blocked, error, pause, submitted),
             # never leave the adapter's browser / agent session behind: an open agentic
@@ -1216,6 +1268,7 @@ class Pipeline:
 
     async def _fill_and_submit(
         self, app: Application, job: Job, company: Company, mode: Mode, adapter: Adapter, ctx: ApplyContext,
+        review_reason: str = "review_mode",
     ) -> AppState:
         # Per-task usage (other workers' LLM calls in the meantime must not be billed here).
         with usage_scope() as used:
@@ -1276,7 +1329,7 @@ class Pipeline:
             await self._transition(app.id, AppState.FAILED, reason=fill.error or "fill_failed", expected_from=AppState.FILLING)
             return AppState.FAILED
         if mode is Mode.REVIEW:
-            await self._transition(app.id, AppState.AWAITING_REVIEW, reason="review_mode", expected_from=AppState.FILLING)
+            await self._transition(app.id, AppState.AWAITING_REVIEW, reason=review_reason, expected_from=AppState.FILLING)
             return AppState.AWAITING_REVIEW
 
         # ---- final gate -> durable pre-write -> click (no await between gate and pre-write)

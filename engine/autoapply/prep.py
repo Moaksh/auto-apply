@@ -70,6 +70,8 @@ class PrepReport:
     touched_cluster_ids: list[str] = field(default_factory=list)
     requeued_jobs: list[int] = field(default_factory=list)
     harvest_failed_jobs: list[int] = field(default_factory=list)
+    #: jobs skipped because their posting has closed (liveness gate)
+    closed_jobs: list[int] = field(default_factory=list)
     paused: bool = False
     tokens_in: int = 0
     tokens_out: int = 0
@@ -245,6 +247,42 @@ def build_context(
     )
 
 
+async def _skip_closed_postings(
+    conn: sqlite3.Connection, apps: list[Any], *, emit: EmitFn, report: PrepReport, run_row_id: int | None,
+) -> list[Any]:
+    """queued -> skipped (``posting_closed``) for every app whose posting has closed; returns the rest."""
+    from autoapply import liveness
+
+    if not apps or not liveness.ENABLED:
+        return apps
+    jobs = {a.id: db.get_job(conn, a.job_id) for a in apps}
+    try:
+        results = await liveness.ensure_many(conn, jobs.values())
+    except Exception:  # noqa: BLE001 - never block prep on the liveness check
+        log.warning("prep: liveness checks failed", exc_info=True)
+        return apps
+    keep = []
+    for app in apps:
+        job = jobs[app.id]
+        res = results.get(job.id)
+        if res is None or not res.closed:
+            keep.append(app)
+            continue
+        try:
+            t = db.transition(conn, app.id, AppState.SKIPPED, reason=liveness.SKIP_POSTING_CLOSED,
+                              expected_from=AppState.QUEUED, run_id=run_row_id)
+        except db.IllegalTransition:
+            continue  # moved on meanwhile (e.g. the user acted): leave it alone
+        db.remove_job_from_questions(conn, job.id)
+        company = db.get_company(conn, job.company_id)
+        msg = liveness.closed_message(job.title, company.name, res, user_queued=(app.state_reason or "").startswith("user_"))
+        log.info("prep: %s", msg)
+        db.log_event(conn, "prep", msg, job_id=job.id, application_id=app.id, run_id=run_row_id)
+        report.closed_jobs.append(job.id)
+        await emit("application_state", t.to_payload())
+    return keep
+
+
 async def run_prep(
     conn: sqlite3.Connection,
     *,
@@ -275,7 +313,10 @@ async def run_prep(
     else:
         apps = [db.get_application(conn, i) for i in application_ids]
         apps = [a for a in apps if a.state is AppState.QUEUED]
-    open_before = {q.cluster_id for q in db.list_questions(conn, status=QuestionStatus.OPEN)}
+    # Liveness gate (autoapply.liveness): skip queued jobs whose posting has closed before any
+    # question harvest. Checks run concurrently (bounded), are cached 12h, and unknown = open.
+    apps = await _skip_closed_postings(conn, apps, emit=emit, report=report, run_row_id=run_row_id)
+    open_before ={q.cluster_id for q in db.list_questions(conn, status=QuestionStatus.OPEN)}
     created_q: list[int] = []
     touched: set[str] = set()
     total = len(apps)

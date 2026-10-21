@@ -47,6 +47,9 @@ SKIP_COOLDOWN = "company_cooldown"
 SKIP_DAILY_CAP = "daily_cap_reached"
 SKIP_BELOW_THRESHOLD = "below_threshold"
 SKIP_OFF_FIELD = "role_off_field"
+#: Set by the pipeline, not by ``hard_filter``: see ``autoapply.liveness`` / ``autoapply.legitimacy``.
+SKIP_POSTING_CLOSED = "posting_closed"
+SKIP_ASKS_TO_PAY = "asks_candidate_to_pay"
 
 #: Reasons that mean "not now" rather than "never": the caller should leave the application
 #: where it is (``discovered``) instead of skipping it.
