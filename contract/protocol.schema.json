@@ -80,7 +80,10 @@
     "update_referral",
     "set_provider_key",
     "accept_reply_suggestion",
-    "dismiss_reply_suggestion"
+    "dismiss_reply_suggestion",
+    "generate_interview_prep",
+    "get_interview_prep",
+    "interview_debrief"
   ],
   "x-event-types": [
     "ack",
@@ -1251,10 +1254,119 @@
       "title": "CheckSourceLoginPayload",
       "type": "object"
     },
+    "ChecklistItem": {
+      "additionalProperties": false,
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        },
+        "source": {
+          "default": "general",
+          "enum": [
+            "employer_reply",
+            "job",
+            "general"
+          ],
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "ChecklistItem",
+      "type": "object"
+    },
     "ClearMailAccountPayload": {
       "additionalProperties": false,
       "properties": {},
       "title": "ClearMailAccountPayload",
+      "type": "object"
+    },
+    "CompanyBrief": {
+      "additionalProperties": false,
+      "description": "Only data AutoApply already stores (no new web lookups). Omitted from the pack when there is nothing.",
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "domain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain"
+        },
+        "careers_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Careers Url"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Stored homepage description (prospects.summary).",
+          "title": "Summary"
+        },
+        "summary_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Summary Url"
+        },
+        "other_roles": {
+          "description": "Other job titles seen at this company.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Other Roles",
+          "type": "array",
+          "default": []
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "CompanyBrief",
       "type": "object"
     },
     "Counts": {
@@ -1840,6 +1952,27 @@
       "title": "FormQuestion",
       "type": "object"
     },
+    "GenerateInterviewPrepPayload": {
+      "additionalProperties": false,
+      "description": "Build (or rebuild) the interview prep pack for one application.",
+      "properties": {
+        "application_id": {
+          "title": "Application Id",
+          "type": "integer"
+        },
+        "force": {
+          "default": false,
+          "description": "Regenerate even when a pack is already stored.",
+          "title": "Force",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "application_id"
+      ],
+      "title": "GenerateInterviewPrepPayload",
+      "type": "object"
+    },
     "GetInsightsPayload": {
       "additionalProperties": false,
       "properties": {
@@ -1857,6 +1990,20 @@
         }
       },
       "title": "GetInsightsPayload",
+      "type": "object"
+    },
+    "GetInterviewPrepPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "application_id": {
+          "title": "Application Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "application_id"
+      ],
+      "title": "GetInterviewPrepPayload",
       "type": "object"
     },
     "GetMailAccountPayload": {
@@ -1970,6 +2117,311 @@
         "variants"
       ],
       "title": "Insights",
+      "type": "object"
+    },
+    "InterviewDebrief": {
+      "additionalProperties": false,
+      "description": "``ack.result`` of ``interview_debrief``. Appended to ``<home>/interview_prep/<application_id>.debriefs.json``.",
+      "properties": {
+        "application_id": {
+          "title": "Application Id",
+          "type": "integer"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "went_well": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Went Well",
+          "type": "array",
+          "default": []
+        },
+        "gaps": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Gaps",
+          "type": "array",
+          "default": []
+        },
+        "follow_ups": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Follow Ups",
+          "type": "array",
+          "default": []
+        },
+        "thank_you": {
+          "$ref": "#/$defs/ThankYouDraft"
+        },
+        "tokens_in": {
+          "default": 0,
+          "title": "Tokens In",
+          "type": "integer"
+        },
+        "tokens_out": {
+          "default": 0,
+          "title": "Tokens Out",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "application_id",
+        "created_at",
+        "thank_you"
+      ],
+      "title": "InterviewDebrief",
+      "type": "object"
+    },
+    "InterviewDebriefPayload": {
+      "additionalProperties": false,
+      "description": "Free-text notes written after an interview; returns a structured debrief and a thank-you draft.",
+      "properties": {
+        "application_id": {
+          "title": "Application Id",
+          "type": "integer"
+        },
+        "notes": {
+          "maxLength": 20000,
+          "minLength": 1,
+          "title": "Notes",
+          "type": "string"
+        }
+      },
+      "required": [
+        "application_id",
+        "notes"
+      ],
+      "title": "InterviewDebriefPayload",
+      "type": "object"
+    },
+    "InterviewPrepPack": {
+      "additionalProperties": false,
+      "description": "``ack.result`` of ``generate_interview_prep`` / ``get_interview_prep``.\n\nStored as JSON at ``<home>/interview_prep/<application_id>.json``. Grounded only in the job\ndescription, the company data on file and the user's profile, resume text and story bank.",
+      "properties": {
+        "application_id": {
+          "title": "Application Id",
+          "type": "integer"
+        },
+        "job_id": {
+          "title": "Job Id",
+          "type": "integer"
+        },
+        "company": {
+          "title": "Company",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoardStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Board status when the pack was generated."
+        },
+        "generated_at": {
+          "format": "date-time",
+          "title": "Generated At",
+          "type": "string"
+        },
+        "trigger": {
+          "default": "user",
+          "enum": [
+            "user",
+            "status_change"
+          ],
+          "title": "Trigger",
+          "type": "string"
+        },
+        "questions": {
+          "items": {
+            "$ref": "#/$defs/InterviewQuestion"
+          },
+          "title": "Questions",
+          "type": "array",
+          "default": []
+        },
+        "questions_to_ask": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Questions To Ask",
+          "type": "array",
+          "default": []
+        },
+        "company_brief": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CompanyBrief"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "checklist": {
+          "items": {
+            "$ref": "#/$defs/ChecklistItem"
+          },
+          "title": "Checklist",
+          "type": "array",
+          "default": []
+        },
+        "unsupported_claims": {
+          "description": "Claims the fact check removed (not shown anywhere in the pack).",
+          "items": {
+            "type": "string"
+          },
+          "title": "Unsupported Claims",
+          "type": "array",
+          "default": []
+        },
+        "rejected_story_ids": {
+          "description": "Story ids the model cited that are not in the story bank.",
+          "items": {
+            "type": "integer"
+          },
+          "title": "Rejected Story Ids",
+          "type": "array",
+          "default": []
+        },
+        "tokens_in": {
+          "default": 0,
+          "title": "Tokens In",
+          "type": "integer"
+        },
+        "tokens_out": {
+          "default": 0,
+          "title": "Tokens Out",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "application_id",
+        "job_id",
+        "company",
+        "title",
+        "generated_at"
+      ],
+      "title": "InterviewPrepPack",
+      "type": "object"
+    },
+    "InterviewQuestion": {
+      "additionalProperties": false,
+      "description": "A likely interview question. Behavioural questions carry the best-matching story (or a gap).",
+      "properties": {
+        "kind": {
+          "enum": [
+            "behavioural",
+            "technical",
+            "role"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "basis": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The job-description requirement the question comes from.",
+          "title": "Basis"
+        },
+        "story_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "stories.id of the matched story (behavioural only).",
+          "title": "Story Id"
+        },
+        "story_title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Story Title"
+        },
+        "star": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StarOutline"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "star_source": {
+          "anyOf": [
+            {
+              "enum": [
+                "model",
+                "story"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "'story' = the model's outline failed the fact check and the story's own words are shown.",
+          "title": "Star Source"
+        },
+        "story_gap": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "No story fits: what kind of story to add to the story bank. Nothing is invented.",
+          "title": "Story Gap"
+        }
+      },
+      "required": [
+        "kind",
+        "question"
+      ],
+      "title": "InterviewQuestion",
       "type": "object"
     },
     "JobDiscoveredPayload": {
@@ -5764,6 +6216,34 @@
       "title": "SourceStatusPayload",
       "type": "object"
     },
+    "StarOutline": {
+      "additionalProperties": false,
+      "description": "Talking points for one story, in STAR order. Every line comes from the story bank / profile.",
+      "properties": {
+        "situation": {
+          "default": "",
+          "title": "Situation",
+          "type": "string"
+        },
+        "task": {
+          "default": "",
+          "title": "Task",
+          "type": "string"
+        },
+        "action": {
+          "default": "",
+          "title": "Action",
+          "type": "string"
+        },
+        "result": {
+          "default": "",
+          "title": "Result",
+          "type": "string"
+        }
+      },
+      "title": "StarOutline",
+      "type": "object"
+    },
     "StatePayload": {
       "additionalProperties": false,
       "properties": {
@@ -6053,6 +6533,39 @@
         "all_required_ok"
       ],
       "title": "SystemCheckResult",
+      "type": "object"
+    },
+    "ThankYouDraft": {
+      "additionalProperties": false,
+      "description": "Never sent by the engine. It may later become an outreach draft.",
+      "properties": {
+        "subject": {
+          "title": "Subject",
+          "type": "string"
+        },
+        "body": {
+          "title": "Body",
+          "type": "string"
+        },
+        "grounded": {
+          "default": true,
+          "title": "Grounded",
+          "type": "boolean"
+        },
+        "unsupported_claims": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unsupported Claims",
+          "type": "array",
+          "default": []
+        }
+      },
+      "required": [
+        "subject",
+        "body"
+      ],
+      "title": "ThankYouDraft",
       "type": "object"
     },
     "ThreadOutcome": {
@@ -8713,6 +9226,84 @@
       ],
       "additionalProperties": false
     },
+    "CommandGenerateInterviewPrep": {
+      "type": "object",
+      "title": "Command: generate_interview_prep",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "generate_interview_prep"
+        },
+        "payload": {
+          "$ref": "#/$defs/GenerateInterviewPrepPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandGetInterviewPrep": {
+      "type": "object",
+      "title": "Command: get_interview_prep",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "get_interview_prep"
+        },
+        "payload": {
+          "$ref": "#/$defs/GetInterviewPrepPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandInterviewDebrief": {
+      "type": "object",
+      "title": "Command: interview_debrief",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "interview_debrief"
+        },
+        "payload": {
+          "$ref": "#/$defs/InterviewDebriefPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
     "EventAck": {
       "type": "object",
       "title": "Event: ack",
@@ -9573,6 +10164,15 @@
         },
         {
           "$ref": "#/$defs/CommandDismissReplySuggestion"
+        },
+        {
+          "$ref": "#/$defs/CommandGenerateInterviewPrep"
+        },
+        {
+          "$ref": "#/$defs/CommandGetInterviewPrep"
+        },
+        {
+          "$ref": "#/$defs/CommandInterviewDebrief"
         }
       ]
     },

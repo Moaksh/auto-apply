@@ -188,6 +188,9 @@ def samples() -> list[Envelope]:
     c("accept_reply_suggestion", {"reply_id": 4})
     c("dismiss_reply_suggestion", {"reply_id": 5})
     c("set_provider_key", {"provider": "hunter", "api_key": "hunter-key"})
+    c("generate_interview_prep", {"application_id": 11, "force": False})
+    c("get_interview_prep", {"application_id": 11})
+    c("interview_debrief", {"application_id": 11, "notes": "Spoke with Priya (EM). Went deep on Kafka consumer lag; I froze on a sharding question."})
 
     # ---- events
     e("ack", {"ok": True, "result": {"application_ids": [11, 12]}}, reply_to=CMD)

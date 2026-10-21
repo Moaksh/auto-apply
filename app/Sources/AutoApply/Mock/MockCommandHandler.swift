@@ -471,6 +471,9 @@ enum MockCommandHandler {
              .suppress, .unsuppress, .enableSending, .searchProspects, .addProspect, .updateProspect, .suggestReferrers,
              .addReferral, .draftReferral, .updateReferral, .setProviderKey, .acceptReplySuggestion, .dismissReplySuggestion:
             return MockOutreach.handle(command, world: world) ?? Handled(reply: ack())
+        case .generateInterviewPrep, .getInterviewPrep, .interviewDebrief:
+            // No interview prep in the mock world yet (no UI): "no pack stored".
+            return Handled(reply: ack())
         }
     }
 

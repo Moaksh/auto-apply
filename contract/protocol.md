@@ -182,6 +182,48 @@ An advisory report computed from the user's own data. It never changes a thresho
 - **`upskill`** (`UpskillHints`): skills (fixed vocabulary) named in the descriptions of jobs skipped after scoring or rejected (status `rejected` or a rejection reply) in the last 90 days, that the profile does not mention anywhere (skills, headline, summary, roles, resume text). Listed from 3 jobs, up to 10: `hints[]` `{skill, jobs, skipped, rejected, examples}`, plus `note` (advisory wording) and the optional `summary`.
 - **`variants`** (`VariantInsights`): `variants[]` `{resume_variant_id, label, applications, responses, interviews, response_rate, low_sample (< 10)}`, the dashboard's "By resume variant" shape counted with the response rule above, and a one-line `finding`.
 
+#### 5.4 Interview prep commands (`engine/autoapply/interview.py`; no schema change)
+
+Packs and debriefs are JSON files under the AutoApply home, not tables:
+`<home>/interview_prep/<application_id>.json` (the pack) and
+`<home>/interview_prep/<application_id>.debriefs.json` (a list, newest last). Both models are in
+the protocol schema `$defs` (`InterviewPrepPack`, `InterviewDebrief`).
+
+| type | payload | ack `result` | notes |
+|---|---|---|---|
+| `generate_interview_prep` | `application_id`, `force` (false) | `InterviewPrepPack` | returns the stored pack unless `force`; otherwise writes one (one model call, plus one retry when the fact check finds problems). Runs on request even while paused. `unavailable` when the model fails, `not_found` for an unknown application. Tokens are added to the application |
+| `get_interview_prep` | `application_id` | `InterviewPrepPack` \| `null` | reads the stored pack; never calls a model |
+| `interview_debrief` | `application_id`, `notes` (the user's free text, 1–20000 characters) | `InterviewDebrief` | structured debrief + a thank-you draft that is fact-checked like a cover letter and **never sent**. `invalid_payload` for blank notes |
+
+- **Pack** (`InterviewPrepPack`): `application_id`, `job_id`, `company`, `title`, `status` (board
+  status when written), `generated_at`, `trigger` (`user` \| `status_change`), `questions[]`,
+  `questions_to_ask[]`, `company_brief?`, `checklist[]`, `unsupported_claims[]`,
+  `rejected_story_ids[]`, `tokens_in`, `tokens_out`.
+  - `questions[]`: `{kind: behavioural|technical|role, question, basis?, story_id?, story_title?,
+    star?: {situation, task, action, result}, star_source?: model|story, story_gap?}`.
+    A behavioural question carries the best-matching story from the story bank with a STAR
+    outline, or `story_gap` (no story fits: what kind of story to add). Nothing is invented.
+  - `company_brief`: `{name, domain?, careers_url?, summary?, summary_url?, other_roles[]}` from
+    stored data only (companies, the prospect's stored homepage summary, other job titles seen).
+    Omitted (`null`) when nothing beyond the name is stored.
+  - `checklist[]`: `{text, url?, source: employer_reply|job|general}`. Links come from the
+    application's employer replies (`application_replies` subject + snippet; Zoom / Meet / Teams /
+    HackerRank / Codility / Calendly … are named), the Gmail link to the reply, and the job posting.
+- **Grounding**: the prompt holds only the profile facts, stories (with ids), resume text, the JD
+  and stored company data. Every question, STAR outline, and question to ask is fact-checked with
+  the cover-letter `fact_check`. A cited story id that is not in the bank is rejected
+  (`rejected_story_ids`, the question gets a `story_gap`). An outline that adds claims is replaced
+  by the story's own words (`star_source = story`). A STAR outline without a story is dropped.
+  Whatever is removed is listed in `unsupported_claims`.
+- **Automatic**: when a card moves to `interview` or `assessment` (`set_status`,
+  `accept_reply_suggestion`, `mark_applied`) and it has no pack yet, the daemon writes one in the
+  background (`trigger = status_change`). Not while paused. Off when meta `interview_prep_auto` is
+  `false` (default on).
+- **Debrief** (`InterviewDebrief`): `application_id`, `created_at`, `went_well[]`, `gaps[]`,
+  `follow_ups[]`, `thank_you: {subject, body, grounded, unsupported_claims[]}`, `tokens_in`,
+  `tokens_out`. The notes count as the user's own facts for the draft. Placeholders such as
+  `[Name]` count as unsupported. A draft with `grounded = false` should not be used as written.
+
 ## 6. Events (daemon → app)
 
 | type | payload | when |

@@ -929,11 +929,68 @@ extension CheckSourceLoginPayload {
     }
 }
 
+struct ChecklistItem: Codable, Sendable, Hashable {
+    enum Source: String, Codable, Sendable, CaseIterable, Hashable {
+        case employerReply = "employer_reply"
+        case job
+        case general
+    }
+    var text: String
+    var url: String? = nil
+    var source: Source = .general
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case text
+        case url
+        case source
+    }
+}
+
+extension ChecklistItem {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        text = try c.decode(String.self, forKey: .text)
+        url = try c.decodeIfPresent(String.self, forKey: .url)
+        source = try c.decodeIfPresent(Source.self, forKey: .source) ?? .general
+    }
+}
+
 struct ClearMailAccountPayload: Codable, Sendable, Hashable {
 }
 
 extension ClearMailAccountPayload {
     init(from decoder: any Decoder) throws {
+    }
+}
+
+/// Only data AutoApply already stores (no new web lookups). Omitted from the pack when there is nothing.
+struct CompanyBrief: Codable, Sendable, Hashable {
+    var name: String
+    var domain: String? = nil
+    var careersUrl: String? = nil
+    var summary: String? = nil
+    var summaryUrl: String? = nil
+    var otherRoles: [String] = []
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case name
+        case domain
+        case careersUrl = "careers_url"
+        case summary
+        case summaryUrl = "summary_url"
+        case otherRoles = "other_roles"
+    }
+}
+
+extension CompanyBrief {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        name = try c.decode(String.self, forKey: .name)
+        domain = try c.decodeIfPresent(String.self, forKey: .domain)
+        careersUrl = try c.decodeIfPresent(String.self, forKey: .careersUrl)
+        summary = try c.decodeIfPresent(String.self, forKey: .summary)
+        summaryUrl = try c.decodeIfPresent(String.self, forKey: .summaryUrl)
+        otherRoles = try c.decodeIfPresent([String].self, forKey: .otherRoles) ?? []
     }
 }
 
@@ -1310,6 +1367,25 @@ extension FormQuestion {
     }
 }
 
+/// Build (or rebuild) the interview prep pack for one application.
+struct GenerateInterviewPrepPayload: Codable, Sendable, Hashable {
+    var applicationId: Int
+    var force: Bool = false
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case applicationId = "application_id"
+        case force
+    }
+}
+
+extension GenerateInterviewPrepPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        applicationId = try c.decode(Int.self, forKey: .applicationId)
+        force = try c.decodeIfPresent(Bool.self, forKey: .force) ?? false
+    }
+}
+
 struct GetInsightsPayload: Codable, Sendable, Hashable {
     var force: Bool = false
     var summarize: Bool = false
@@ -1325,6 +1401,21 @@ extension GetInsightsPayload {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         force = try c.decodeIfPresent(Bool.self, forKey: .force) ?? false
         summarize = try c.decodeIfPresent(Bool.self, forKey: .summarize) ?? false
+    }
+}
+
+struct GetInterviewPrepPayload: Codable, Sendable, Hashable {
+    var applicationId: Int
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case applicationId = "application_id"
+    }
+}
+
+extension GetInterviewPrepPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        applicationId = try c.decode(Int.self, forKey: .applicationId)
     }
 }
 
@@ -1419,6 +1510,173 @@ extension Insights {
         variants = try c.decode(VariantInsights.self, forKey: .variants)
         tokensIn = try c.decodeIfPresent(Int.self, forKey: .tokensIn) ?? 0
         tokensOut = try c.decodeIfPresent(Int.self, forKey: .tokensOut) ?? 0
+    }
+}
+
+/// ``ack.result`` of ``interview_debrief``. Appended to ``<home>/interview_prep/<application_id>.debriefs.json``.
+struct InterviewDebrief: Codable, Sendable, Hashable {
+    var applicationId: Int
+    var createdAt: Date
+    var wentWell: [String] = []
+    var gaps: [String] = []
+    var followUps: [String] = []
+    var thankYou: ThankYouDraft
+    var tokensIn: Int = 0
+    var tokensOut: Int = 0
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case applicationId = "application_id"
+        case createdAt = "created_at"
+        case wentWell = "went_well"
+        case gaps
+        case followUps = "follow_ups"
+        case thankYou = "thank_you"
+        case tokensIn = "tokens_in"
+        case tokensOut = "tokens_out"
+    }
+}
+
+extension InterviewDebrief {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        applicationId = try c.decode(Int.self, forKey: .applicationId)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        wentWell = try c.decodeIfPresent([String].self, forKey: .wentWell) ?? []
+        gaps = try c.decodeIfPresent([String].self, forKey: .gaps) ?? []
+        followUps = try c.decodeIfPresent([String].self, forKey: .followUps) ?? []
+        thankYou = try c.decode(ThankYouDraft.self, forKey: .thankYou)
+        tokensIn = try c.decodeIfPresent(Int.self, forKey: .tokensIn) ?? 0
+        tokensOut = try c.decodeIfPresent(Int.self, forKey: .tokensOut) ?? 0
+    }
+}
+
+/// Free-text notes written after an interview; returns a structured debrief and a thank-you draft.
+struct InterviewDebriefPayload: Codable, Sendable, Hashable {
+    var applicationId: Int
+    var notes: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case applicationId = "application_id"
+        case notes
+    }
+}
+
+extension InterviewDebriefPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        applicationId = try c.decode(Int.self, forKey: .applicationId)
+        notes = try c.decode(String.self, forKey: .notes)
+    }
+}
+
+/// ``ack.result`` of ``generate_interview_prep`` / ``get_interview_prep``.
+///
+/// Stored as JSON at ``<home>/interview_prep/<application_id>.json``. Grounded only in the job
+/// description, the company data on file and the user's profile, resume text and story bank.
+struct InterviewPrepPack: Codable, Sendable, Hashable {
+    enum Trigger: String, Codable, Sendable, CaseIterable, Hashable {
+        case user
+        case statusChange = "status_change"
+    }
+    var applicationId: Int
+    var jobId: Int
+    var company: String
+    var title: String
+    var status: BoardStatus? = nil
+    var generatedAt: Date
+    var trigger: Trigger = .user
+    var questions: [InterviewQuestion] = []
+    var questionsToAsk: [String] = []
+    var companyBrief: CompanyBrief? = nil
+    var checklist: [ChecklistItem] = []
+    var unsupportedClaims: [String] = []
+    var rejectedStoryIds: [Int] = []
+    var tokensIn: Int = 0
+    var tokensOut: Int = 0
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case applicationId = "application_id"
+        case jobId = "job_id"
+        case company
+        case title
+        case status
+        case generatedAt = "generated_at"
+        case trigger
+        case questions
+        case questionsToAsk = "questions_to_ask"
+        case companyBrief = "company_brief"
+        case checklist
+        case unsupportedClaims = "unsupported_claims"
+        case rejectedStoryIds = "rejected_story_ids"
+        case tokensIn = "tokens_in"
+        case tokensOut = "tokens_out"
+    }
+}
+
+extension InterviewPrepPack {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        applicationId = try c.decode(Int.self, forKey: .applicationId)
+        jobId = try c.decode(Int.self, forKey: .jobId)
+        company = try c.decode(String.self, forKey: .company)
+        title = try c.decode(String.self, forKey: .title)
+        status = try c.decodeIfPresent(BoardStatus.self, forKey: .status)
+        generatedAt = try c.decode(Date.self, forKey: .generatedAt)
+        trigger = try c.decodeIfPresent(Trigger.self, forKey: .trigger) ?? .user
+        questions = try c.decodeIfPresent([InterviewQuestion].self, forKey: .questions) ?? []
+        questionsToAsk = try c.decodeIfPresent([String].self, forKey: .questionsToAsk) ?? []
+        companyBrief = try c.decodeIfPresent(CompanyBrief.self, forKey: .companyBrief)
+        checklist = try c.decodeIfPresent([ChecklistItem].self, forKey: .checklist) ?? []
+        unsupportedClaims = try c.decodeIfPresent([String].self, forKey: .unsupportedClaims) ?? []
+        rejectedStoryIds = try c.decodeIfPresent([Int].self, forKey: .rejectedStoryIds) ?? []
+        tokensIn = try c.decodeIfPresent(Int.self, forKey: .tokensIn) ?? 0
+        tokensOut = try c.decodeIfPresent(Int.self, forKey: .tokensOut) ?? 0
+    }
+}
+
+/// A likely interview question. Behavioural questions carry the best-matching story (or a gap).
+struct InterviewQuestion: Codable, Sendable, Hashable {
+    enum Kind: String, Codable, Sendable, CaseIterable, Hashable {
+        case behavioural
+        case technical
+        case role
+    }
+    enum StarSource: String, Codable, Sendable, CaseIterable, Hashable {
+        case model
+        case story
+    }
+    var kind: Kind
+    var question: String
+    var basis: String? = nil
+    var storyId: Int? = nil
+    var storyTitle: String? = nil
+    var star: StarOutline? = nil
+    var starSource: StarSource? = nil
+    var storyGap: String? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case kind
+        case question
+        case basis
+        case storyId = "story_id"
+        case storyTitle = "story_title"
+        case star
+        case starSource = "star_source"
+        case storyGap = "story_gap"
+    }
+}
+
+extension InterviewQuestion {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decode(Kind.self, forKey: .kind)
+        question = try c.decode(String.self, forKey: .question)
+        basis = try c.decodeIfPresent(String.self, forKey: .basis)
+        storyId = try c.decodeIfPresent(Int.self, forKey: .storyId)
+        storyTitle = try c.decodeIfPresent(String.self, forKey: .storyTitle)
+        star = try c.decodeIfPresent(StarOutline.self, forKey: .star)
+        starSource = try c.decodeIfPresent(StarSource.self, forKey: .starSource)
+        storyGap = try c.decodeIfPresent(String.self, forKey: .storyGap)
     }
 }
 
@@ -2994,6 +3252,31 @@ extension SourceStatusPayload {
     }
 }
 
+/// Talking points for one story, in STAR order. Every line comes from the story bank / profile.
+struct StarOutline: Codable, Sendable, Hashable {
+    var situation: String = ""
+    var task: String = ""
+    var action: String = ""
+    var result: String = ""
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case situation
+        case task
+        case action
+        case result
+    }
+}
+
+extension StarOutline {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        situation = try c.decodeIfPresent(String.self, forKey: .situation) ?? ""
+        task = try c.decodeIfPresent(String.self, forKey: .task) ?? ""
+        action = try c.decodeIfPresent(String.self, forKey: .action) ?? ""
+        result = try c.decodeIfPresent(String.self, forKey: .result) ?? ""
+    }
+}
+
 struct StatePayload: Codable, Sendable, Hashable {
     var daemon: DaemonActivity
     var paused: Bool = false
@@ -3152,6 +3435,31 @@ extension SystemCheckResult {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         items = try c.decode([SystemCheckItem].self, forKey: .items)
         allRequiredOk = try c.decode(Bool.self, forKey: .allRequiredOk)
+    }
+}
+
+/// Never sent by the engine. It may later become an outreach draft.
+struct ThankYouDraft: Codable, Sendable, Hashable {
+    var subject: String
+    var body: String
+    var grounded: Bool = true
+    var unsupportedClaims: [String] = []
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case subject
+        case body
+        case grounded
+        case unsupportedClaims = "unsupported_claims"
+    }
+}
+
+extension ThankYouDraft {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        subject = try c.decode(String.self, forKey: .subject)
+        body = try c.decode(String.self, forKey: .body)
+        grounded = try c.decodeIfPresent(Bool.self, forKey: .grounded) ?? true
+        unsupportedClaims = try c.decodeIfPresent([String].self, forKey: .unsupportedClaims) ?? []
     }
 }
 
@@ -3727,6 +4035,9 @@ enum Command: Sendable, Hashable {
     case setProviderKey(SetProviderKeyPayload)
     case acceptReplySuggestion(AcceptReplySuggestionPayload)
     case dismissReplySuggestion(DismissReplySuggestionPayload)
+    case generateInterviewPrep(GenerateInterviewPrepPayload)
+    case getInterviewPrep(GetInterviewPrepPayload)
+    case interviewDebrief(InterviewDebriefPayload)
 
     /// Wire `type` string.
     var type: String {
@@ -3807,6 +4118,9 @@ enum Command: Sendable, Hashable {
         case .setProviderKey: "set_provider_key"
         case .acceptReplySuggestion: "accept_reply_suggestion"
         case .dismissReplySuggestion: "dismiss_reply_suggestion"
+        case .generateInterviewPrep: "generate_interview_prep"
+        case .getInterviewPrep: "get_interview_prep"
+        case .interviewDebrief: "interview_debrief"
         }
     }
 
@@ -3887,6 +4201,9 @@ enum Command: Sendable, Hashable {
         "set_provider_key",
         "accept_reply_suggestion",
         "dismiss_reply_suggestion",
+        "generate_interview_prep",
+        "get_interview_prep",
+        "interview_debrief",
     ]
 }
 
@@ -4070,6 +4387,9 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case "set_provider_key": command = .setProviderKey(try c.decode(SetProviderKeyPayload.self, forKey: .payload))
         case "accept_reply_suggestion": command = .acceptReplySuggestion(try c.decode(AcceptReplySuggestionPayload.self, forKey: .payload))
         case "dismiss_reply_suggestion": command = .dismissReplySuggestion(try c.decode(DismissReplySuggestionPayload.self, forKey: .payload))
+        case "generate_interview_prep": command = .generateInterviewPrep(try c.decode(GenerateInterviewPrepPayload.self, forKey: .payload))
+        case "get_interview_prep": command = .getInterviewPrep(try c.decode(GetInterviewPrepPayload.self, forKey: .payload))
+        case "interview_debrief": command = .interviewDebrief(try c.decode(InterviewDebriefPayload.self, forKey: .payload))
         default:
             throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "unknown command type \(type)")
         }
@@ -4157,6 +4477,9 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case .setProviderKey(let p): try c.encode(p, forKey: .payload)
         case .acceptReplySuggestion(let p): try c.encode(p, forKey: .payload)
         case .dismissReplySuggestion(let p): try c.encode(p, forKey: .payload)
+        case .generateInterviewPrep(let p): try c.encode(p, forKey: .payload)
+        case .getInterviewPrep(let p): try c.encode(p, forKey: .payload)
+        case .interviewDebrief(let p): try c.encode(p, forKey: .payload)
         }
     }
 }

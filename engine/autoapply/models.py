@@ -1067,6 +1067,96 @@ class Insights(_P):
     tokens_out: int = Field(default=0, ge=0)
 
 
+class StarOutline(_P):
+    """Talking points for one story, in STAR order. Every line comes from the story bank / profile."""
+
+    situation: str = ""
+    task: str = ""
+    action: str = ""
+    result: str = ""
+
+
+class InterviewQuestion(_P):
+    """A likely interview question. Behavioural questions carry the best-matching story (or a gap)."""
+
+    kind: Literal["behavioural", "technical", "role"]
+    question: str
+    basis: str | None = Field(default=None, description="The job-description requirement the question comes from.")
+    story_id: int | None = Field(default=None, description="stories.id of the matched story (behavioural only).")
+    story_title: str | None = None
+    star: StarOutline | None = None
+    star_source: Literal["model", "story"] | None = Field(
+        default=None, description="'story' = the model's outline failed the fact check and the story's own words are shown.",
+    )
+    story_gap: str | None = Field(
+        default=None, description="No story fits: what kind of story to add to the story bank. Nothing is invented.",
+    )
+
+
+class CompanyBrief(_P):
+    """Only data AutoApply already stores (no new web lookups). Omitted from the pack when there is nothing."""
+
+    name: str
+    domain: str | None = None
+    careers_url: str | None = None
+    summary: str | None = Field(default=None, description="Stored homepage description (prospects.summary).")
+    summary_url: str | None = None
+    other_roles: list[str] = Field(default_factory=list, description="Other job titles seen at this company.")
+
+
+class ChecklistItem(_P):
+    text: str
+    url: str | None = None
+    source: Literal["employer_reply", "job", "general"] = "general"
+
+
+class InterviewPrepPack(_P):
+    """``ack.result`` of ``generate_interview_prep`` / ``get_interview_prep``.
+
+    Stored as JSON at ``<home>/interview_prep/<application_id>.json``. Grounded only in the job
+    description, the company data on file and the user's profile, resume text and story bank."""
+
+    application_id: int
+    job_id: int
+    company: str
+    title: str
+    status: BoardStatus | None = Field(default=None, description="Board status when the pack was generated.")
+    generated_at: Timestamp
+    trigger: Literal["user", "status_change"] = "user"
+    questions: list[InterviewQuestion] = Field(default_factory=list)
+    questions_to_ask: list[str] = Field(default_factory=list)
+    company_brief: CompanyBrief | None = None
+    checklist: list[ChecklistItem] = Field(default_factory=list)
+    unsupported_claims: list[str] = Field(
+        default_factory=list, description="Claims the fact check removed (not shown anywhere in the pack).",
+    )
+    rejected_story_ids: list[int] = Field(default_factory=list, description="Story ids the model cited that are not in the story bank.")
+    tokens_in: int = 0
+    tokens_out: int = 0
+
+
+class ThankYouDraft(_P):
+    """Never sent by the engine. It may later become an outreach draft."""
+
+    subject: str
+    body: str
+    grounded: bool = True
+    unsupported_claims: list[str] = Field(default_factory=list)
+
+
+class InterviewDebrief(_P):
+    """``ack.result`` of ``interview_debrief``. Appended to ``<home>/interview_prep/<application_id>.debriefs.json``."""
+
+    application_id: int
+    created_at: Timestamp
+    went_well: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+    follow_ups: list[str] = Field(default_factory=list)
+    thank_you: ThankYouDraft
+    tokens_in: int = 0
+    tokens_out: int = 0
+
+
 class PerJobAnswer(_P):
     job_id: int
     answer: str
@@ -1496,6 +1586,24 @@ class SetProviderKeyPayload(_P):
     api_key: str | None = Field(default=None, description="null removes the key. Stored in the macOS Keychain only.")
 
 
+class GenerateInterviewPrepPayload(_P):
+    """Build (or rebuild) the interview prep pack for one application."""
+
+    application_id: int
+    force: bool = Field(default=False, description="Regenerate even when a pack is already stored.")
+
+
+class GetInterviewPrepPayload(_P):
+    application_id: int
+
+
+class InterviewDebriefPayload(_P):
+    """Free-text notes written after an interview; returns a structured debrief and a thank-you draft."""
+
+    application_id: int
+    notes: str = Field(min_length=1, max_length=20000)
+
+
 COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "hello": HelloPayload,
     "ping": PingPayload,
@@ -1573,6 +1681,9 @@ COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "set_provider_key": SetProviderKeyPayload,
     "accept_reply_suggestion": AcceptReplySuggestionPayload,
     "dismiss_reply_suggestion": DismissReplySuggestionPayload,
+    "generate_interview_prep": GenerateInterviewPrepPayload,
+    "get_interview_prep": GetInterviewPrepPayload,
+    "interview_debrief": InterviewDebriefPayload,
 }
 
 
@@ -1949,6 +2060,8 @@ _EXTRA_DEFS: tuple[type[BaseModel], ...] = (
     NeverGuess,
     Profile,
     FormQuestion,
+    InterviewPrepPack,
+    InterviewDebrief,
 )
 
 

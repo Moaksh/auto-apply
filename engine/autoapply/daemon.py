@@ -57,6 +57,7 @@ from autoapply.enums import (
     Actor,
     AnswerOrigin,
     AppState,
+    BoardStatus,
     CapKind,
     DaemonActivity,
     ErrorCode,
@@ -545,6 +546,8 @@ class Daemon:
         self._outreach_options = outreach_options or {}
         self.outreach: OutreachService | None = None
         self.replywatch: Any = None  # mail.replywatch.ReplyWatcher
+        #: application ids with an automatic interview prep pack being written (no duplicates)
+        self._interview_prep_pending: set[int] = set()
 
         self.clients: set[Client] = set()
         self.lock = InstanceLock(paths.home / LOCK_FILENAME)
@@ -1167,6 +1170,7 @@ class Daemon:
     async def _cmd_set_status(self, p: Any) -> None:
         payload = db.set_status(self.conn, p.application_id, p.status, actor=Actor.USER)
         await self.emit("application_status", payload)
+        self._maybe_queue_interview_prep(p.application_id, payload.status)
 
     async def _cmd_update_preferences(self, p: Any) -> dict[str, Any]:
         patch = p.preferences.model_dump(exclude_unset=True, mode="json")
@@ -1289,6 +1293,7 @@ class Daemon:
             reason="user_applied", actor=Actor.USER, at=app.state_updated_at,
         ))
         self._submitted(app.id)
+        self._maybe_queue_interview_prep(app.id, app.status)
         return {"application_id": app.id, "status": app.status.value if app.status else "applied"}
 
     async def _cmd_add_job_url(self, p: Any) -> dict[str, Any]:
@@ -1688,11 +1693,80 @@ class Daemon:
         reply, status = db.decide_reply_suggestion(self.conn, p.reply_id, accept=True)
         if status is not None:
             await self.emit("application_status", status)
+            self._maybe_queue_interview_prep(reply.application_id, status.status)
         return {"reply_id": reply.id, "application_id": reply.application_id,
                 "status": reply.suggested_status.value if reply.suggested_status else None}
 
     async def _cmd_dismiss_reply_suggestion(self, p: Any) -> None:
         db.decide_reply_suggestion(self.conn, p.reply_id, accept=False)
+
+    # ---- interview prep (autoapply/interview.py) -------------------------------------------
+
+    async def _cmd_generate_interview_prep(self, p: Any) -> dict[str, Any]:
+        """Return the stored pack, or write one (``force`` rewrites it). Runs on request even while
+        paused: pause stops the agent's own work, not something the user asked for."""
+        from autoapply import interview
+
+        if not p.force:
+            existing = interview.load_pack(self.paths, p.application_id)
+            if existing is not None:
+                db.get_application(self.conn, p.application_id)  # not_found for a deleted application
+                return existing.model_dump(mode="json")
+        try:
+            pack = await interview.generate_pack(self.llm, self.conn, self.paths, p.application_id, trigger="user")
+        except interview.InterviewPrepError as e:
+            raise CommandError(ErrorCode.UNAVAILABLE, str(e), application_id=p.application_id) from e
+        return pack.model_dump(mode="json")
+
+    async def _cmd_get_interview_prep(self, p: Any) -> dict[str, Any] | None:
+        from autoapply import interview
+
+        db.get_application(self.conn, p.application_id)
+        pack = interview.load_pack(self.paths, p.application_id)
+        return pack.model_dump(mode="json") if pack is not None else None
+
+    async def _cmd_interview_debrief(self, p: Any) -> dict[str, Any]:
+        """Structured debrief + a fact-checked thank-you draft. Nothing is sent."""
+        from autoapply import interview
+
+        try:
+            result = await interview.debrief(self.llm, self.conn, self.paths, p.application_id, p.notes)
+        except interview.InterviewPrepError as e:
+            raise CommandError(ErrorCode.UNAVAILABLE, str(e), application_id=p.application_id) from e
+        return result.model_dump(mode="json")
+
+    def _maybe_queue_interview_prep(self, application_id: int, status: Any) -> None:
+        """A card reached Interview / Assessment: write its prep pack in the background, once
+        (gated by ``interview.AUTO_ENABLED`` and the ``interview_prep_auto`` meta flag; not while paused)."""
+        from autoapply import interview
+
+        try:
+            if status is None or BoardStatus(status) not in interview.AUTO_STATUSES:
+                return
+            if self.paused or not interview.auto_enabled(self.conn) or application_id in self._interview_prep_pending:
+                return
+            if interview.load_pack(self.paths, application_id) is not None:
+                return
+        except Exception:  # noqa: BLE001 - a hook must never break the command that called it
+            log.warning("interview prep: could not check application %s", application_id, exc_info=True)
+            return
+        self._interview_prep_pending.add(application_id)
+        self._spawn(self._auto_interview_prep(application_id), name=f"interview-prep-{application_id}")
+
+    async def _auto_interview_prep(self, application_id: int) -> None:
+        from autoapply import interview
+
+        try:
+            if self.paused or interview.load_pack(self.paths, application_id) is not None:
+                return
+            await interview.generate_pack(self.llm, self.conn, self.paths, application_id, trigger="status_change")
+        except Exception as e:  # noqa: BLE001 - background work: log, never crash the daemon
+            log.warning("interview prep for application %s failed: %s", application_id, e)
+            with contextlib.suppress(Exception):
+                db.log_event(self.conn, "interview_prep", f"could not write the interview prep pack: {e}",
+                             level=LogLevel.WARNING, application_id=application_id)
+        finally:
+            self._interview_prep_pending.discard(application_id)
 
     async def log_line(self, level: LogLevel, message: str) -> None:
         await self.emit("log", LogPayload(level=level, message=message, logger=log.name, at=utcnow()))

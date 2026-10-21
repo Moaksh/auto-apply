@@ -8,6 +8,7 @@ Everything lives under one "home" directory:
         resumes/            user-approved resume PDFs (never modified)
         screenshots/        full-page screenshots per application
         cover_letters/      generated cover letters
+        interview_prep/     interview prep packs and debriefs (JSON, one file per application)
         chrome-profile/     dedicated persistent Chrome profile for Playwright
         logs/               daemon logs
 
@@ -71,6 +72,11 @@ class Paths:
     @property
     def cover_letters(self) -> Path:
         return self.home / "cover_letters"
+
+    @property
+    def interview_prep(self) -> Path:
+        """Interview prep packs (``<id>.json``) and debriefs (``<id>.debriefs.json``); created on first write."""
+        return self.home / "interview_prep"
 
     @property
     def chrome_profile(self) -> Path:
