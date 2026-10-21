@@ -152,7 +152,7 @@ struct RevealCard: View {
         }
         .padding(Space.l)
         .frame(width: 372)
-        .glassPanel(tint: tint.opacity(0.10))
+        .glassChrome(in: RoundedRectangle(cornerRadius: Radius.palette, style: .continuous))
         .errorShake(trigger: shake)
         .onAppear {
             guard moment.flavor == .sudo else { return }

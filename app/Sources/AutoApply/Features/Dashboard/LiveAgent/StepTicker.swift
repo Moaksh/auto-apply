@@ -15,7 +15,7 @@ struct StepTicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
-            Text("Step ticker").eyebrowStyle()
+            Text("Steps").eyebrowStyle()
             VStack(alignment: .leading, spacing: 2) {
                 if steps.isEmpty {
                     ForEach(Array(fallbackLines.suffix(Self.visibleLines).enumerated()), id: \.offset) { _, line in
@@ -55,7 +55,7 @@ struct StepTicker: View {
             }
             Text(text(step)).foregroundStyle(isCurrent ? Palette.textPrimary : Palette.textSecondary).lineLimit(1)
             if step.isLowConfidence {
-                Text("low confidence → asking you").foregroundStyle(Palette.needsYou).lineLimit(1)
+                Text("not sure → asking you").foregroundStyle(Palette.needsYou).lineLimit(1)
             }
             if isCurrent { ThinkingDots(isActive: true, color: Palette.accent) }
         }

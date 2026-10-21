@@ -36,14 +36,14 @@ struct ActivityInspector: View {
                                 Image(systemName: "arrow.up.forward")
                             }
                         }
-                        .buttonStyle(.link)
+                        .buttonStyle(.secondaryLink)
                     }
                     VStack(alignment: .leading, spacing: Space.xs) {
                         Text("Payload").eyebrowStyle()
                         JSONText(json: ActivityRules.prettyJSON(e.payload))
                             .padding(Space.m)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .sunkenWell()
+                            .well()
                     }
                     if ActivityRules.isError(e) {
                         Button {
@@ -54,7 +54,7 @@ struct ActivityInspector: View {
                             Label(copied ? "Copied" : "Copy diagnostic", systemImage: copied ? "checkmark" : "doc.on.clipboard")
                                 .contentTransition(.symbolEffect(.replace))
                         }
-                        .buttonStyle(.glass)
+                        .buttonStyle(.secondaryLink)
                     }
                 }
                 .padding(Space.l)

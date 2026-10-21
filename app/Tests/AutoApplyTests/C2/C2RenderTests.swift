@@ -72,7 +72,7 @@ struct C2RenderTests {
         #expect(store.stats.totalApplied > 0, "fixture has submissions")
         let image = render("widgets", width: 900, height: 1400, store: store) {
             VStack(spacing: Space.gutter) {
-                HStack(alignment: .top, spacing: Space.gutter) { AppliedTodayCard(countUp: false); NeedsYouCard(); ResponseRateCard(); CapsCard() }
+                HStack(alignment: .top, spacing: Space.gutter) { AppliedTodayCard(); NeedsYouCard(); ResponseRateCard(); CapsCard() }
                 ApplicationsChart()
                 HStack(alignment: .top, spacing: Space.gutter) { FunnelChart(); VariantChart() }
                 HStack(alignment: .top, spacing: Space.gutter) { ScoreHistogram(); SourcesChart() }

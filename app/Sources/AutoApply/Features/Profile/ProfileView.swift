@@ -1,6 +1,6 @@
 // ProfileView.swift — Profile as a form-style document (docs/UI_UX_PLAN.md §5.8): Identity,
-// Contact, Links, Experience, Education, Skills, Never-guess facts (locked styling), and Memory
-// (answers saved from the inbox, with inline edit / delete).
+// Contact, Links, Experience, Education, Skills, Facts only you set (locked styling), and Saved
+// answers (from Needs You, with inline edit / delete).
 import SwiftUI
 
 @objc(ProfileFeature)
@@ -28,13 +28,13 @@ struct ProfileView: View {
                         Text("Last updated \(C3Format.relative(updated))").font(Typography.callout).foregroundStyle(Palette.textSecondary)
                     }
                     if model.isEditing {
-                        Button("Cancel") { model.cancelEditing() }.buttonStyle(.glass)
+                        Button("Cancel") { model.cancelEditing() }.buttonStyle(.secondaryLink)
                         Button("Save") { Task { await model.save() } }
-                            .buttonStyle(.glassProminent)
+                            .buttonStyle(.primaryPill)
                             .keyboardShortcut("s", modifiers: .command)
                             .disabled(model.isSaving)
                     } else {
-                        Button { model.beginEditing() } label: { Label("Edit", systemImage: "pencil") }.buttonStyle(.glass)
+                        Button { model.beginEditing() } label: { Label("Edit", systemImage: "pencil") }.buttonStyle(.secondaryLink)
                     }
                 }
                 if model.isEditing {
@@ -192,7 +192,7 @@ private struct ProfileEditor: View {
                     }
                     Text("Summary").font(Typography.body).padding(.top, Space.xs)
                     TextEditor(text: Binding(get: { model.draft?.summary ?? "" }, set: { model.draft?.summary = $0 }))
-                        .font(Typography.body).scrollContentBackground(.hidden).frame(minHeight: 70).padding(Space.xs).sunkenWell()
+                        .font(Typography.body).scrollContentBackground(.hidden).frame(minHeight: 70).padding(Space.xs).well()
                 }
                 DocumentSection("Contact") {
                     Grid(alignment: .leading, horizontalSpacing: Space.m, verticalSpacing: Space.s) {
@@ -287,22 +287,22 @@ private struct WorkHistoryEditor: View {
             }
             TextEditor(text: Binding(get: { item.highlights.joined(separator: "\n") },
                                      set: { item.highlights = $0.components(separatedBy: "\n") }))
-                .font(Typography.callout).scrollContentBackground(.hidden).frame(minHeight: 44).padding(Space.xs).sunkenWell()
-            Text("One highlight per line. Facts only: the agent quotes these.").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
+                .font(Typography.callout).scrollContentBackground(.hidden).frame(minHeight: 44).padding(Space.xs).well()
+            Text("One highlight per line. Facts only: the agent draws on these.").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
         }
         .padding(.vertical, Space.xs)
     }
 }
 
-// MARK: - Never-guess (locked)
+// MARK: - Facts only you set (locked)
 
 private struct NeverGuessSummary: View {
     @Environment(AppStore.self) private var store
 
     var body: some View {
         let ng = store.library.neverGuess
-        DocumentSection("Never-guess facts", trailing: {
-            Label("only you", systemImage: "lock.fill").font(Typography.callout).foregroundStyle(Palette.textSecondary).fixedSize()
+        DocumentSection("Facts only you set", trailing: {
+            Label("the agent never guesses these", systemImage: "lock.fill").font(Typography.callout).foregroundStyle(Palette.textSecondary).fixedSize()
         }) {
             VStack(spacing: Space.xs) {
                 LockedField(title: "Sponsorship", isEmpty: ng.sponsorship == nil) { Text(ng.sponsorship ?? "") }
@@ -317,7 +317,7 @@ private struct NeverGuessSummary: View {
                 }
             }
             Button("Edit in Settings ▸ Guardrails") { SettingsNavigation.shared.open(.guardrails, router: store.router) }
-                .buttonStyle(.link)
+                .buttonStyle(.secondaryLink)
         }
     }
 
@@ -338,7 +338,7 @@ private struct MemorySection: View {
 
     var body: some View {
         let items = model.memory
-        DocumentSection("Memory · \(model.store.library.memoryAnswers.count) answers", trailing: {
+        DocumentSection("Saved answers · \(model.store.library.memoryAnswers.count)", trailing: {
             TextField("Filter", text: $model.memoryFilter).textFieldStyle(.roundedBorder).frame(width: 160)
         }) {
             if items.isEmpty {
@@ -365,9 +365,9 @@ private struct MemoryRow: View {
             if model.editingMemoryID == item.id {
                 VStack(alignment: .leading, spacing: Space.xs) {
                     TextEditor(text: $model.memoryDraft)
-                        .font(Typography.body).scrollContentBackground(.hidden).frame(minHeight: 56).padding(Space.xs).sunkenWell()
+                        .font(Typography.body).scrollContentBackground(.hidden).frame(minHeight: 56).padding(Space.xs).well()
                     HStack {
-                        Button("Save") { Task { await model.saveMemory(item) } }.buttonStyle(.borderedProminent).controlSize(.small)
+                        Button("Save") { Task { await model.saveMemory(item) } }.buttonStyle(.bordered).controlSize(.small)
                         Button("Cancel") { model.editingMemoryID = nil }.buttonStyle(.bordered).controlSize(.small)
                     }
                 }
@@ -380,7 +380,7 @@ private struct MemoryRow: View {
                 Spacer()
                 if model.confirmingDeleteMemoryID == item.id {
                     Text("Delete?").font(Typography.callout)
-                    Button("Delete") { Task { await model.deleteMemory(item) } }.buttonStyle(.borderedProminent).tint(Palette.error).controlSize(.small)
+                    Button("Delete", role: .destructive) { Task { await model.deleteMemory(item) } }.buttonStyle(.bordered).controlSize(.small)
                     Button("Keep") { model.confirmingDeleteMemoryID = nil }.buttonStyle(.bordered).controlSize(.small)
                 } else {
                     Button { model.beginEditingMemory(item) } label: { Image(systemName: "pencil") }

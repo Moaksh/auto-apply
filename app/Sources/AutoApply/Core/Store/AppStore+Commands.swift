@@ -184,7 +184,7 @@ extension AppStore {
         case .success:
             return true
         case .failure(.timeout):
-            toasts.show("Approval sent; waiting for the daemon to confirm", symbol: "clock", style: .info)
+            toasts.show("Approval sent; waiting for the agent to confirm", symbol: "clock", style: .info)
             return false
         case .failure(let error):
             jobs.performBatch { for (id, state) in previous { jobs.mutate(applicationID: id) { $0.state = state } } }

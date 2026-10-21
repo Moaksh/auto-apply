@@ -1,7 +1,6 @@
-// CommandPaletteView.swift — the ⌘K palette content (docs/UI_UX_PLAN.md §3.3). The shell's
-// CommandPaletteHost supplies the floating glass panel (640 wide, upper third, scale-in); this
-// view renders the search field, sectioned results, and a single matched-geometry selection
-// capsule that slides between rows. ↑↓ move, ↵ opens, ⌘↵ opens the posting, ⌥↵ shows the job
+// CommandPaletteView.swift — the ⌘K palette content. The shell's CommandPaletteHost supplies
+// the floating glass panel (640 wide, upper third); this view renders the search field,
+// sectioned results and the shared selected-row look. ↑↓ move, ↵ opens, ⌘↵ opens the posting, ⌥↵ shows the job
 // in Pipeline, esc closes.
 import SwiftUI
 
@@ -18,7 +17,6 @@ struct CommandPaletteView: View {
     @Environment(\.motionReduced) private var reduced
     @State private var model: PaletteModel?
     @FocusState private var focused: Bool
-    @Namespace private var selectionNS
 
     var body: some View {
         Group {
@@ -48,9 +46,7 @@ struct CommandPaletteView: View {
                     .focused($focused)
                     .onSubmit { Task { await model.run() } }
                 if model.scope != .all {
-                    Text(scopeLabel(model.scope)).font(Typography.monoSmall).foregroundStyle(Palette.accent)
-                        .padding(.horizontal, 6).padding(.vertical, 2)
-                        .background(Palette.accent.opacity(0.12), in: Capsule())
+                    Badge(scopeLabel(model.scope), tone: .accent)
                 }
                 KeyCap("esc")
             }
@@ -62,7 +58,7 @@ struct CommandPaletteView: View {
                         if results.isEmpty {
                             VStack(alignment: .leading, spacing: Space.xs) {
                                 Text("No matches").font(Typography.body).foregroundStyle(Palette.textSecondary)
-                                Text("Try > for actions, @ for companies, ? for inbox questions, / for settings.")
+                                Text("Try > for actions, @ for companies, ? for Needs You, / for settings.")
                                     .font(Typography.callout).foregroundStyle(Palette.textTertiary)
                             }
                             .padding(Space.l)
@@ -74,7 +70,7 @@ struct CommandPaletteView: View {
                                     .padding(.top, index == 0 ? Space.xs : Space.m)
                                     .padding(.bottom, Space.xxs)
                             }
-                            PaletteRow(item: item, isSelected: index == model.selection, selectionNS: selectionNS)
+                            PaletteRow(item: item, isSelected: index == model.selection)
                                 .id(item.id)
                                 .onTapGesture {
                                     model.selection = index
@@ -84,7 +80,6 @@ struct CommandPaletteView: View {
                         }
                     }
                     .padding(Space.s)
-                    .animation(Motion.resolve(Motion.snappy, reduceMotion: reduced), value: model.selection)
                 }
                 .frame(maxHeight: 400)
                 .fixedSize(horizontal: false, vertical: true)
@@ -117,12 +112,11 @@ struct CommandPaletteView: View {
             Spacer()
             hint(">", "actions")
             hint("@", "companies")
-            hint("?", "inbox")
+            hint("?", "Needs You")
             hint("/", "settings")
         }
         .padding(.horizontal, Space.l)
         .padding(.vertical, Space.s)
-        .background(Palette.textPrimary.opacity(0.03))
     }
 
     private func hint(_ key: String, _ text: String) -> some View {
@@ -135,10 +129,10 @@ struct CommandPaletteView: View {
     private func scopeLabel(_ scope: PaletteScope) -> String {
         switch scope {
         case .all: ""
-        case .actions: "ACTIONS"
-        case .companies: "COMPANIES"
-        case .questions: "INBOX"
-        case .settings: "SETTINGS"
+        case .actions: "Actions"
+        case .companies: "Companies"
+        case .questions: "Needs You"
+        case .settings: "Settings"
         }
     }
 }
@@ -146,7 +140,6 @@ struct CommandPaletteView: View {
 private struct PaletteRow: View {
     var item: PaletteItem
     var isSelected: Bool
-    var selectionNS: Namespace.ID
 
     var body: some View {
         HStack(spacing: Space.s) {
@@ -169,16 +162,7 @@ private struct PaletteRow: View {
             if let shortcut = item.shortcut { KeyCap(shortcut) }
             if isSelected { Text("↵").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary) }
         }
-        .padding(.horizontal, Space.m)
-        .padding(.vertical, 6)
-        .background {
-            if isSelected {
-                Capsule(style: .continuous)
-                    .fill(Palette.accent.opacity(0.16))
-                    .matchedGeometryEffect(id: "palette.selection", in: selectionNS)
-            }
-        }
-        .contentShape(Rectangle())
+        .selectableRow(isSelected: isSelected, verticalPadding: Space.xs + 2)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
     }

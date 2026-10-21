@@ -1,8 +1,9 @@
-// ReviewView.swift — the Review queue (docs/UI_UX_PLAN.md §5.6): list (flagged first) on the
-// left, screenshot + every Q&A side by side on the right with hover-linked field highlights,
-// inline ✎ edits, and the floating morphing glass BulkActionBar with the inline safeguard and
-// skip-reason picker. Keys: ↑↓/J K focus, X select, ⌘A select all, A approve, S skip, Space
-// Quick Look.
+// ReviewView.swift — Review: approve applications before they're sent. List (flagged first) on
+// the left, screenshot + every answer side by side on the right with hover-linked field
+// highlights and inline ✎ edits. One primary action: Approve & submit (this job, or the floating
+// glass bulk bar when several are ticked; never both at once). The low-confidence safeguard and
+// skip reasons ask inline. Keys: ↑↓/J K focus, X select, ⌘A select all, A approve, S skip,
+// Space Quick Look.
 import QuickLook
 import SwiftUI
 
@@ -27,12 +28,16 @@ struct ReviewQueueView: View {
         VStack(spacing: 0) {
             header(model, count: queue.count)
             Divider()
-            if queue.isEmpty && model.departing.isEmpty {
+            if !store.hasSnapshot && store.isDaemonUnreachable {
+                ErrorState(title: "Can't reach the agent", message: "Applications to review show here once the agent is running.")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if !store.hasSnapshot || !store.jobs.isLoaded {
+                LoadingState(message: "Loading applications…")
+            } else if queue.isEmpty && model.departing.isEmpty {
                 EmptyState(symbol: "checkmark.rectangle.stack", title: "Nothing to review",
                            message: store.mode == .review
-                               ? "Filled applications wait here for your OK before they're submitted."
-                               : "You're in Auto mode. Jobs only land here for ATSes or jobs set to Review.",
-                           prominent: true)
+                               ? "Filled applications wait here for your OK before they're sent."
+                               : "You're in Auto mode. Applications wait here only for sites, companies or jobs you set to Review.")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 HStack(spacing: 0) {
@@ -60,17 +65,7 @@ struct ReviewQueueView: View {
     // MARK: Header
 
     private func header(_ model: ReviewModel, count: Int) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: Space.m) {
-            Text("Review").font(Typography.title1)
-            HStack(spacing: Space.xs) {
-                Text("\(count)").numericRoll(Double(count))
-                Text("ready ·")
-                Text(model.modeSummary)
-            }
-            .font(Typography.body)
-            .foregroundStyle(Palette.textSecondary)
-            .lineLimit(1)
-            Spacer()
+        ScreenHeader("Review", summary: "\(count) ready · \(model.modeSummary)") {
             if count > 1 {
                 Text(model.selection.isEmpty ? "Tick jobs to approve several at once" : "\(model.selection.count) of \(count) selected")
                     .font(Typography.callout)
@@ -90,8 +85,6 @@ struct ReviewQueueView: View {
                 .buttonStyle(.borderless)
             }
         }
-        .padding(.horizontal, Space.contentPadding)
-        .padding(.vertical, Space.l)
     }
 
     // MARK: List
@@ -119,12 +112,11 @@ struct ReviewQueueView: View {
                     }
                 }
                 .padding(Space.s)
-                .padding(.bottom, 80)
+                .padding(.bottom, Space.xxxl * 2)
                 .animation(Motion.resolve(Motion.settle, reduceMotion: reduced), value: queue.map(\.id))
             }
             .focusable()
             .focused($listFocused)
-            .focusEffectDisabled()
             .onKeyPress(.downArrow) { model.moveFocus(by: 1); return .handled }
             .onKeyPress(.upArrow) { model.moveFocus(by: -1); return .handled }
             .onKeyPress("j") { model.moveFocus(by: 1); return .handled }
@@ -144,7 +136,6 @@ struct ReviewQueueView: View {
             }
             .onAppear { listFocused = true }
         }
-        .background(Palette.surface.opacity(0.4))
     }
 
     // MARK: Floating bar
@@ -196,41 +187,31 @@ struct ReviewQueueView: View {
             let clean = targets.filter { id in !(store.jobs.job(id: id).map(model.needsLook) ?? false) }.count
             let flagged = targets.count - clean
             let loading = model.anyLoading(targets)
-            HStack(spacing: Space.s) {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.needsYou)
-                Text(loading
-                     ? "Some answers are still loading. Include the \(flagged) unchecked?"
-                     : (flagged == 1 ? "Include the flagged one?" : "Include the \(flagged) flagged ones?"))
-                    .font(Typography.bodyEmph)
-                Button("Yes") { Task { await model.confirmApprove(includeFlagged: true) } }.buttonStyle(.glassProminent)
-                Button("Only the \(clean) clean one\(clean == 1 ? "" : "s")") { Task { await model.confirmApprove(includeFlagged: false) } }
-                    .buttonStyle(.glass)
-                Button("Cancel") { model.cancelBar() }.buttonStyle(.glass)
+            GlassBarPrompt(symbol: "exclamationmark.triangle.fill",
+                           message: loading
+                               ? "Some answers are still loading. Include the \(flagged) unchecked?"
+                               : (flagged == 1 ? "Include the one that needs a look?" : "Include the \(flagged) that need a look?")) {
+                Button("Cancel") { model.cancelBar() }.buttonStyle(.secondaryLink)
+                Button("Only the \(clean) without issues") { Task { await model.confirmApprove(includeFlagged: false) } }
+                    .buttonStyle(.secondaryLink)
+                Button("Include them") { Task { await model.confirmApprove(includeFlagged: true) } }.buttonStyle(.primaryPill)
             }
-            .padding(.horizontal, Space.m).padding(.vertical, Space.s)
-            .glassEffect(.regular, in: Capsule())
         case .confirmAllFlagged(let targets):
-            HStack(spacing: Space.s) {
-                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.needsYou)
-                Text(model.anyLoading(targets)
-                     ? "Answers are still loading, so confidence isn't checked yet. Approve anyway?"
-                     : (targets.count == 1 ? "This one has low-confidence answers. Approve anyway?" : "All \(targets.count) have low-confidence answers. Approve anyway?"))
-                    .font(Typography.bodyEmph)
-                Button("Approve anyway") { Task { await model.confirmApprove(includeFlagged: true) } }.buttonStyle(.glassProminent)
-                Button("Cancel") { model.cancelBar() }.buttonStyle(.glass)
+            GlassBarPrompt(symbol: "exclamationmark.triangle.fill",
+                           message: model.anyLoading(targets)
+                               ? "Answers are still loading, so they haven't been checked yet. Approve anyway?"
+                               : (targets.count == 1 ? "The agent wasn't sure about some answers. Approve anyway?"
+                                  : "The agent wasn't sure about some answers in all \(targets.count). Approve anyway?")) {
+                Button("Cancel") { model.cancelBar() }.buttonStyle(.secondaryLink)
+                Button("Approve anyway") { Task { await model.confirmApprove(includeFlagged: true) } }.buttonStyle(.primaryPill)
             }
-            .padding(.horizontal, Space.m).padding(.vertical, Space.s)
-            .glassEffect(.regular, in: Capsule())
         case .skipReason:
-            HStack(spacing: Space.s) {
-                Text("Skip because…").font(Typography.bodyEmph)
+            GlassBarPrompt(symbol: nil, message: "Skip because…") {
                 ForEach(ReviewSkipReason.allCases) { reason in
-                    Button(reason.title) { Task { await model.skip(reason: reason) } }.buttonStyle(.glass)
+                    Button(reason.title) { Task { await model.skip(reason: reason) } }.buttonStyle(.secondaryLink)
                 }
-                Button("Cancel") { model.cancelBar() }.buttonStyle(.glass)
+                Button("Cancel") { model.cancelBar() }.buttonStyle(.secondaryLink)
             }
-            .padding(.horizontal, Space.m).padding(.vertical, Space.s)
-            .glassEffect(.regular, in: Capsule())
         }
     }
 }
@@ -274,14 +255,10 @@ private struct ReviewRow: View {
                         .help("\(model.flaggedAnswers(for: job).count) answer(s) need a look")
                         .accessibilityLabel("Needs a look")
                 }
-                if let score = job.score { ScorePill(score: score, threshold: store.preferences.matchThreshold) }
+                if let score = job.score { Badge(score: score, threshold: store.preferences.matchThreshold) }
             }
         }
-        .padding(.horizontal, Space.m)
-        .padding(.vertical, Space.s)
-        .background(isFocused ? Palette.accent.opacity(0.14) : Color.clear,
-                    in: RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
-        .contentShape(Rectangle())
+        .selectableRow(isSelected: isFocused)
         .offset(x: departIndex != nil && !reduced ? 24 : 0)
         .opacity(departIndex != nil ? 0.6 : 1)
         .animation(Motion.resolve(Motion.snappy, reduceMotion: reduced), value: departIndex)
@@ -306,13 +283,13 @@ private struct ReviewDetail: View {
                     Text(job.title).font(Typography.body).foregroundStyle(Palette.textSecondary)
                 }
                 Spacer()
-                if let score = job.score { ScorePill(score: score, threshold: store.preferences.matchThreshold) }
+                if let score = job.score { Badge(score: score, threshold: store.preferences.matchThreshold) }
                 Menu {
-                    Button("Inherit (\(store.effectiveMode(for: withoutOverride(job)).rawValue.capitalized))") { Task { await model.setMode(nil, for: job) } }
+                    Button("Use app setting (\(store.effectiveMode(for: withoutOverride(job)).rawValue.capitalized))") { Task { await model.setMode(nil, for: job) } }
                     Button("Always Auto for this job") { Task { await model.setMode(.auto, for: job) } }
                     Button("Always Review for this job") { Task { await model.setMode(.review, for: job) } }
                 } label: {
-                    Text(job.modeOverride.map { "Job: \($0.rawValue.capitalized)" } ?? "Mode: inherit")
+                    Text(job.modeOverride.map { "This job: \($0.rawValue.capitalized)" } ?? "Mode: app setting")
                 }
                 .menuStyle(.borderlessButton)
                 .fixedSize()
@@ -331,16 +308,18 @@ private struct ReviewDetail: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
-    /// This job's own Approve / Skip: always visible, independent of the multi-selection (the
-    /// floating bar handles batches).
+    /// This job's own Approve / Skip. Approve is the screen's primary pill only while the
+    /// floating bar is away (no ticked jobs, no question open); otherwise it steps down to a plain
+    /// button so one prominent action shows at a time.
     private var actions: some View {
         let busy = model.departing[job.id] != nil || model.isApproving
         let flagged = model.needsLook(job)
         // The A / S keys act on the selection when there is one, so only hint them when they mean this job.
         let keysMeanThisJob = model.selection.isEmpty
+        let isPrimary = keysMeanThisJob && model.barMode == .actions
         return HStack(spacing: Space.s) {
             if flagged {
-                Label(model.answersLoaded(job) ? "Some answers need a look before you submit" : "Answers are still loading",
+                Label(model.answersLoaded(job) ? "Some answers need a look before you send this" : "Answers are still loading",
                       systemImage: "exclamationmark.triangle.fill")
                     .font(Typography.callout)
                     .foregroundStyle(Palette.needsYou)
@@ -352,9 +331,9 @@ private struct ReviewDetail: View {
             } label: {
                 HStack(spacing: Space.xs) { Text("Skip"); if keysMeanThisJob { KeyCap("S") } }
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.secondaryLink)
             .disabled(busy)
-            Button {
+            let approve = Button {
                 Task { await model.requestApprove(only: [job.id]) }
             } label: {
                 HStack(spacing: Space.xs) {
@@ -363,9 +342,11 @@ private struct ReviewDetail: View {
                     if keysMeanThisJob { KeyCap("A") }
                 }
             }
-            .buttonStyle(.glassProminent)
+            Group {
+                if isPrimary { approve.buttonStyle(.primaryPill) } else { approve.buttonStyle(.bordered) }
+            }
             .disabled(busy || !store.isConnected)
-            .help(store.isConnected ? "Submit this application now" : "The agent isn't connected")
+            .help(store.isConnected ? "Send this application now" : "The agent isn't connected")
         }
     }
 

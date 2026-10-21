@@ -1,80 +1,62 @@
-// Materials.swift — glass is for the navigation/control layer, never content (§1.5).
-// Every helper falls back to an opaque raised surface + hairline under Reduce Transparency.
+// Materials.swift — the two content surfaces and the one glass material.
+//
+// Content sits on exactly two things: a flat `surface()` (white / near-black + a 0.5pt hairline,
+// radius 8, no shadow) and a sunken `well()` (stone) for inputs, quotes, screenshots and logs.
+// Liquid Glass is only for the floating control layer (toolbar and sidebar come from the system;
+// in-window: `GlassBar`, toasts, the ⌘K palette, the menu-bar panel chrome). Never content.
 import SwiftUI
 
 extension View {
-    /// Floating glass panel (⌘K palette, menu bar popover content, HUDs).
-    func glassPanel(cornerRadius: CGFloat = Radius.palette, tint: Color? = nil) -> some View {
-        modifier(GlassSurface(shape: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous), tint: tint, interactive: false))
+    /// The content surface: flat, hairline, radius 8. No shadow, no tint, no glow.
+    func surface(cornerRadius: CGFloat = Radius.card) -> some View {
+        modifier(SurfaceModifier(cornerRadius: cornerRadius))
     }
 
-    /// Glass capsule (toasts, floating action buttons, the Paused overlay).
-    func glassCapsule(tint: Color? = nil, interactive: Bool = false) -> some View {
-        modifier(GlassSurface(shape: Capsule(), tint: tint, interactive: interactive))
-    }
-
-    /// Solid content surface: card background + hairline. Flat by design — no drop shadow.
-    func surfaceCard(cornerRadius: CGFloat = Radius.card, raised: Bool = false) -> some View {
-        modifier(SurfaceCard(cornerRadius: cornerRadius, raised: raised))
-    }
-
-    /// Inputs, code/log wells, screenshot wells.
-    func sunkenWell(cornerRadius: CGFloat = Radius.inner) -> some View {
+    /// The sunken well (stone): inputs, quotes, screenshots, logs.
+    func well(cornerRadius: CGFloat = Radius.inner) -> some View {
         background(Palette.sunken, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
     }
 
-    /// Floating depth for a dragged card: scale 1.03 + heavy shadow + velocity rotation.
+    /// Liquid Glass for the floating control layer only. Falls back to an opaque surface +
+    /// hairline under Reduce Transparency.
+    func glassChrome<S: Shape>(in shape: S, interactive: Bool = false) -> some View {
+        modifier(GlassChrome(shape: shape, interactive: interactive))
+    }
+
+    /// A dragged card: a slight lift in scale only (no shadow).
     func dragLift(isDragging: Bool, rotation: Double = 0) -> some View {
         scaleEffect(isDragging ? 1.03 : 1)
             .rotationEffect(.degrees(isDragging ? max(-1.5, min(1.5, rotation)) : 0))
-            .shadow(color: .black.opacity(isDragging ? 0.18 : 0), radius: isDragging ? 12 : 0, y: isDragging ? 12 : 0)
     }
 }
 
-struct GlassSurface<S: Shape>: ViewModifier {
+private struct SurfaceModifier: ViewModifier {
+    var cornerRadius: CGFloat
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    func body(content: Content) -> some View {
+        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+        content
+            .background(Palette.surface, in: shape)
+            .overlay {
+                shape.strokeBorder(contrast == .increased ? Palette.strokeStrong : Palette.hairline,
+                                   lineWidth: contrast == .increased ? 1 : 0.5)
+            }
+    }
+}
+
+private struct GlassChrome<S: Shape>: ViewModifier {
     let shape: S
-    var tint: Color?
     var interactive: Bool
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     func body(content: Content) -> some View {
         if reduceTransparency {
             content
-                .background(Palette.surfaceRaised, in: shape)
-                .overlay(shape.stroke(Palette.hairline, lineWidth: 0.5))
+                .background(Palette.surface, in: shape)
+                .overlay(shape.stroke(Palette.strokeStrong, lineWidth: 0.5))
         } else {
-            content.glassEffect(glass, in: shape)
+            content.glassEffect(interactive ? Glass.regular.interactive() : Glass.regular, in: shape)
         }
-    }
-
-    private var glass: Glass {
-        var g = Glass.regular
-        if let tint { g = g.tint(tint) }
-        if interactive { g = g.interactive() }
-        return g
-    }
-}
-
-struct SurfaceCard: ViewModifier {
-    var cornerRadius: CGFloat
-    var raised: Bool
-    @Environment(\.colorScheme) private var colorScheme
-    @Environment(\.colorSchemeContrast) private var contrast
-
-    func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        content
-            .background(raised ? Palette.surfaceRaised : Palette.surface, in: shape)
-            .overlay {
-                shape.stroke(contrast == .increased ? Palette.strokeStrong : Palette.hairline,
-                             lineWidth: contrast == .increased ? 1 : 0.5)
-            }
-            .overlay(alignment: .top) {
-                // Dark mode lifts with a 1pt top inner highlight instead of a shadow.
-                if colorScheme == .dark {
-                    shape.stroke(LinearGradient(colors: [.white.opacity(0.04), .clear], startPoint: .top, endPoint: .center), lineWidth: 1)
-                        .allowsHitTesting(false)
-                }
-            }
     }
 }

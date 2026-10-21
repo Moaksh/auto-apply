@@ -153,7 +153,7 @@ enum SystemCheckMerger {
         if byName[.autoapplyd] == nil {
             byName[.autoapplyd] = SystemCheckItem(
                 name: .autoapplyd, ok: daemonReachable, required: true, version: nil,
-                detail: daemonReachable ? "running" : "not running — install the LaunchAgent",
+                detail: daemonReachable ? "running" : "not running: install the agent",
                 fixCommand: daemonReachable ? nil : DaemonControl.installHint)
         }
         if byName[.chrome] == nil {
@@ -175,7 +175,7 @@ extension SystemCheckItem.Name {
         case .claudeCli: "Claude CLI"
         case .uv: "uv"
         case .node: "Node.js ≥ 20"
-        case .autoapplyd: "autoapplyd"
+        case .autoapplyd: "Background agent"
         case .chrome: "Chrome"
         }
     }
@@ -183,10 +183,10 @@ extension SystemCheckItem.Name {
     var whyItMatters: String {
         switch self {
         case .claudeCli: "AutoApply uses your existing Claude login to read job descriptions and draft answers. No API key needed."
-        case .uv: "The background agent (autoapplyd) is a Python program managed by uv."
+        case .uv: "The background agent is a Python program, installed and run with uv."
         case .node: "Browser automation runs through Playwright MCP, which needs Node.js 20 or newer."
-        case .autoapplyd: "The agent runs in the background as a LaunchAgent so it works while the app is closed."
-        case .chrome: "A dedicated Chrome profile is used for browsing job boards. You log in once; no passwords are stored."
+        case .autoapplyd: "The agent runs in the background on this Mac, so it keeps working while the app is closed."
+        case .chrome: "A separate Chrome profile is used for job sites. You log in to LinkedIn and Glassdoor there yourself; AutoApply never sees those passwords."
         }
     }
 }

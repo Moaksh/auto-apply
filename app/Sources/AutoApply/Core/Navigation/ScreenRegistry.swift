@@ -163,7 +163,7 @@ struct PlaceholderScreen: View {
         EmptyState(
             symbol: "hammer",
             title: screen.title,
-            message: "\(screen.expectedViewName) is provided by workstream \(screen.owner) and registers via ScreenRegistry."
+            message: "This screen isn't available in this build."
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Palette.windowBackground)
@@ -181,12 +181,10 @@ struct JobDetailPlaceholder: View {
                 Text(job.company).font(Typography.title1)
                 Text(job.title).font(Typography.title2).foregroundStyle(.secondary)
                 HStack(spacing: Space.s) {
-                    StatusChip(job: job)
-                    if let score = job.score { ScorePill(score: score, threshold: store.preferences.matchThreshold) }
+                    Badge(job: job)
+                    if let score = job.score { Badge(score: score, threshold: store.preferences.matchThreshold) }
                     Text(job.ats.label).font(Typography.callout).foregroundStyle(.secondary)
                 }
-                Text("JobDetailView is provided by workstream C2.")
-                    .font(Typography.callout).foregroundStyle(.tertiary)
                 Spacer()
             }
             .padding(Space.xl)

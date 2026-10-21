@@ -1,135 +1,140 @@
-// KPIWidgets.swift — W3 Applied Today, W4 Needs You, W5 Response Rate, W6 Caps
-// (docs/UI_UX_PLAN.md §4.3), built on C1's Card / KPICard / MetricText / CapBar.
+// KPIWidgets.swift — the four number tiles: Applied today, Needs You, Response rate, Daily
+// limits. Each is a plain Surface with one number; nothing glows, counts up or flashes.
 import SwiftUI
 
-/// Shared loading / error resolution for DB-backed widgets (§4.4).
+/// A change in a metric ("3pt", up).
+struct MetricDelta: Equatable {
+    var text: String
+    var isPositive: Bool
+}
+
+/// Shared loading / error resolution for DB-backed widgets.
 enum WidgetDataState {
-    static func resolve(isLoaded: Bool, isAvailable: Bool) -> CardState {
+    static func resolve(isLoaded: Bool, isAvailable: Bool) -> SurfaceState {
         if isLoaded { return .content }
         return isAvailable ? .loading : .error(message: "Couldn't read stats")
     }
 }
 
-/// W3 — submissions today, 7-day sparkline, delta vs the 14-day average; glows once per new
-/// submission.
-struct AppliedTodayCard: View {
-    @Environment(AppStore.self) private var store
-    var countUp: Bool
+/// A tile: big number, optional trend line, one caption.
+private struct MetricTile<Extra: View>: View {
+    var title: String
+    var state: SurfaceState = .content
+    var value: MetricText
+    var caption: String?
+    @ViewBuilder var extra: () -> Extra
 
     var body: some View {
-        let stats = store.stats
-        let state = WidgetDataState.resolve(isLoaded: store.jobs.isLoaded, isAvailable: store.repository.isAvailable)
-        let value = countUp ? 0 : store.counts.submittedToday
-        KPICard(title: "Applied today",
-                value: MetricText(value, size: .xl),
-                caption: value == 0 && !countUp ? "Nothing yet today" : DashboardFormat.deltaVsAverage(stats.appliedTodayDeltaVsAverage),
-                delta: DashboardFormat.appliedTodayDelta(stats.appliedTodayDeltaVsAverage),
-                sparkline: stats.appliedLast7,
-                state: state,
-                glowTrigger: store.live.submittedEventCount)
-            .accessibilityLabel("Applied today: \(store.counts.submittedToday). \(DashboardFormat.deltaVsAverage(stats.appliedTodayDeltaVsAverage))")
+        Surface(title, state: state) {
+            VStack(alignment: .leading, spacing: Space.s) {
+                value
+                extra()
+                if let caption {
+                    Text(caption).font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                }
+            }
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
-/// W4 — open question clusters + parked jobs. The one loud card: amber when > 0, neutral
-/// "All clear" otherwise; plays the arrival PhaseAnimator when a new cluster lands.
+/// Applications sent today, a 7-day trend, and the difference from the 14-day average.
+struct AppliedTodayCard: View {
+    @Environment(AppStore.self) private var store
+
+    var body: some View {
+        let stats = store.stats
+        let value = store.counts.submittedToday
+        MetricTile(title: "Applied today",
+                   state: WidgetDataState.resolve(isLoaded: store.jobs.isLoaded, isAvailable: store.repository.isAvailable),
+                   value: MetricText(value, size: .xl),
+                   caption: value == 0 ? "Nothing yet today" : DashboardFormat.deltaVsAverage(stats.appliedTodayDeltaVsAverage)) {
+            Sparkline(values: stats.appliedLast7).frame(height: 28)
+        }
+        .accessibilityLabel("Applied today: \(value). \(DashboardFormat.deltaVsAverage(stats.appliedTodayDeltaVsAverage))")
+    }
+}
+
+/// Open questions and tasks, and the jobs waiting on them. "All clear" when there are none.
 struct NeedsYouCard: View {
     @Environment(AppStore.self) private var store
     @Environment(Router.self) private var router
-    @Environment(\.motionReduced) private var reduced
-    @State private var arrivals = 0
 
     var body: some View {
         let open = store.inbox.openCount
-        let parked = store.counts.needsYouJobs
-        Card("Needs you", tint: open > 0 ? Palette.needsYou : nil) {
+        let waiting = store.counts.needsYouJobs
+        Surface("Needs You") {
             if open > 0 {
                 VStack(alignment: .leading, spacing: Space.s) {
                     HStack(alignment: .firstTextBaseline, spacing: Space.s) {
-                        badge(open)
-                        Text(open == 1 ? "question" : "questions").font(Typography.body)
+                        MetricText(open, size: .xl, color: Palette.needsYou)
+                        Text(open == 1 ? "question or task" : "questions and tasks").font(Typography.body)
                     }
-                    Text("\(parked) job\(parked == 1 ? "" : "s") parked").font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                    Text("\(waiting) job\(waiting == 1 ? "" : "s") waiting for you").font(Typography.callout).foregroundStyle(Palette.textSecondary)
                     Button {
                         router.go(.needsYou)
                     } label: {
                         HStack(spacing: Space.xs) { Text("Answer"); KeyCap(.nextQuestion) }
                     }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.secondaryLink)
                 }
             } else {
                 VStack(alignment: .leading, spacing: Space.s) {
-                    HStack(spacing: Space.s) {
-                        Image(systemName: "checkmark.circle").font(.system(size: 22)).foregroundStyle(Palette.applied)
-                        Text("All clear").font(Typography.title2)
-                    }
+                    Label("All clear", systemImage: "checkmark.circle")
+                        .font(Typography.title2)
+                        .foregroundStyle(Palette.textPrimary)
                     Text("Nothing needs you right now.").font(Typography.callout).foregroundStyle(Palette.textSecondary)
                 }
             }
         }
-        .onChange(of: open) { old, new in if new > old { arrivals += 1 } }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(open > 0 ? "Needs you: \(open) questions, \(parked) jobs parked" : "Needs you: all clear")
-    }
-
-    @ViewBuilder
-    private func badge(_ open: Int) -> some View {
-        let metric = MetricText(open, size: .xl, color: Palette.needsYou)
-        if reduced {
-            metric
-        } else {
-            // §2.4 #2: scale 1 → 1.25 → 1 with an amber flash, once per arrival.
-            metric.phaseAnimator([0, 1, 0], trigger: arrivals) { view, phase in
-                view.scaleEffect(phase == 1 ? 1.25 : 1, anchor: .leading)
-                    .background(Palette.needsYou.opacity(phase == 1 ? 0.2 : 0), in: RoundedRectangle(cornerRadius: 6))
-            } animation: { _ in .spring(duration: 0.25, bounce: 0.2) }
-        }
+        .accessibilityLabel(open > 0 ? "Needs You: \(open) questions or tasks, \(waiting) jobs waiting" : "Needs You: all clear")
     }
 }
 
-/// W5 — responses ÷ applied (rolling 30 days), delta vs the previous 30. Ghosted isn't a
-/// response. "—" until 10+ applications.
+/// Responses ÷ applications over 30 days, vs the previous 30. Ghosted isn't a response. "—"
+/// until there are 10+ applications.
 struct ResponseRateCard: View {
     @Environment(AppStore.self) private var store
 
     var body: some View {
         let stats = store.stats
-        let state = WidgetDataState.resolve(isLoaded: store.jobs.isLoaded, isAvailable: store.repository.isAvailable)
         let rate = stats.responseRate30
-        KPICard(title: "Response rate",
-                value: rate.map { MetricText($0, format: .percent(decimals: 0), size: .xl) } ?? MetricText(0, format: .placeholder, size: .xl),
-                caption: rate == nil ? "Needs 10+ applications" : "30-day window",
-                delta: DashboardFormat.responseRateDelta(current: rate, previous: stats.responseRatePrevious30),
-                state: state)
-            .help("Responses of any kind (assessment, interview, offer or rejection) ÷ applications, last 30 days. Ghosted doesn't count.")
+        let delta = DashboardFormat.responseRateDelta(current: rate, previous: stats.responseRatePrevious30)
+        MetricTile(title: "Response rate",
+                   state: WidgetDataState.resolve(isLoaded: store.jobs.isLoaded, isAvailable: store.repository.isAvailable),
+                   value: rate.map { MetricText($0, format: .percent(decimals: 0), size: .xl) } ?? MetricText(0, format: .placeholder, size: .xl),
+                   caption: rate == nil ? "Shown after 10 applications" : "Last 30 days\(delta.map { " · \($0.isPositive ? "up" : "down") \($0.text)" } ?? "")") {
+            EmptyView()
+        }
+        .help("Responses of any kind (assessment, interview, offer or rejection) ÷ applications, last 30 days. Ghosted doesn't count.")
     }
 }
 
-/// W6 — daily cap, company cooldowns, LinkedIn/Glassdoor read budgets. Never red.
+/// Daily limits: applications today, per-company cooldown, LinkedIn / Glassdoor visits. Never red.
 struct CapsCard: View {
     @Environment(AppStore.self) private var store
 
     var body: some View {
         let caps = store.caps
-        Card("Caps") {
+        Surface("Daily limits") {
             VStack(alignment: .leading, spacing: Space.s) {
                 CapBar(title: "Applications", used: caps.dailyUsed, limit: max(1, caps.dailyLimit))
                 HStack {
                     Text("Per company").font(Typography.callout).foregroundStyle(Palette.textSecondary)
                     Spacer()
-                    if caps.companiesCoolingDown > 0 {
-                        Text("\(caps.companiesCoolingDown) cooling down").font(Typography.callout)
-                    } else {
-                        Label("1 / \(store.preferences.perCompanyCooldownDays)d", systemImage: "checkmark")
-                            .font(Typography.callout).foregroundStyle(Palette.textSecondary)
-                    }
+                    Text(caps.companiesCoolingDown > 0
+                         ? "\(caps.companiesCoolingDown) waiting out the \(store.preferences.perCompanyCooldownDays)-day gap"
+                         : "1 every \(store.preferences.perCompanyCooldownDays) days")
+                        .font(Typography.callout)
+                        .foregroundStyle(Palette.textSecondary)
                 }
                 .accessibilityElement(children: .combine)
                 if caps.linkedinSessionsLimit > 0 {
-                    CapBar(title: "LinkedIn reads", used: caps.linkedinSessionsUsed, limit: caps.linkedinSessionsLimit)
+                    CapBar(title: "LinkedIn visits", used: caps.linkedinSessionsUsed, limit: caps.linkedinSessionsLimit)
                 }
                 if caps.glassdoorSessionsLimit > 0 {
-                    CapBar(title: "Glassdoor reads", used: caps.glassdoorSessionsUsed, limit: caps.glassdoorSessionsLimit)
+                    CapBar(title: "Glassdoor visits", used: caps.glassdoorSessionsUsed, limit: caps.glassdoorSessionsLimit)
                 }
             }
         }

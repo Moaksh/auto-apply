@@ -29,10 +29,10 @@ struct ScoreHistogram: View {
         }.filter { $0.count > 0 }
         let hasData = bins.contains { $0.total > 0 }
         let base = WidgetDataState.resolve(isLoaded: store.jobs.isLoaded, isAvailable: store.repository.isAvailable)
-        let state: CardState = base != .content ? base
+        let state: SurfaceState = base != .content ? base
             : (hasData ? .content : .empty(symbol: "chart.bar.doc.horizontal", message: "Scores appear after the first discovery run"))
 
-        Card("Match scores", state: state, onRetry: { store.recomputeStats() }) {
+        Surface("Match scores", state: state, onRetry: { store.recomputeStats() }) {
             VStack(alignment: .leading, spacing: Space.s) {
                 Chart {
                     ForEach(segments) { s in bar(s, threshold: threshold) }
@@ -75,9 +75,9 @@ struct ScoreHistogram: View {
                     if let proposed, let preview = ChartMath.thresholdPreview(sortedScores: sortedScores, current: current, proposed: proposed) {
                         Text(preview).font(Typography.callout).foregroundStyle(Palette.textSecondary)
                         Spacer()
-                        Button("Cancel") { self.proposed = nil }.buttonStyle(.glass)
+                        Button("Cancel") { self.proposed = nil }.buttonStyle(.secondaryLink)
                         Button("Set threshold") { save(proposed, old: current) }
-                            .buttonStyle(.glassProminent)
+                            .buttonStyle(.bordered)
                             .disabled(isSaving || !store.isConnected)
                     } else {
                         Text("Drag the line to preview a new threshold").font(Typography.callout).foregroundStyle(Palette.textTertiary)

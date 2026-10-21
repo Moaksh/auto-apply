@@ -71,7 +71,7 @@ struct ChipField: View {
         }
         .padding(Space.xs)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .sunkenWell()
+        .well()
         .motion(Motion.snappy, value: values)
         .onTapGesture { focused = true }
     }
@@ -87,7 +87,7 @@ struct ChipField: View {
                 }
                 if pool.count > visibleSuggestions {
                     Button(showAll ? "Less" : "More…") { showAll.toggle() }
-                        .buttonStyle(.link)
+                        .buttonStyle(.secondaryLink)
                         .font(Typography.callout)
                 }
             }
@@ -108,7 +108,7 @@ struct ChipField: View {
                             if i == 0 { Text("↩").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary) }
                         }
                         .padding(.horizontal, Space.s).padding(.vertical, 3)
-                        .background(i == 0 ? Palette.accent.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 5))
+                        .background(i == 0 ? Palette.accent.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
@@ -124,7 +124,7 @@ struct ChipField: View {
             }
             .padding(Space.xs)
             .frame(maxWidth: 320, alignment: .leading)
-            .sunkenWell()
+            .well()
         }
     }
 
@@ -189,7 +189,7 @@ struct ToggleChips<Value: Hashable>: View {
                     .background(on ? Palette.accent.opacity(0.12) : Palette.sunken, in: Capsule())
                     .overlay(Capsule().stroke(on ? Palette.accent.opacity(0.5) : Palette.hairline, lineWidth: 0.5))
                 }
-                .buttonStyle(PressScaleStyle())
+                .buttonStyle(.plain)
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
@@ -304,7 +304,7 @@ struct DropZone: View {
             Image(systemName: "arrow.down.doc").font(.system(size: 28)).foregroundStyle(isTargeted ? Palette.accent : Palette.textSecondary)
             HStack(spacing: Space.xs) {
                 Text(title).font(Typography.bodyEmph)
-                Button("Choose files…", action: onChoose).buttonStyle(.link)
+                Button("Choose files…", action: onChoose).buttonStyle(.secondaryLink)
             }
             if let subtitle { Text(subtitle).font(Typography.callout).foregroundStyle(Palette.textTertiary) }
         }

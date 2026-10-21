@@ -23,6 +23,10 @@ final class GRDBRepository: AppRepository {
     private let changes = EventBroadcaster<Void>()
     private let poller = Mutex<Task<Void, Never>?>(nil)
 
+    /// Poll 1 of 2 (documented, Rams audit #9): every 500 ms read SQLite's `PRAGMA data_version`
+    /// (a single integer, no table scan) and re-query only when the agent has written. This is
+    /// how a read-only app sees another process's writes; the other poll is AppStore's 500 ms
+    /// pipeline-flow prune.
     init(path: String, pollInterval: Duration = .milliseconds(500)) {
         self.path = path
         self.pollInterval = pollInterval

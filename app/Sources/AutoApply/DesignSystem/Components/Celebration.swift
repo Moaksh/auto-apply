@@ -22,7 +22,7 @@ struct SubmittedCheck: View {
                 .foregroundStyle(color)
                 .symbolEffect(.drawOn, isActive: false)
                 .id(trigger)
-                .accessibilityLabel("Submitted")
+                .accessibilityLabel("Applied")
         } else {
             KeyframeAnimator(initialValue: Values(), trigger: trigger) { v in
                 ZStack {
@@ -56,7 +56,7 @@ struct SubmittedCheck: View {
                     LinearKeyframe(0, duration: 0.6)
                 }
             }
-            .accessibilityLabel("Submitted")
+            .accessibilityLabel("Applied")
         }
     }
 }
@@ -98,25 +98,21 @@ struct RadialBurst: View {
     }
 }
 
-/// Inbox zero: `checkmark.seal` drawn on + radial burst + headline.
+/// Needs You is empty: a calm check and one honest line.
 struct InboxZeroCelebration: View {
     var resumedJobs: Int
     var trigger: Int
 
     var body: some View {
-        VStack(spacing: Space.m) {
-            ZStack {
-                RadialBurst(trigger: trigger).frame(width: 180, height: 180)
-                Image(systemName: "checkmark.seal")
-                    .font(.system(size: 56, weight: .regular))
-                    .foregroundStyle(Palette.applied)
-                    .symbolEffect(.drawOn, isActive: false)
-            }
-            Text("All caught up.").displayStyle()
-            Text(resumedJobs > 0 ? "\(resumedJobs) jobs resumed. The agent's back at it." : "Nothing needs you right now.")
-                .font(Typography.title2).foregroundStyle(Palette.textSecondary)
-        }
-        .accessibilityElement(children: .combine)
+        EmptyState(symbol: "checkmark.circle", title: "All clear",
+                   message: InboxZeroCelebration.message(requeued: resumedJobs))
+    }
+
+    /// Jobs only go back to the queue; they apply on the agent's next run.
+    static func message(requeued: Int) -> String {
+        requeued > 0
+            ? "\(requeued) job\(requeued == 1 ? " is" : "s are") back in the queue for the agent's next run."
+            : "Nothing needs you right now."
     }
 }
 

@@ -34,14 +34,14 @@ extension AppState {
         case .scored: "Scored"
         case .skipped: "Skipped"
         case .queued: "Queued"
-        case .prepping: "Prepping"
+        case .prepping: "Collecting questions"
         case .needsYou: "Needs you"
         case .filling: "Filling"
-        case .awaitingReview: "Awaiting review"
-        case .submitting: "Submitting"
-        case .submitted: "Submitted"
+        case .awaitingReview: "Waiting for review"
+        case .submitting: "Sending"
+        case .submitted: "Applied"
         case .failed: "Failed"
-        case .unknownVerify: "Verify submission"
+        case .unknownVerify: "Check if applied"
         }
     }
 
@@ -104,7 +104,7 @@ enum FlowStage: String, CaseIterable, Sendable, Hashable {
         case .scored: "Scored"
         case .queued: "Queued"
         case .filling: "Filling"
-        case .submitted: "Submitted"
+        case .submitted: "Applied"
         case .skipped: "Skipped"
         case .needsYou: "Needs you"
         case .failed: "Failed"
@@ -120,18 +120,7 @@ extension Ats {
         case .ashby: "Ashby"
         case .workday: "Workday"
         case .linkedinEasyApply: "LinkedIn Easy Apply"
-        case .other: "Other"
-        }
-    }
-
-    var shortLabel: String {
-        switch self {
-        case .greenhouse: "GH"
-        case .lever: "LV"
-        case .ashby: "AB"
-        case .workday: "WD"
-        case .linkedinEasyApply: "EA"
-        case .other: "—"
+        case .other: "Other site"
         }
     }
 }
@@ -157,7 +146,7 @@ extension DaemonActivity {
         case .idle: "Idle"
         case .discovering: "Discovering"
         case .scoring: "Scoring"
-        case .prepping: "Prepping"
+        case .prepping: "Collecting questions"
         case .applying: "Applying"
         }
     }

@@ -1,6 +1,6 @@
 // FinishSteps.swift — onboarding steps 6–7 and the finish moment: connect sources (card flips
 // when a session is detected), choose Auto/Review (looping mini animations while hovered or
-// selected), and "Ready" (Run Prep pass / Not now).
+// selected), and "Ready" (Collect questions / Not now).
 import SwiftUI
 
 // MARK: - Step 6: Connect sources
@@ -31,7 +31,7 @@ struct SourcesStep: View {
                                 .textFieldStyle(.roundedBorder)
                                 .onSubmit { model.addCareerURL() }
                             Button { model.addCareerURL() } label: { Image(systemName: "plus") }
-                                .buttonStyle(.glass)
+                                .buttonStyle(.secondaryLink)
                                 .accessibilityLabel("Add company URL")
                         }
                         FlowLayout(spacing: Space.xs) {
@@ -51,19 +51,20 @@ struct SourcesStep: View {
                 }
             }
         }
-        // Optional: lets the agent finish applications that need an emailed security code (Greenhouse)
-        // without asking. Same control as Settings ▸ Sources.
+        // Optional: lets the agent read emailed security codes and, with the consent shown next to
+        // the form, sign up on sites that require an account. Same control as Settings ▸ Sources.
         VStack(alignment: .leading, spacing: Space.s) {
             HStack(spacing: Space.s) {
                 Image(systemName: "envelope.badge.shield.half.filled").foregroundStyle(Palette.accent)
-                Text("Security codes").font(Typography.title2)
+                Text("Email inbox").font(Typography.title2)
                 Text("optional").font(Typography.callout).foregroundStyle(Palette.textTertiary)
             }
-            MailAccountRow()
+            MailAccountRow(createAccounts: Binding(get: { model.createAccounts },
+                                                   set: { on in Task { await model.setCreateAccounts(on) } }))
         }
         .padding(Space.l)
         .frame(maxWidth: .infinity, alignment: .topLeading)
-        .surfaceCard()
+        .surface()
     }
 }
 
@@ -85,7 +86,7 @@ private struct SourceCard<Footer: View>: View {
         }
         .padding(Space.l)
         .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
-        .surfaceCard()
+        .surface()
     }
 }
 
@@ -143,11 +144,11 @@ private struct LoginSourceCard: View {
                 if !checking {
                     HStack(spacing: Space.s) {
                         if !isWaiting {
-                            Button(failure == nil ? "Log in in agent Chrome" : "Try again") {
+                            Button(failure == nil ? "Log in in the agent's Chrome" : "Try again") {
                                 requested = true
                                 onConnect()
                             }
-                            .buttonStyle(.glass)
+                            .buttonStyle(.secondaryLink)
                         }
                         Button("Check now") {
                             checking = true
@@ -179,9 +180,9 @@ private struct LoginSourceCard: View {
             HStack(spacing: Space.s) {
                 Text(glyph)
                     .font(.system(size: 13, weight: .bold, design: .rounded))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Palette.onAccent)
                     .frame(width: 22, height: 22)
-                    .background(Palette.accent, in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .background(Palette.accent, in: RoundedRectangle(cornerRadius: Radius.logo, style: .continuous))
                 Text(name).font(Typography.title2)
             }
             Text("Read-only browsing").font(Typography.callout).foregroundStyle(Palette.textSecondary)
@@ -190,7 +191,7 @@ private struct LoginSourceCard: View {
         }
         .padding(Space.l)
         .frame(maxWidth: .infinity, minHeight: 150, alignment: .topLeading)
-        .surfaceCard()
+        .surface()
         .accessibilityElement(children: .contain)
         .accessibilityLabel("\(name), \(connected ? "connected" : "not connected")")
     }
@@ -204,14 +205,14 @@ struct ModeStep: View {
     var body: some View {
         StepHeader(title: "How much should the agent do on its own?")
         HStack(spacing: Space.l) {
-            ModeCard(mode: .auto, symbol: "bolt.fill", title: "Auto", detail: "Applies when confident.\nAsks when unsure.",
+            ModeCard(mode: .auto, symbol: "bolt.fill", title: "Auto", detail: "Sends applications when the checks pass.\nAsks you when it's unsure.",
                      isSelected: model.selectedMode == .auto) { model.selectedMode = .auto }
             ModeCard(mode: .review, symbol: "checkmark.rectangle.stack", title: "Review", detail: "Fills everything, waits\nfor your approval.",
                      isSelected: model.selectedMode == .review) { model.selectedMode = .review }
         }
         VStack(alignment: .leading, spacing: Space.xs) {
             Text("Recommended for your first week: Review").font(Typography.bodyEmph)
-            Text("You can override this per ATS or per job anytime.").font(Typography.callout).foregroundStyle(Palette.textSecondary)
+            Text("You can change this for an application site, a company or a single job at any time.").font(Typography.callout).foregroundStyle(Palette.textSecondary)
         }
     }
 }
@@ -240,13 +241,13 @@ private struct ModeCard: View {
             }
             .padding(Space.l)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .surfaceCard()
+            .surface()
             .overlay {
                 RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
                     .stroke(isSelected ? Palette.accent : .clear, lineWidth: 2)
             }
         }
-        .buttonStyle(PressScaleStyle())
+        .buttonStyle(.plain)
         .onHover { hovering = $0 }
         .accessibilityAddTraits(isSelected ? .isSelected : [])
     }
@@ -306,15 +307,17 @@ struct ReadyStep: View {
                 .scaleEffect(appeared || reduced ? 1 : 0.6)
                 .animation(Motion.resolve(Motion.celebrate, reduceMotion: reduced), value: appeared)
             Text("You're set.").displayStyle()
-            Text("Your agent starts at \(model.firstRunText). First, a Prep pass?")
+            Text("Your agent starts at \(model.firstRunText). Collect questions first?")
                 .font(Typography.title2).foregroundStyle(Palette.textSecondary)
-            Text("A Prep pass collects the questions forms will ask, so you can answer them once up front.")
+            Text("The agent opens queued applications and gathers the questions they ask, without sending anything, so you can answer them once up front.")
                 .font(Typography.callout).foregroundStyle(Palette.textTertiary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 460)
             HStack(spacing: Space.m) {
                 Button("Not now") { finish(runPrep: false) }
-                    .buttonStyle(.glass)
-                Button("Run Prep pass") { finish(runPrep: true) }
-                    .buttonStyle(.glassProminent)
+                    .buttonStyle(.secondaryLink)
+                Button("Collect questions") { finish(runPrep: true) }
+                    .buttonStyle(.primaryPill)
                     .keyboardShortcut(.return, modifiers: .command)
             }
             .disabled(model.isSaving)

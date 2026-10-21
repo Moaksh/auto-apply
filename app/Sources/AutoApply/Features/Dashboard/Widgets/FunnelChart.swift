@@ -17,10 +17,10 @@ struct FunnelChart: View {
         let steps = store.stats.funnel(window)
         let applied = steps.first?.count ?? 0
         let base = WidgetDataState.resolve(isLoaded: store.jobs.isLoaded, isAvailable: store.repository.isAvailable)
-        let state: CardState = base != .content ? base
+        let state: SurfaceState = base != .content ? base
             : (applied == 0 ? .empty(symbol: "chart.bar.xaxis", message: "Charts fill in after your first ~10 applications") : .content)
 
-        Card("Funnel", state: state, onRetry: { store.recomputeStats() }) {
+        Surface("Funnel", state: state, onRetry: { store.recomputeStats() }) {
             Picker("Window", selection: $windowRaw) {
                 Text("30d").tag(StatsWindow.days30.rawValue)
                 Text("90d").tag(StatsWindow.days90.rawValue)

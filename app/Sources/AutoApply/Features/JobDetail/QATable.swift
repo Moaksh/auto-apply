@@ -29,7 +29,7 @@ struct QATable: View {
                     if index < answers.count - 1 { Divider().overlay(Palette.hairline) }
                 }
             }
-            .surfaceCard(cornerRadius: Radius.inner)
+            .surface(cornerRadius: Radius.inner)
         }
     }
 }
@@ -76,7 +76,7 @@ private struct QARow: View {
                     Text(confidenceWord(answer.confidenceLevel)).font(Typography.monoSmall).foregroundStyle(Palette.textSecondary)
                         .help("Confidence \(c.formatted(.number.precision(.fractionLength(2))))")
                 }
-                Button { showSource = true } label: { ProvenanceTag(origin: answer.origin, reference: referenceLabel) }
+                Button { showSource = true } label: { Badge(origin: answer.origin, reference: referenceLabel) }
                     .buttonStyle(.plain)
                     .popover(isPresented: $showSource, arrowEdge: .trailing) { sourcePopover }
                     .help("Show where this answer came from")
@@ -90,7 +90,7 @@ private struct QARow: View {
         .onHover { hovering = $0 }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(answer.question): \(answer.answer.isEmpty ? "no answer" : answer.answer)")
-        .accessibilityValue("Source \(answer.origin.label)\(answer.isLocked ? ", locked" : ""), \(confidenceWord(answer.confidenceLevel)) confidence")
+        .accessibilityValue("Source \(answer.origin.label)\(answer.isLocked ? ", a fact only you set" : ""), \(confidenceWord(answer.confidenceLevel)) confidence")
         .accessibilityAction(named: "Copy answer") { copy() }
         .accessibilityAction(named: "Show source") { showSource = true }
     }
@@ -118,7 +118,7 @@ private struct QARow: View {
     private var sourcePopover: some View {
         VStack(alignment: .leading, spacing: Space.s) {
             HStack {
-                ProvenanceTag(origin: answer.origin, reference: referenceLabel)
+                Badge(origin: answer.origin, reference: referenceLabel)
                 Spacer()
                 ConfidenceDot(level: answer.confidenceLevel)
             }
@@ -175,8 +175,8 @@ enum QASource {
             if let id, let resume = library.resume(id: id) { return "Extracted from \(resume.label) (\((resume.filePath as NSString).lastPathComponent))." }
             return "Extracted from your resume."
         case .profile: return "From your profile."
-        case .neverGuess: return "A never-guess fact: only ever set by you."
-        case .generated: return "Generated from your profile, stories and the job description — no invented facts."
+        case .neverGuess: return "A fact only you set. The agent never guesses it."
+        case .generated: return "Drafted by the agent from your profile, stories and the job description. Check it before you rely on it."
         case .user: return "You answered this directly."
         }
     }

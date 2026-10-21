@@ -12,10 +12,10 @@ struct SourcesChart: View {
         let segments = ChartMath.sourceSegments(stats.sources, easyApply: stats.easyApplyCount)
         let applied = Dictionary(stats.sources.map { ($0.source.rawValue, $0.applied) }, uniquingKeysWith: { a, _ in a })
         let base = WidgetDataState.resolve(isLoaded: store.jobs.isLoaded, isAvailable: store.repository.isAvailable)
-        let state: CardState = base != .content ? base
+        let state: SurfaceState = base != .content ? base
             : (segments.isEmpty ? .empty(symbol: "globe", message: "Sources appear after the first discovery run") : .content)
 
-        Card("Sources", state: state, onRetry: { store.recomputeStats() }) {
+        Surface("Sources", state: state, onRetry: { store.recomputeStats() }) {
             VStack(alignment: .leading, spacing: Space.m) {
                 Chart(segments) { segment in
                     BarMark(x: .value("Share", segment.share), y: .value("All", "Sources"), stacking: .normalized)

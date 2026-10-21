@@ -103,11 +103,11 @@ struct PaletteModelTests {
         #expect(router.selection == .needsYou)
         #expect(InboxModel.shared(for: store).selectedClusterID == "np")
 
-        model.query = "/daily cap"
+        model.query = "/daily limit"
         #expect(await model.run())
         #expect(SettingsNavigation.shared.tab == .schedule)
 
-        model.query = ">run discovery"
+        model.query = ">run now"
         #expect(await model.run())
         #expect(await c3WaitUntil { daemon.sent("run_now").count == 1 })
     }

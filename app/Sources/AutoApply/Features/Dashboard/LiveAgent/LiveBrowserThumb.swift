@@ -1,12 +1,12 @@
-// LiveBrowserThumb.swift — the hero's live Chrome well (§4.3 W2c) built on C1's LiveThumbnail:
-// adds the once-per-frame accent scan line, the ATS chip (click brings the real Chrome window
+// LiveBrowserThumb.swift — the live agent's Chrome well, built on LiveThumbnail: the
+// once-per-frame scan line, the application-site label (click brings the real Chrome window
 // forward) and the "Last: Ramp · 13:58" caption when not filling.
 import SwiftUI
 
 struct LiveBrowserThumb: View {
     var frame: DecodedFrame?
     var isLive: Bool
-    var atsLabel: String?
+    var siteLabel: String?
     var caption: String?
     var accessibilityDescription: String
     var onBringChromeForward: () -> Void
@@ -19,18 +19,18 @@ struct LiveBrowserThumb: View {
             LiveThumbnail(frame: frame, isLive: isLive)
                 .overlay { scanLine }
                 .overlay(alignment: .topTrailing) {
-                    if let atsLabel {
+                    if let siteLabel {
                         Button(action: onBringChromeForward) {
                             HStack(spacing: 3) {
                                 Image(systemName: "globe").imageScale(.small)
-                                Text(atsLabel)
+                                Text(siteLabel)
                             }
-                            .font(Typography.monoSmall)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
+                            .font(Typography.callout)
+                            .padding(.horizontal, Space.s)
+                            .padding(.vertical, Space.xxs)
+                            .background(Palette.surface, in: Capsule())
                         }
                         .buttonStyle(.plain)
-                        .glassCapsule(interactive: true)
                         .padding(Space.s)
                         .help("Bring the agent's Chrome window forward")
                     }

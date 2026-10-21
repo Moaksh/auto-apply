@@ -40,7 +40,7 @@ struct RenderSmokeTests {
         return store
     }
 
-    @Test func brandFieldAndProminentEmptyStateRender() {
+    @Test func brandFieldAndEmptyStateRender() {
         // The mesh never folds: every drifting point stays inside the unit square.
         for t in stride(from: 0.0, through: 600, by: 7.3) {
             let points = BrandMesh.points(at: t)
@@ -51,12 +51,14 @@ struct RenderSmokeTests {
             for reduce in [true, false] {
                 let image = render("brand-field-\(reduce ? "static" : "live")", width: 720, scheme: scheme) {
                     VStack(spacing: Space.l) {
-                        Text("Good morning.").heroDisplayStyle()
+                        Text("Set up your job agent.").heroDisplayStyle()
                             .padding(Space.xl)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .brandHeroBand()
                         EmptyState(symbol: "checkmark.rectangle.stack", title: "Nothing to review",
-                                   message: "Filled applications wait here.", actionTitle: "Open board", prominent: true) {}
+                                   message: "Filled applications wait here.", actionTitle: "Run now", isPrimary: true) {}
+                        LoadingState()
+                        ErrorState(title: "Can't reach the agent", actionTitle: "Restart agent", action: {})
                     }
                     .padding()
                     .motionEnvironment(simulateReduceMotion: reduce)
@@ -70,28 +72,41 @@ struct RenderSmokeTests {
         for scheme in [ColorScheme.light, .dark] {
             let image = render("components", width: 720, scheme: scheme) {
                 VStack(alignment: .leading, spacing: Space.l) {
+                    ScreenHeader("Review", summary: "3 ready · Mode: Review")
                     HStack(spacing: Space.gutter) {
-                        KPICard(title: "Applied today", value: MetricText(9, size: .xl), caption: "+4 vs avg",
-                                delta: .init(text: "4", isPositive: true), sparkline: [2, 3, 5, 3, 6, 7, 9])
-                        Card("Needs you", tint: Palette.needsYou) {
+                        Surface("Applied today") {
+                            MetricText(9, size: .xl)
+                            Sparkline(values: [2, 3, 5, 3, 6, 7, 9]).frame(height: 28)
+                        }
+                        Surface("Needs You") {
                             HStack(alignment: .firstTextBaseline) {
                                 MetricText(6, size: .xl, color: Palette.needsYou)
-                                Text("questions · 14 jobs parked").font(Typography.callout)
+                                Text("questions · 14 jobs waiting").font(Typography.callout)
                             }
                         }
                     }
-                    Card("Caps") {
+                    Surface("Daily limits") {
                         VStack(spacing: Space.s) {
                             CapBar(title: "Applications", used: 13, limit: 15)
-                            CapBar(title: "LinkedIn sessions", used: 3, limit: 3)
+                            CapBar(title: "LinkedIn visits", used: 3, limit: 3)
                         }
                     }
-                    HStack { ForEach(StatusKind.allCases, id: \.self) { StatusChip($0, size: .small) } }
+                    HStack { ForEach(StatusKind.allCases, id: \.self) { Badge(status: $0, compact: true) } }
                     HStack(spacing: Space.s) {
-                        StatusChip(.needsYou); StatusChip(.interview); ScorePill(score: 91); ScorePill(score: 64)
-                        ProvenanceTag(origin: .cv); ProvenanceTag(origin: .neverGuess); ProvenanceTag(origin: .user)
+                        Badge(status: .needsYou); Badge(status: .interview); Badge(score: 91); Badge(score: 64); Badge(site: .greenhouse)
+                        Badge(origin: .cv); Badge(origin: .neverGuess); Badge(origin: .user)
                         ConfidenceDot(level: .high); ConfidenceDot(level: .medium)
                     }
+                    HStack(spacing: Space.l) {
+                        Button("Approve & submit") {}.buttonStyle(.primaryPill)
+                        Button("Skip") {}.buttonStyle(.secondaryLink)
+                        Text("Selected row").selectableRow(isSelected: true)
+                    }
+                    Text("A quote in a well").padding(Space.m).well()
+                    BulkActionBar(selectionCount: 2, actions: [
+                        BulkAction(id: "approve", title: "Approve & submit", shortcut: .approve, isProminent: true) {},
+                        BulkAction(id: "skip", title: "Skip", shortcut: .skip) {},
+                    ], onClear: {})
                     LockedField(title: "Notice period") { Text("60 days") }
                     AgentPill(status: AgentStatus(kind: .applying, title: "Applying", detail: "3 of 12 today", progress: 0.25))
                     Banner(issues: [AppIssue(id: "x", severity: .warning, message: "LinkedIn session expired.", fixTitle: "Reconnect", fix: nil)],
@@ -100,7 +115,7 @@ struct RenderSmokeTests {
                         StepRail(steps: [.init(id: 1, title: "System check"), .init(id: 2, title: "Resumes"), .init(id: 3, title: "Preferences"),
                                          .init(id: 4, title: "Story bank", isOptional: true)], current: 2)
                         Spacer()
-                        EmptyState(symbol: "tray", title: "All caught up.", message: "14 jobs resumed.")
+                        EmptyState(symbol: "tray", title: "All clear", message: "14 jobs are back in the queue.")
                     }
                     MiniHistogram(bins: MiniHistogram.benchmark, threshold: 70).frame(height: 36)
                 }

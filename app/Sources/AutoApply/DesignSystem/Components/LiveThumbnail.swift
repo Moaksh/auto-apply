@@ -24,6 +24,6 @@ struct LiveThumbnail: View {
         }
         .aspectRatio(16 / 10, contentMode: .fit)
         .clipShape(.thumb)
-        .accessibilityLabel(isLive ? "Live view of the agent's Chrome window" : "Last submitted page")
+        .accessibilityLabel(isLive ? "Live view of the agent's Chrome window" : "Last page the agent applied on")
     }
 }

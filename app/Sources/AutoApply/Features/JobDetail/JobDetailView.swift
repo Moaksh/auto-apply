@@ -1,7 +1,9 @@
-// JobDetailView.swift — Job detail (docs/UI_UX_PLAN.md §5.4), pushed in the detail column or
-// in its own window: header with status menu, match breakdown + resume + overrides on the
-// left, and Overview (JD) | Questions (this job's open Needs You questions, answered in place;
-// only while it has some) | Application (Q&A audit + submitted page) | Screenshots | Timeline.
+// JobDetailView.swift — Job detail, pushed in the detail column or in its own window: header with
+// the status menu and the one state-dependent primary action (Approve & submit, Try again, Queue
+// for next run), match breakdown + resume + mode on the left, and Overview (job description) |
+// Questions (this job's open Needs You questions, answered in place; only while it has some) |
+// Application (answer log + page as sent) | Screenshots | Timeline. Token counts and the resume
+// pick score sit behind "Technical details".
 import SwiftUI
 
 @objc(JobDetailFeature)
@@ -24,8 +26,8 @@ enum JobDetailTab: String, CaseIterable, Sendable {
         }
     }
 
-    /// A job blocked on questions opens on them; submitted/reviewable jobs on their receipts;
-    /// others on the JD.
+    /// A job blocked on questions opens on them; applied/reviewable jobs on their answers;
+    /// others on the job description.
     static func initial(for job: JobItem, openQuestions: Int = 0) -> JobDetailTab {
         if openQuestions > 0 { return .questions }
         return switch job.state {
@@ -43,7 +45,6 @@ struct JobDetailView: View {
     @State private var tab: JobDetailTab?
     @State private var highlighted: ApplicationAnswerItem?
     @State private var events: [ActivityEvent] = []
-    @State private var width: CGFloat = 1000
     @State private var actions = JobDetailActions()
     @State private var quickLookURL: URL?
     @Environment(\.motionReduced) private var reduced
@@ -60,13 +61,14 @@ struct JobDetailView: View {
                 }
                 .onChange(of: job.state) { _, state in
                     actions.reset()
-                    // Became reviewable while open: show the receipts to review.
+                    // Became reviewable while open: show the answers to review.
                     if state == .awaitingReview { tab = .application }
                 }
                 .onChange(of: router.jobApproveRequest) { _, request in
                     if request?.jobID == jobID { requestApprove(job) }
                 }
                 .quickLookPreview($quickLookURL)
+                .focusedSceneValue(\.copyAllAnswers, CopyAllAnswersAction { copyAll(job) })
         } else if !store.jobs.isLoaded {
             SkeletonBlock(lines: 8).padding(Space.xl).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         } else {
@@ -94,18 +96,20 @@ struct JobDetailView: View {
             }
             Divider()
             ScrollView {
-                let narrow = width < 860
-                let layout = narrow ? AnyLayout(VStackLayout(alignment: .leading, spacing: Space.xl))
-                                    : AnyLayout(HStackLayout(alignment: .top, spacing: Space.xl))
-                layout {
-                    sidebar(job).frame(width: narrow ? nil : 300, alignment: .topLeading)
-                    main(job).frame(maxWidth: .infinity, alignment: .topLeading)
+                ViewThatFits(in: .horizontal) {
+                    HStack(alignment: .top, spacing: Space.xl) {
+                        sidebar(job).frame(width: 300, alignment: .topLeading)
+                        main(job).frame(minWidth: 520, idealWidth: 520, maxWidth: .infinity, alignment: .topLeading)
+                    }
+                    VStack(alignment: .leading, spacing: Space.xl) {
+                        sidebar(job)
+                        main(job).frame(maxWidth: .infinity, alignment: .topLeading)
+                    }
                 }
                 .padding(Space.contentPadding)
             }
         }
         .animation(Motion.resolve(Motion.snappy, reduceMotion: reduced), value: actions.prompt)
-        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .background(Palette.windowBackground)
         .navigationTitle(job.company)
     }
@@ -122,7 +126,7 @@ struct JobDetailView: View {
                 .foregroundStyle(Palette.textSecondary)
                 .padding(Space.s)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Palette.skipped.opacity(0.15), in: RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
+                .well()
             }
             if job.state == .failed || job.state == .unknownVerify, let reason = job.stateReason {
                 HStack(spacing: Space.s) {
@@ -137,9 +141,31 @@ struct JobDetailView: View {
             resumeSection(job)
             overrides(job)
             JobNotesEditor(jobID: job.id, notes: job.notes, onEditingChanged: actions.editingChanged)
-            if job.tokensIn + job.tokensOut > 0 {
-                Text("Tokens · \(job.tokensIn.formatted()) in · \(job.tokensOut.formatted()) out")
-                    .font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
+            technicalDetails(job)
+        }
+    }
+
+    /// Token counts and the resume pick score: useful for debugging, noise for everyone else.
+    @ViewBuilder
+    private func technicalDetails(_ job: JobItem) -> some View {
+        let hasTokens = job.tokensIn + job.tokensOut > 0
+        if hasTokens || job.resumePickScore != nil {
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: Space.xs) {
+                    if hasTokens {
+                        Text("Claude tokens: \(job.tokensIn.formatted()) in, \(job.tokensOut.formatted()) out")
+                    }
+                    if let pick = job.resumePickScore {
+                        Text("Resume match: \(pick.formatted(.number.precision(.fractionLength(2))))")
+                            .help("Similarity between this resume and the job description; the best-matching approved resume is used.")
+                    }
+                }
+                .font(Typography.callout)
+                .foregroundStyle(Palette.textSecondary)
+                .textSelection(.enabled)
+                .padding(.top, Space.xs)
+            } label: {
+                Text("Technical details").font(Typography.callout).foregroundStyle(Palette.textSecondary)
             }
         }
     }
@@ -149,23 +175,18 @@ struct JobDetailView: View {
         if let resume = store.library.resume(id: job.resumeVariantID) {
             HStack(spacing: Space.s) {
                 Text("Resume").eyebrowStyle()
-                Text((resume.filePath as NSString).lastPathComponent).font(Typography.body)
-                if let pick = job.resumePickScore {
-                    Text("picked: \(pick.formatted(.number.precision(.fractionLength(2))))")
-                        .font(Typography.monoSmall).foregroundStyle(Palette.textSecondary)
-                        .help("Similarity between this resume and the job description; the highest-scoring approved variant is used.")
-                }
+                Text((resume.filePath as NSString).lastPathComponent).font(Typography.body).lineLimit(1).truncationMode(.middle)
             }
         }
     }
 
     private func overrides(_ job: JobItem) -> some View {
         VStack(alignment: .leading, spacing: Space.xs) {
-            Text("Overrides").eyebrowStyle()
+            Text("Mode for this job").eyebrowStyle()
             HStack {
                 Text("Mode").font(Typography.callout).foregroundStyle(Palette.textSecondary)
                 Picker("Mode", selection: Binding(get: { job.modeOverride }, set: { m in Task { await store.setJobMode(jobID: job.id, mode: m) } })) {
-                    Text("Inherit (\(inheritedModeLabel(job)))").tag(Mode?.none)
+                    Text("App setting (\(inheritedModeLabel(job)))").tag(Mode?.none)
                     Text("Auto").tag(Mode?.some(.auto))
                     Text("Review").tag(Mode?.some(.review))
                 }
@@ -243,7 +264,7 @@ struct JobDetailView: View {
     private func review(_ job: JobItem) -> some View {
         VStack(alignment: .leading, spacing: Space.l) {
             HStack {
-                Text("Review before submitting").eyebrowStyle()
+                Text("Review before sending").eyebrowStyle()
                 Spacer()
                 Button { copyAll(job) } label: {
                     HStack(spacing: Space.xs) { Text("Copy all"); KeyCap(.copyAll) }
@@ -264,7 +285,7 @@ struct JobDetailView: View {
     private func audit(_ job: JobItem) -> some View {
         VStack(alignment: .leading, spacing: Space.l) {
             HStack {
-                Text("Application (Q&A audit)").eyebrowStyle()
+                Text("Answer log").eyebrowStyle()
                 Spacer()
                 Button { copyAll(job) } label: {
                     HStack(spacing: Space.xs) { Text("Copy all"); KeyCap(.copyAll) }
@@ -278,7 +299,7 @@ struct JobDetailView: View {
             if let path = job.coverLetterPath, FileManager.default.fileExists(atPath: path) {
                 CoverLetterCard(path: path) { store.toasts.show("Copied cover letter", symbol: "checkmark", style: .success) }
             }
-            Text("Submitted page").eyebrowStyle()
+            Text("Page as sent").eyebrowStyle()
             ScreenshotViewer(shots: JobDetailRules.screenshots(for: job), highlighted: highlighted)
         }
     }
@@ -294,9 +315,10 @@ struct JobDetailView: View {
     }
 }
 
-/// "[logo] Stripe · Backend Engineer   ● Awaiting review  [Skip] [Approve & submit] [Open posting]".
-/// The chip is a menu only for submitted jobs (board moves); everything else the job's state
-/// allows is a button, with at most one accent-filled.
+/// "[logo] Stripe · Backend Engineer   ● Waiting for review  Skip  (Approve & submit ⌘↵)  Open posting".
+/// The badge is a menu only for applied jobs (pipeline moves); everything else the job's state
+/// allows is a button, with at most one primary pill (it steps down while an inline question
+/// asks for its own answer).
 private struct JobDetailHeader: View {
     var job: JobItem
     var actions: JobDetailActions
@@ -325,24 +347,9 @@ private struct JobDetailHeader: View {
             }
             if let url = (job.applyURL ?? job.sourceURL).flatMap(URL.init(string:)) {
                 Button("Open posting") { NSWorkspace.shared.open(url) }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.secondaryLink)
                     .fixedSize()
                     .help("Open the job posting in your browser")
-            }
-            Button("") { copyAll() }
-                .keyboardShortcut(.copyAll)
-                .hidden()
-                .frame(width: 0, height: 0)
-                .accessibilityHidden(true)
-            if job.state == .awaitingReview {
-                // ⌘↵ approve. Held while an inline editor is open so ⌘↵ in a text field never
-                // submits a half-edited form (and the notes editor keeps its own ⌘↵ Save).
-                Button("") { approve() }
-                    .keyboardShortcut(.submit)
-                    .disabled(actions.isEditing || actions.inFlight || !store.isConnected)
-                    .hidden()
-                    .frame(width: 0, height: 0)
-                    .accessibilityHidden(true)
             }
         }
     }
@@ -363,12 +370,25 @@ private struct JobDetailHeader: View {
             }
         }
         .fixedSize()
-        .help(action == .approve && needsLook ? "Some answers need a look. You'll be asked before it's submitted." : action.help)
+        .help(action == .approve && needsLook ? "Some answers need a look. You'll be asked before it's sent." : action.help)
         .disabled(actions.inFlight || (!store.isConnected && action.needsDaemon))
-        if action.isPrimary {
-            button.buttonStyle(.glassProminent)
+        if action == .approve {
+            // ⌘↵ approves. Held while an inline editor is open so ⌘↵ in a text field never sends a
+            // half-edited form (and the notes editor keeps its own ⌘↵ Save).
+            styled(button, action).keyboardShortcut(.submit).disabled(actions.isEditing)
         } else {
-            button.buttonStyle(.glass)
+            styled(button, action)
+        }
+    }
+
+    @ViewBuilder
+    private func styled(_ button: some View, _ action: JobDetailRules.HeaderAction) -> some View {
+        if action.isPrimary && actions.prompt == .none {
+            button.buttonStyle(.primaryPill)
+        } else if action.isPrimary {
+            button.buttonStyle(.bordered)
+        } else {
+            button.buttonStyle(.secondaryLink)
         }
     }
 
@@ -396,7 +416,7 @@ private struct JobDetailHeader: View {
     private var statusMenu: some View {
         let moves = JobDetailRules.menuActions(for: job)
         if moves.isEmpty {
-            StatusChip(job: job).fixedSize()
+            Badge(job: job).fixedSize()
         } else {
             Menu {
                 ForEach(moves, id: \.self) { action in
@@ -406,7 +426,7 @@ private struct JobDetailHeader: View {
                     }
                 }
             } label: {
-                StatusChip(job: job)
+                Badge(job: job)
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
@@ -432,25 +452,25 @@ private struct JobDetailPromptBar: View {
             case .confirmFlagged(let flagged, let loading):
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.needsYou)
                 Text(loading
-                     ? "Answers are still loading, so confidence isn't checked yet. Approve anyway?"
-                     : "\(flagged == 1 ? "1 answer needs" : "\(flagged) answers need") a look. Approve anyway?")
+                     ? "Answers are still loading, so they haven't been checked yet. Approve anyway?"
+                     : "The agent wasn't sure about \(flagged == 1 ? "1 answer" : "\(flagged) answers"). Approve anyway?")
                     .font(Typography.bodyEmph)
                 Spacer(minLength: Space.s)
-                Button("Review answers") { reviewAnswers() }.buttonStyle(.glass)
+                Button("Review answers") { reviewAnswers() }.buttonStyle(.secondaryLink)
                 Button("Cancel") { actions.cancelPrompt() }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.secondaryLink)
                     .keyboardShortcut(.cancelAction)
                 Button("Approve anyway") { Task { await actions.confirmApprove(job: job, store: store) } }
-                    .buttonStyle(.glassProminent)
+                    .buttonStyle(.primaryPill)
             case .skipReason:
                 Text("Skip because…").font(Typography.bodyEmph)
                 Spacer(minLength: Space.s)
                 ForEach(ReviewSkipReason.allCases) { reason in
                     Button(reason.title) { Task { await actions.skip(job: job, reason: reason, store: store) } }
-                        .buttonStyle(.glass)
+                        .buttonStyle(.secondaryLink)
                 }
                 Button("Cancel") { actions.cancelPrompt() }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.secondaryLink)
                     .keyboardShortcut(.cancelAction)
             }
         }
@@ -461,7 +481,7 @@ private struct JobDetailPromptBar: View {
     }
 }
 
-/// Free-form notes on a job, saved through `update_job_notes` (the daemon is the only writer).
+/// Free-form notes on a job, saved through `update_job_notes` (the agent is the only writer).
 private struct JobNotesEditor: View {
     var jobID: Int
     var notes: String?
@@ -477,9 +497,10 @@ private struct JobNotesEditor: View {
                 Text("Notes").eyebrowStyle()
                 Spacer()
                 if isEditing {
-                    Button("Cancel") { isEditing = false }.buttonStyle(.link)
+                    Button("Cancel") { isEditing = false }.buttonStyle(.secondaryLink)
                     Button(isSaving ? "Saving…" : "Save") { save() }
-                        .buttonStyle(.link)
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
                         .disabled(isSaving || !store.isConnected)
                         .keyboardShortcut(.return, modifiers: .command)
                 } else {
@@ -487,7 +508,7 @@ private struct JobNotesEditor: View {
                         draft = notes ?? ""
                         isEditing = true
                     }
-                    .buttonStyle(.link)
+                    .buttonStyle(.secondaryLink)
                     .disabled(!store.isConnected)
                 }
             }
@@ -497,7 +518,7 @@ private struct JobNotesEditor: View {
                     .frame(minHeight: 72)
                     .scrollContentBackground(.hidden)
                     .padding(Space.xs)
-                    .sunkenWell()
+                    .well()
                     .accessibilityLabel("Job notes")
             } else if let notes, !notes.isEmpty {
                 Text(notes).font(Typography.body).textSelection(.enabled)
@@ -551,12 +572,22 @@ private struct CoverLetterCard: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             if text.split(separator: "\n").count > 8 || text.count > 600 {
                 Button(expanded ? "Show less" : "Show all") { expanded.toggle() }
-                    .buttonStyle(.link)
+                    .buttonStyle(.secondaryLink)
                     .font(Typography.callout)
             }
         }
         .padding(Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .sunkenWell()
+        .well()
     }
+}
+
+/// ⇧⌘C "Copy All Answers" from the Job menu, for whichever job detail has focus (main window
+/// or its own window). Replaces a hidden zero-size shortcut button.
+struct CopyAllAnswersAction {
+    let perform: @MainActor () -> Void
+}
+
+extension FocusedValues {
+    @Entry var copyAllAnswers: CopyAllAnswersAction?
 }

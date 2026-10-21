@@ -71,7 +71,7 @@ enum IssueReporter {
             let lines = tail(directory.appendingPathComponent(name), lines: n)
             if !lines.isEmpty { return redact(lines.joined(separator: "\n")) }
         }
-        return "(no daemon log found)"
+        return "(no agent log found)"
     }
 
     /// Writes the redacted bundle; returns its URL.

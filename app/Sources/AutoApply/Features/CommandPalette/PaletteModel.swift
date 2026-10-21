@@ -63,7 +63,7 @@ enum PaletteScope: Equatable, Sendable {
         case .all: "Search jobs, questions, stories, settings and actions"
         case .actions: "Actions"
         case .companies: "Companies"
-        case .questions: "Inbox questions"
+        case .questions: "Needs You questions"
         case .settings: "Settings"
         }
     }
@@ -83,24 +83,24 @@ struct PaletteSettingEntry: Sendable, Hashable {
         .init(title: "Salary floor", keywords: "minimum pay compensation currency", tab: .preferences, key: "salary_floor"),
         .init(title: "Excluded companies & keywords", keywords: "exclude blocklist industries", tab: .preferences, key: "exclude_companies"),
         .init(title: "Match threshold", keywords: "score minimum", tab: .preferences, key: "match_threshold"),
-        .init(title: "Never-guess facts", keywords: "sponsorship visa salary expectation notice start relocation eeo", tab: .guardrails, key: "never_guess"),
-        .init(title: "Ask confidence", keywords: "strict balanced lenient confidence threshold", tab: .guardrails, key: "ask_confidence"),
+        .init(title: "Facts only you set", keywords: "never guess locked sponsorship visa salary expectation notice start relocation eeo", tab: .guardrails, key: "never_guess"),
+        .init(title: "When to ask you", keywords: "ask confidence strict balanced lenient threshold", tab: .guardrails, key: "ask_confidence"),
         .init(title: "Always-ask patterns", keywords: "always ask questions", tab: .guardrails, key: "always_ask_patterns"),
         .init(title: "Global mode", keywords: "auto review autonomy", tab: .modes, key: "mode"),
-        .init(title: "Per-ATS modes", keywords: "greenhouse lever ashby workday override", tab: .modes, key: "per_ats_mode"),
+        .init(title: "Mode per application site", keywords: "ats greenhouse lever ashby workday override", tab: .modes, key: "per_ats_mode"),
         .init(title: "Per-company modes", keywords: "company override", tab: .modes, key: "per_company_mode"),
         .init(title: "Sources", keywords: "linkedin glassdoor greenhouse lever ashby career pages", tab: .sources, key: "sources_enabled"),
         .init(title: "Career page URLs", keywords: "careers websites", tab: .sources, key: "career_page_urls"),
         .init(title: "Run schedule", keywords: "times hours when runs", tab: .schedule, key: "schedule"),
-        .init(title: "Daily cap", keywords: "limit applications per day", tab: .schedule, key: "daily_cap"),
+        .init(title: "Daily limit", keywords: "cap limit applications per day", tab: .schedule, key: "daily_cap"),
         .init(title: "Agents at once", keywords: "parallel concurrent applications simultaneous agents", tab: .schedule, key: "parallel_applications"),
         .init(title: "Per-company cooldown", keywords: "days company", tab: .schedule, key: "per_company_cooldown_days"),
         .init(title: "Auto-ghost & nudges", keywords: "ghosted heard back follow up days", tab: .schedule, key: "ghost_after_days"),
         .init(title: "Notifications", keywords: "alerts notify", tab: .general, key: "notifications"),
         .init(title: "Show in Dock / launch at login", keywords: "dock login startup menu bar", tab: .general, key: "show_in_dock"),
         .init(title: "Haptics & sounds", keywords: "feedback trackpad", tab: .general, key: "haptics"),
-        .init(title: "Daemon status", keywords: "autoapplyd launchagent restart install", tab: .agent, key: "daemon"),
-        .init(title: "Export tracker CSV", keywords: "export data csv backup", tab: .data, key: "export"),
+        .init(title: "Agent status", keywords: "daemon autoapplyd launchagent restart install background", tab: .agent, key: "daemon"),
+        .init(title: "Export pipeline as CSV", keywords: "tracker export data csv backup", tab: .data, key: "export"),
     ]
 }
 
@@ -111,7 +111,7 @@ struct PaletteItem: Identifiable, Hashable, Sendable {
         var title: String {
             switch self {
             case .jobs: "Jobs"
-            case .questions: "Inbox"
+            case .questions: "Needs You"
             case .stories: "Stories"
             case .settings: "Settings"
             case .actions: "Actions"
@@ -236,7 +236,7 @@ final class PaletteModel {
             guard let s else { return nil }
             // Agent blockers rank above questions and read as tasks ("To do").
             return PaletteItem(id: "q.\(c.clusterId)", section: .questions, kind: .question(c.clusterId), title: title,
-                               subtitle: c.isAction ? "To do · agent is blocked" : nil,
+                               subtitle: c.isAction ? "Task for you · the agent is stuck" : nil,
                                symbol: c.isAction ? InboxActionCopy.symbol(c) : "text.bubble",
                                trailing: C3Format.plural(c.jobCount, "job"),
                                statusKind: .needsYou, score: s + c.jobCount + (c.isAction ? 100 : 0))

@@ -11,18 +11,13 @@ struct StoryBankView: View {
     var body: some View {
         let model = self.model
         VStack(spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Story Bank").font(Typography.title1)
-                Text(C3Format.plural(model.stories.count, "story", "stories")).font(Typography.body).foregroundStyle(Palette.textSecondary)
-                Spacer()
+            ScreenHeader("Story Bank", summary: C3Format.plural(model.stories.count, "story", "stories")) {
                 Button { model.isImporting.toggle() } label: { Label("Import from text", systemImage: "doc.text") }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.secondaryLink)
                 Button { model.newStory() } label: { Label("New story", systemImage: "plus") }
-                    .buttonStyle(.glassProminent)
+                    .buttonStyle(.secondaryLink)
                     .keyboardShortcut("n", modifiers: .command)
             }
-            .padding(.horizontal, Space.contentPadding)
-            .padding(.vertical, Space.l)
             Divider()
             if model.isImporting {
                 ImportStoryPanel(model: model)
@@ -31,7 +26,7 @@ struct StoryBankView: View {
             if model.stories.isEmpty && model.draft == nil {
                 EmptyState(symbol: "text.book.closed", title: "Add your first story",
                            message: "Stories make “why” and “tell us about a time” answers sound like you.",
-                           actionTitle: "Import from text", prominent: true) { model.isImporting = true }
+                           actionTitle: "Import from text") { model.isImporting = true }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 HStack(spacing: 0) {
@@ -73,12 +68,12 @@ private struct ImportStoryPanel: View {
             Text("Paste a story. “Situation: / Task: / Action: / Result:” labels are recognized; otherwise paragraphs fill S, T, A, R in order.")
                 .font(Typography.callout).foregroundStyle(Palette.textSecondary)
             TextEditor(text: $model.importText)
-                .font(Typography.body).scrollContentBackground(.hidden).frame(height: 120).padding(Space.xs).sunkenWell()
+                .font(Typography.body).scrollContentBackground(.hidden).frame(height: 120).padding(Space.xs).well()
             HStack {
                 Spacer()
-                Button("Cancel") { model.isImporting = false; model.importText = "" }.buttonStyle(.glass)
+                Button("Cancel") { model.isImporting = false; model.importText = "" }.buttonStyle(.secondaryLink)
                 Button("Create story") { model.applyImport() }
-                    .buttonStyle(.glassProminent)
+                    .buttonStyle(.bordered)
                     .disabled(model.importText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
@@ -113,20 +108,20 @@ private struct StoryEditor: View {
             Divider()
             HStack(spacing: Space.s) {
                 Image(systemName: "checkmark.shield").foregroundStyle(Palette.textSecondary)
-                Text("Facts only. The agent quotes these; it won't invent metrics.")
+                Text("Write facts only. The agent draws on these when it drafts answers.")
                     .font(Typography.callout).foregroundStyle(Palette.textSecondary)
                 Spacer()
                 if model.draft?.id != nil {
                     if model.confirmingDelete {
                         Text("Delete this story?").font(Typography.callout)
-                        Button("Delete") { Task { await model.delete() } }.buttonStyle(.borderedProminent).tint(Palette.error)
+                        Button("Delete", role: .destructive) { Task { await model.delete() } }.buttonStyle(.bordered)
                         Button("Keep") { model.confirmingDelete = false }.buttonStyle(.bordered)
                     } else {
-                        Button("Delete") { model.confirmingDelete = true }.buttonStyle(.glass)
+                        Button("Delete") { model.confirmingDelete = true }.buttonStyle(.secondaryLink)
                     }
                 }
                 Button("Save") { Task { await model.save() } }
-                    .buttonStyle(.glassProminent)
+                    .buttonStyle(.primaryPill)
                     .keyboardShortcut("s", modifiers: .command)
                     .disabled(!model.hasUnsavedChanges || model.isSaving)
             }
@@ -150,7 +145,7 @@ private struct StoryEditor: View {
                 .scrollContentBackground(.hidden)
                 .frame(minHeight: 64)
                 .padding(Space.s)
-                .sunkenWell()
+                .well()
         }
     }
 }

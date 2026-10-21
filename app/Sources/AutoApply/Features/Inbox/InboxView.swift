@@ -1,8 +1,8 @@
-// InboxView.swift — the Needs-You inbox screen (docs/UI_UX_PLAN.md §5.5). The list has two
-// sections: "Agent is blocked" (actions: create an account, solve a CAPTCHA, verify…; done in the
-// agent's Chrome, then retried) above "Questions to answer" (form fields, sorted by jobs
-// unblocked). The right pane is an action checklist or the adaptive answer composer (inline, no
-// modal); "Answered today" is collapsed at the bottom, then the inbox-zero celebration (§6).
+// InboxView.swift — Needs You: questions and tasks only you can do. The list has two sections:
+// "Tasks for you" (create an account, solve a CAPTCHA, verify; done in the agent's Chrome, then
+// tried again) above "Questions" (form fields, sorted by jobs waiting). The right pane is a task
+// checklist or the answer composer, whose one primary action is Answer (⌘↵). "Answered today"
+// is collapsed at the bottom. Answered jobs go back in the queue for the agent's next run.
 import SwiftUI
 
 @objc(InboxFeature)
@@ -25,7 +25,12 @@ struct InboxView: View {
         VStack(spacing: 0) {
             InboxHeader(model: model)
             Divider()
-            if model.isInboxZero {
+            if !store.hasSnapshot && store.isDaemonUnreachable {
+                ErrorState(title: "Can't reach the agent", message: "Questions and tasks show here once the agent is running.")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if !store.hasSnapshot {
+                LoadingState(message: "Loading questions…")
+            } else if model.isInboxZero {
                 InboxZeroView(model: model)
             } else {
                 HStack(spacing: 0) {
@@ -44,7 +49,8 @@ struct InboxView: View {
                             .id(cluster.clusterId)
                             .transition(reduced ? AnyTransition.opacity : AnyTransition(.blurReplace))
                         } else {
-                            EmptyState(symbol: "hand.raised", title: "Pick a question", message: "Answer once and every job asking it resumes.")
+                            EmptyState(symbol: "hand.raised", title: "Pick a question",
+                                       message: "Answer once, and every job that asks it goes back in the queue.")
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                         }
                     }
@@ -82,7 +88,6 @@ struct InboxView: View {
             }
             .focusable()
             .focused($listFocused)
-            .focusEffectDisabled()
             .onKeyPress(.downArrow) { model.moveSelection(by: 1); return .handled }
             .onKeyPress(.upArrow) { model.moveSelection(by: -1); return .handled }
             .onKeyPress("j") { model.moveSelection(by: 1); return .handled }
@@ -91,8 +96,7 @@ struct InboxView: View {
                 if let id { withMotion(Motion.snappy, reduceMotion: reduced) { proxy.scrollTo(id) } }
             }
         }
-        .background(Palette.surface.opacity(0.4))
-        .accessibilityLabel("Needs you: agent blockers first, then questions sorted by jobs unblocked")
+        .accessibilityLabel("Needs You: tasks first, then questions sorted by jobs waiting")
     }
 
     private func row(_ cluster: QuestionCluster, _ model: InboxModel) -> some View {
@@ -108,8 +112,8 @@ struct InboxView: View {
 
 // MARK: - Section header
 
-/// "AGENT IS BLOCKED · needs you to act" / "QUESTIONS TO ANSWER". Amber (status.needsYou) marks
-/// the blockers; questions stay neutral, so color carries the one meaning that matters here.
+/// "TASKS FOR YOU" / "QUESTIONS". Coral marks the tasks (the agent is stuck until you act);
+/// questions stay neutral.
 private struct InboxSectionHeader: View {
     enum Kind { case action, question }
     var kind: Kind
@@ -120,10 +124,7 @@ private struct InboxSectionHeader: View {
             Image(systemName: kind == .action ? "hand.raised.fill" : "text.bubble")
                 .imageScale(.small)
                 .foregroundStyle(kind == .action ? Palette.needsYou : Palette.textTertiary)
-            Text(kind == .action ? "Agent is blocked" : "Questions to answer").eyebrowStyle()
-            if kind == .action {
-                Text("· needs you to act").font(Typography.callout).foregroundStyle(Palette.textTertiary)
-            }
+            Text(kind == .action ? "Tasks for you" : "Questions").eyebrowStyle()
             Spacer()
             Text("\(count)").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary).monospacedDigit()
         }
@@ -142,47 +143,16 @@ private struct InboxHeader: View {
     var model: InboxModel
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Space.s) {
-            HStack(alignment: .firstTextBaseline, spacing: Space.m) {
-                Text("Needs You").font(Typography.title1)
-                HStack(spacing: Space.xs) {
-                    if model.actionCount > 0 {
-                        Text("\(model.actionCount)").numericRoll(Double(model.actionCount))
-                            .foregroundStyle(Palette.needsYou)
-                        Text("to do ·")
-                    }
-                    Text("\(model.questionCount)").numericRoll(Double(model.questionCount))
-                    Text(model.questionCount == 1 ? "question ·" : "questions ·")
-                    Text("\(model.jobsWaiting)").numericRoll(Double(model.jobsWaiting))
-                    Text(model.jobsWaiting == 1 ? "job waiting" : "jobs waiting")
-                }
-                .font(Typography.body)
-                .foregroundStyle(Palette.textSecondary)
-                Spacer()
-                Button {
-                    Task { await store.runPrepPass() }
-                } label: {
-                    HStack(spacing: Space.xs) {
-                        Text("Run Prep pass")
-                        KeyCap(.runPrep)
-                    }
-                }
-                .buttonStyle(.glass)
-                .disabled(store.live.activity == .prepping)
-                .help("Collect questions from queued jobs before applying")
+        VStack(alignment: .leading, spacing: 0) {
+            ScreenHeader("Needs You", summary: InboxHeader.summary(tasks: model.actionCount, questions: model.questionCount,
+                                                                     jobs: model.jobsWaiting)) {
                 if store.queuedCount > 0 {
                     // Answered jobs go back to the queue: send them now instead of waiting for a full run.
-                    Button {
-                        Task { await store.applyQueued() }
-                    } label: {
-                        HStack(spacing: Space.xs) {
-                            Text("Apply \(store.queuedCount) queued")
-                            KeyCap(.applyQueued)
-                        }
-                    }
-                    .buttonStyle(.glassProminent)
-                    .disabled(store.isPaused || !store.isConnected || store.live.activity != .idle)
-                    .help("Fill and submit the queued jobs (including ones you just answered) without a new search")
+                    Button("Apply \(store.queuedCount) queued now") { Task { await store.applyQueued() } }
+                        .buttonStyle(.secondaryLink)
+                        .disabled(store.isPaused || !store.isConnected || store.live.activity != .idle)
+                        .help("Fill and submit the queued jobs, including ones you just answered, without a new search "
+                              + "(\(AppShortcut.applyQueued.displayString))")
                 }
             }
             if store.live.activity == .prepping {
@@ -196,11 +166,20 @@ private struct InboxHeader: View {
                         .progressViewStyle(.linear)
                         .controlSize(.mini)
                 }
+                .padding(.horizontal, Space.contentPadding)
+                .padding(.bottom, Space.m)
                 .transition(.opacity)
             }
         }
-        .padding(.horizontal, Space.contentPadding)
-        .padding(.vertical, Space.l)
+    }
+
+    /// "2 tasks · 5 questions · 14 jobs waiting".
+    static func summary(tasks: Int, questions: Int, jobs: Int) -> String {
+        var parts: [String] = []
+        if tasks > 0 { parts.append(C3Format.plural(tasks, "task")) }
+        parts.append(C3Format.plural(questions, "question"))
+        parts.append("\(C3Format.plural(jobs, "job")) waiting")
+        return parts.joined(separator: " · ")
     }
 }
 
@@ -234,7 +213,7 @@ private struct ClusterRow: View {
                         .lineLimit(2)
                     if isLocked {
                         Image(systemName: "lock.fill").imageScale(.small).foregroundStyle(Palette.textSecondary)
-                            .accessibilityLabel("Never-guess fact")
+                            .accessibilityLabel("A fact only you set")
                     }
                 }
                 HStack(spacing: Space.xs) {
@@ -246,28 +225,18 @@ private struct ClusterRow: View {
                         Text("·")
                         Text(companies).lineLimit(1)
                     }
-                    if AnswerKind(cluster: cluster) == .longText {
-                        Text("· long").foregroundStyle(Palette.textTertiary)
-                    }
-                    if cluster.isAction {
-                        Text("· to do").foregroundStyle(Palette.textTertiary)
-                    }
                 }
                 .font(Typography.callout)
                 .foregroundStyle(Palette.textSecondary)
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, Space.m)
-        .padding(.vertical, Space.s)
-        .background(isSelected ? Palette.accent.opacity(0.14) : Color.clear,
-                    in: RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
-        .contentShape(Rectangle())
+        .selectableRow(isSelected: isSelected)
         .contextMenu {
             Button(cluster.isAction ? "Copy task" : "Copy question") { model.copyQuestion(cluster) }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(cluster.isAction ? "To do: " : "")\(model.title(for: cluster)), \(C3Format.plural(cluster.jobCount, "job"))\(isLocked ? ", locked" : "")\(model.isUnread(cluster) ? ", unread" : "")")
+        .accessibilityLabel("\(cluster.isAction ? "Task: " : "")\(model.title(for: cluster)), \(C3Format.plural(cluster.jobCount, "job"))\(isLocked ? ", locked" : "")\(model.isUnread(cluster) ? ", unread" : "")")
         .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
     }
 }
@@ -291,7 +260,7 @@ private struct AnsweredTodaySection: View {
                             Spacer()
                             if row.isPending {
                                 Button("Undo") { model.undo(clusterID: row.clusterID) }
-                                    .buttonStyle(.link)
+                                    .buttonStyle(.secondaryLink)
                                     .font(Typography.callout)
                             } else {
                                 Text(C3Format.plural(row.jobCount, "job")).font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
@@ -305,18 +274,9 @@ private struct AnsweredTodaySection: View {
                 HStack(spacing: Space.s) {
                     Text("Answered today").eyebrowStyle()
                     if let latest = rows.first, latest.status == .answered {
-                        // The answered cluster's pill: "✓ Answered · 14 jobs resumed".
-                        HStack(spacing: Space.xs) {
-                            Image(systemName: "checkmark")
-                            Text("Answered · \(C3Format.plural(latest.jobCount, "job")) resumed")
-                        }
-                        .font(Typography.callout)
-                        .foregroundStyle(Palette.applied)
-                        .padding(.horizontal, Space.s)
-                        .padding(.vertical, 2)
-                        .background(Palette.applied.opacity(0.12), in: Capsule())
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .id(latest.clusterID)
+                        Badge("Answered · \(C3Format.plural(latest.jobCount, "job")) back in the queue", symbol: "checkmark",
+                              tone: .status(.applied))
+                            .id(latest.clusterID)
                     }
                 }
             }
@@ -375,21 +335,15 @@ struct AnswerComposer: View {
 
     private var questionHeader: some View {
         VStack(alignment: .leading, spacing: Space.s) {
-            HStack(spacing: Space.s) {
-                Text(cluster.canonicalQuestion).eyebrowStyle()
-                if isLocked {
-                    Label("Never-guess", systemImage: "lock.fill")
-                        .font(Typography.monoSmall)
-                        .foregroundStyle(Palette.textSecondary)
-                        .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(Palette.sunken, in: Capsule())
-                }
+            if isLocked {
+                Badge("Fact only you set", symbol: "lock.fill")
+                    .help("The agent never guesses this. Your answer can be saved to your profile.")
             }
             Text(cluster.canonicalQuestion).font(Typography.title2).textSelection(.enabled)
             let others = cluster.variants.filter { $0 != cluster.canonicalQuestion }
             if cluster.jobCount > 0 || !others.isEmpty {
                 VStack(alignment: .leading, spacing: Space.xs) {
-                    Text("Asked by \(C3Format.plural(cluster.jobCount, "job"))\(others.isEmpty ? "" : " · variants:")")
+                    Text("Asked by \(C3Format.plural(cluster.jobCount, "job"))\(others.isEmpty ? "" : " · also asked as:")")
                         .font(Typography.callout).foregroundStyle(Palette.textSecondary)
                     if !others.isEmpty {
                         let shown = showAllVariants ? others : Array(others.prefix(2))
@@ -399,7 +353,7 @@ struct AnswerComposer: View {
                             }
                             if others.count > 2 {
                                 Button(showAllVariants ? "Show less" : "+\(others.count - 2)") { showAllVariants.toggle() }
-                                    .buttonStyle(.link).font(Typography.callout)
+                                    .buttonStyle(.secondaryLink).font(Typography.callout)
                             }
                         }
                     }
@@ -422,7 +376,7 @@ struct AnswerComposer: View {
                         }
                         Spacer()
                         Button("Use draft") { useSuggestion(suggestion) }
-                            .buttonStyle(.glass)
+                            .buttonStyle(.secondaryLink)
                             .help("Put the agent's draft in the answer box; edit it before you answer if needed")
                     }
                     Text(suggestion)
@@ -432,9 +386,9 @@ struct AnswerComposer: View {
                 }
                 .padding(Space.m)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .sunkenWell()
+                .well()
             } else if cluster.reason == .lowConfidence {
-                Text("The agent drafted something but wasn't confident enough to submit it.")
+                Text("The agent drafted something but wasn't sure enough to send it.")
                     .font(Typography.callout).foregroundStyle(Palette.textTertiary)
             }
         }
@@ -529,7 +483,7 @@ struct AnswerComposer: View {
                     .scrollContentBackground(.hidden)
                     .padding(Space.s)
                     .frame(minHeight: 140)
-                    .sunkenWell()
+                    .well()
                     .focused($editorFocused)
                 HStack(spacing: Space.xs) {
                     tokenButton("{company}")
@@ -555,7 +509,7 @@ struct AnswerComposer: View {
                 Label("Use your saved answer: “\(memory.answer.prefix(60))\(memory.answer.count > 60 ? "…" : "")”", systemImage: "brain")
                     .font(Typography.callout)
             }
-            .buttonStyle(.link)
+            .buttonStyle(.secondaryLink)
         }
     }
 
@@ -597,7 +551,7 @@ struct AnswerComposer: View {
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .help("Insert this story's facts (the agent won't invent metrics)")
+                    .help("Insert this story's facts into your answer")
                 }
             }
         }
@@ -617,7 +571,7 @@ struct AnswerComposer: View {
                     .foregroundStyle(Palette.textSecondary)
                     .padding(Space.s)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(Palette.surfaceRaised, in: RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
+                    .well()
                     .textSelection(.enabled)
             }
         }
@@ -649,7 +603,7 @@ struct AnswerComposer: View {
                 Toggle(isOn: Binding(get: { draft.saveToProfile }, set: { v in model.updateDraft(for: cluster) { $0.saveToProfile = v } })) {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Save to profile")
-                        Text("Stored as a never-guess fact and used for all future forms.")
+                        Text("Saved as a fact only you set and used on every future form.")
                             .font(Typography.callout).foregroundStyle(Palette.textTertiary)
                     }
                 }
@@ -657,7 +611,7 @@ struct AnswerComposer: View {
                 .disabled(draft.perJob)
             }
             if kind != .action {
-                Toggle("Save to memory (reuse for future jobs)", isOn: Binding(
+                Toggle("Remember this answer for future jobs", isOn: Binding(
                     get: { draft.saveToMemory && !draft.saveToProfile },
                     set: { v in model.updateDraft(for: cluster) { $0.saveToMemory = v } }))
                     .toggleStyle(.checkbox)
@@ -677,7 +631,7 @@ struct AnswerComposer: View {
         HStack(spacing: Space.s) {
             Spacer()
             Button("Skip these jobs") { model.skipSelected(undoManager: undoManager) }
-                .buttonStyle(.glass)
+                .buttonStyle(.secondaryLink)
                 .help("Skip every job that asks this")
             Button {
                 model.submitSelected(undoManager: undoManager)
@@ -687,7 +641,7 @@ struct AnswerComposer: View {
                     KeyCap(.submit)
                 }
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.primaryPill)
             .keyboardShortcut(.submit)
         }
     }
@@ -730,7 +684,6 @@ private struct ChoicePicker: View {
             }
             .focusable()
             .focused(focus)
-            .focusEffectDisabled()
             .onKeyPress(characters: .decimalDigits) { press in
                 guard let key = press.characters.first, let option = ChoiceLogic.option(forKey: key, in: Array(visible.prefix(9))) else {
                     return .ignored
@@ -786,7 +739,7 @@ private struct ChoicePicker: View {
                 }
             }
             .frame(maxWidth: 460, maxHeight: 220)
-            .sunkenWell()
+            .well()
         }
     }
 
@@ -802,7 +755,7 @@ private struct ChoicePicker: View {
             .background(on ? Palette.accent.opacity(0.12) : Palette.sunken, in: Capsule())
             .overlay(Capsule().stroke(on ? Palette.accent.opacity(0.5) : Palette.hairline, lineWidth: 0.5))
         }
-        .buttonStyle(PressScaleStyle())
+        .buttonStyle(.plain)
         .help("Press \(number)")
         .accessibilityAddTraits(on ? .isSelected : [])
     }
@@ -819,14 +772,14 @@ private struct ChoicePicker: View {
                     .focused($otherFocused)
                     .onSubmit { model.submitSelected(undoManager: undoManager) }
                 Button("Use the options") { model.updateDraft(for: cluster) { $0.useOther = false } }
-                    .buttonStyle(.link).font(Typography.callout)
+                    .buttonStyle(.secondaryLink).font(Typography.callout)
             }
         } else {
             Button("Other…") {
                 model.updateDraft(for: cluster) { $0.useOther = true }
                 otherFocused = true
             }
-            .buttonStyle(.link)
+            .buttonStyle(.secondaryLink)
             .font(Typography.callout)
             .help("None of these fit: type your own answer")
         }
@@ -842,9 +795,9 @@ private struct ChoicePicker: View {
 
 // MARK: - Action pane
 
-/// Detail pane for an agent blocker: the task, why the agent stopped, the affected jobs, and
-/// "Open in agent Chrome" / "Done, retry N jobs" / "Skip these jobs". No answer box, nothing is
-/// saved to memory, and the user is never asked to type a password here.
+/// Detail pane for a task: what to do, why the agent stopped, the jobs waiting, and "Open in the
+/// agent's Chrome" / "Done, try again" / "Skip these jobs". No answer box, nothing is saved, and
+/// the user is never asked to type a password here.
 struct ActionPane: View {
     var model: InboxModel
     var cluster: QuestionCluster
@@ -872,11 +825,7 @@ struct ActionPane: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: Space.s) {
-            HStack(spacing: Space.xs) {
-                Image(systemName: "hand.raised.fill").imageScale(.small)
-                Text("Agent is blocked").eyebrowStyle()
-            }
-            .foregroundStyle(Palette.needsYou)
+            Badge("The agent is stuck until you do this", symbol: "hand.raised.fill", tone: .warning)
             HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                 Image(systemName: InboxActionCopy.symbol(cluster)).foregroundStyle(Palette.needsYou)
                 Text(InboxActionCopy.title(cluster)).font(Typography.title2).textSelection(.enabled)
@@ -903,7 +852,7 @@ struct ActionPane: View {
         }
         .padding(Space.m)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .sunkenWell()
+        .well()
     }
 
     /// What the agent actually hit ("Choose Password", "Retype Password", the site).
@@ -915,12 +864,7 @@ struct ActionPane: View {
                 Text("What the agent saw").eyebrowStyle()
                 FlowLayout(spacing: Space.xs) {
                     ForEach(lines, id: \.self) { line in
-                        Text(line)
-                            .font(Typography.callout)
-                            .foregroundStyle(Palette.textSecondary)
-                            .padding(.horizontal, Space.s).padding(.vertical, 2)
-                            .background(Palette.sunken, in: Capsule())
-                            .textSelection(.enabled)
+                        Badge(line)
                     }
                 }
             }
@@ -931,7 +875,7 @@ struct ActionPane: View {
     private var affectedJobs: some View {
         if !jobs.isEmpty {
             VStack(alignment: .leading, spacing: Space.xs) {
-                Text("Waiting on this · \(C3Format.plural(cluster.jobCount, "job"))").eyebrowStyle()
+                Text("\(C3Format.plural(cluster.jobCount, "job")) waiting on this").eyebrowStyle()
                 ForEach(jobs.prefix(6)) { job in
                     Button { store.router.openJob(id: job.id) } label: {
                         HStack(spacing: Space.xs) {
@@ -959,26 +903,27 @@ struct ActionPane: View {
                     opening = false
                 }
             } label: {
-                Label("Open in agent Chrome", systemImage: "globe")
+                Label("Open in the agent's Chrome", systemImage: "globe")
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.secondaryLink)
             .disabled(opening)
             .help("Opens the application page in the Chrome profile the agent uses, so what you do there carries over")
             Spacer()
             Button(cluster.jobCount == 1 ? "Skip this job" : "Skip these jobs") { model.skipSelected(undoManager: undoManager) }
-                .buttonStyle(.glass)
+                .buttonStyle(.secondaryLink)
                 .help("Skip every job waiting on this")
             Button {
                 model.completeSelectedAction(undoManager: undoManager)
             } label: {
                 HStack(spacing: Space.xs) {
-                    Text(cluster.jobCount == 1 ? "Done, retry job" : "Done, retry \(cluster.jobCount) jobs")
+                    Text("Done, try again")
                     KeyCap(.submit)
                 }
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.primaryPill)
             .keyboardShortcut(.submit)
-            .help("You did the step: the agent tries these jobs again")
+            .help(cluster.jobCount == 1 ? "You did the step: the job goes back in the queue"
+                  : "You did the step: the \(cluster.jobCount) jobs go back in the queue")
         }
     }
 }
@@ -990,11 +935,11 @@ private struct InboxZeroView: View {
     var model: InboxModel
 
     var body: some View {
-        VStack(spacing: Space.xl) {
+        VStack(spacing: Space.l) {
             Spacer()
             InboxZeroCelebration(resumedJobs: model.resumedToday, trigger: model.inboxZeroTrigger)
             if model.pendingCount > 0 {
-                Button("Undo last answer") { model.undo() }.buttonStyle(.link)
+                Button("Undo last answer") { model.undo() }.buttonStyle(.secondaryLink)
             }
             Spacer()
             AnsweredTodaySection(model: model)

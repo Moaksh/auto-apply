@@ -116,13 +116,13 @@ enum ChartMath {
         var isManual: Bool
     }
 
-    /// One 100% stacked bar: ATS sources (LinkedIn/Glassdoor shown as "→ATS"), plus the Easy
+    /// One 100% stacked bar: sources (LinkedIn/Glassdoor lead to an application site), plus the Easy
     /// Apply manual segment, in descending order. Zero-count sources are omitted.
     static func sourceSegments(_ sources: [SourceStat], easyApply: Int) -> [SourceSegment] {
         var raw: [(String, String, Int, Bool)] = sources.map { stat in
             let label: String = switch stat.source {
-            case .linkedin: "LinkedIn→ATS"
-            case .glassdoor: "Glassdoor→ATS"
+            case .linkedin: "LinkedIn"
+            case .glassdoor: "Glassdoor"
             case .google: "Google Jobs"
             default: stat.source.label
             }

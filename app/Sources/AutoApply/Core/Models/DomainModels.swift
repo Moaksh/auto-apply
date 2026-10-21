@@ -17,11 +17,11 @@ enum AnswerOrigin: String, Codable, Sendable, CaseIterable, Hashable {
     var label: String {
         switch self {
         case .profile: "profile"
-        case .neverGuess: "profile · locked"
+        case .neverGuess: "fact you set"
         case .cv: "CV"
         case .memory: "memory"
         case .story: "story"
-        case .generated: "generated"
+        case .generated: "drafted"
         case .user: "you"
         }
     }

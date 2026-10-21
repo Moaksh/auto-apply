@@ -10,10 +10,10 @@ struct VariantChart: View {
     var body: some View {
         let variants = store.stats.byVariant
         let base = WidgetDataState.resolve(isLoaded: store.jobs.isLoaded, isAvailable: store.repository.isAvailable)
-        let state: CardState = base != .content ? base
+        let state: SurfaceState = base != .content ? base
             : (variants.isEmpty ? .empty(symbol: "doc.on.doc", message: "Shows which resume gets responses after your first applications") : .content)
 
-        Card("By resume variant", state: state, onRetry: { store.recomputeStats() }) {
+        Surface("By resume", state: state, onRetry: { store.recomputeStats() }) {
             VStack(alignment: .leading, spacing: Space.s) {
                 ForEach(Array(variants.enumerated()), id: \.element.id) { index, v in
                     row(v, color: Palette.categorical[index % Palette.categorical.count])

@@ -40,7 +40,7 @@ struct JobDetailActionsTests {
         #expect(approvedIDs(daemon) == [1])
         #expect(store.jobs.job(id: 1)?.state == .submitting, "chip updates in place")
         #expect(store.router.selection == .dashboard && store.router.path.isEmpty, "no navigation")
-        #expect(store.toasts.current?.message == "Approved · submitting")
+        #expect(store.toasts.current?.message == "Approved · sending now")
         #expect(!actions.inFlight)
     }
 

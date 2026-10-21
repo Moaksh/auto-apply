@@ -1,6 +1,97 @@
-// StatusViews.swift — StatusDot, StatusChip, StatusBar, ScorePill, ProvenanceTag,
-// ConfidenceDot, LockedField. Status color appears only as a dot, symbol tint or 2pt bar.
+// StatusViews.swift — the one Badge (status, score, answer source, site, plain labels), plus
+// StatusDot, StatusBar, ConfidenceDot and LockedField. Status colour is never the only signal:
+// every status badge carries a symbol and a word.
 import SwiftUI
+
+/// A small symbol + label capsule on the sunken stone. One component for every badge.
+struct Badge: View {
+    enum Tone: Equatable {
+        case neutral
+        case accent
+        case warning
+        case error
+        case status(StatusKind)
+
+        var color: Color {
+            switch self {
+            case .neutral: Palette.textSecondary
+            case .accent: Palette.accent
+            case .warning: Palette.needsYou
+            case .error: Palette.error
+            case .status(let kind): kind.color
+            }
+        }
+    }
+
+    var text: String?
+    var symbol: String?
+    var tone: Tone = .neutral
+    /// Numbers (scores) use the rounded metric face.
+    var numeric = false
+    var accessibilityText: String?
+
+    init(_ text: String?, symbol: String? = nil, tone: Tone = .neutral, numeric: Bool = false, accessibilityText: String? = nil) {
+        self.text = text
+        self.symbol = symbol
+        self.tone = tone
+        self.numeric = numeric
+        self.accessibilityText = accessibilityText
+    }
+
+    var body: some View {
+        HStack(spacing: Space.xs) {
+            if let symbol {
+                Image(systemName: symbol)
+                    .imageScale(.small)
+                    .foregroundStyle(tone.color)
+            }
+            if let text {
+                Text(text)
+                    .font(numeric ? Typography.metricSmall : Typography.callout)
+                    .foregroundStyle(numeric ? tone.color : Palette.textPrimary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, text == nil ? Space.xs : Space.s)
+        .padding(.vertical, Space.xxs)
+        .background(Palette.sunken, in: Capsule())
+        .fixedSize()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityText ?? text ?? "")
+    }
+}
+
+extension Badge {
+    /// A status ("Applied", "Needs you"). `compact` keeps only the symbol.
+    init(status kind: StatusKind, label: String? = nil, compact: Bool = false) {
+        self.init(compact ? nil : (label ?? kind.label), symbol: kind.symbol, tone: .status(kind),
+                  accessibilityText: label ?? kind.label)
+    }
+
+    /// A job's current status.
+    init(job: JobItem, compact: Bool = false) {
+        self.init(status: StatusKind(job: job), label: job.state == .submitted ? nil : job.state.label, compact: compact)
+    }
+
+    /// 0–100 match score, tinted by distance to the threshold.
+    init(score: Int, threshold: Int = 70) {
+        let tone: Tone = score >= threshold + 10 ? .status(.applied) : (score >= threshold ? .accent : (score >= threshold - 10 ? .warning : .neutral))
+        self.init("\(score)", tone: tone, numeric: true,
+                  accessibilityText: "Match score \(score)\(score < threshold ? ", below threshold \(threshold)" : "")")
+    }
+
+    /// Where an answer came from (profile / CV / memory / story / drafted / you).
+    init(origin: AnswerOrigin, reference: String? = nil) {
+        let text = reference.map { "\(origin.label) \($0)" } ?? origin.label
+        self.init(text, symbol: origin == .neverGuess ? "lock.fill" : nil, tone: origin == .user ? .accent : .neutral,
+                  accessibilityText: "Source: \(origin.label)")
+    }
+
+    /// The application site, by its full name.
+    init(site: Ats) {
+        self.init(site.label, accessibilityText: "Application site: \(site.label)")
+    }
+}
 
 /// 8pt status dot.
 struct StatusDot: View {
@@ -13,44 +104,7 @@ struct StatusDot: View {
     }
 }
 
-/// Symbol + label capsule. `.small` hides the label but keeps the symbol (differentiate
-/// without color).
-struct StatusChip: View {
-    enum Size { case small, regular }
-
-    var kind: StatusKind
-    var size: Size = .regular
-    var label: String?
-
-    init(_ kind: StatusKind, size: Size = .regular, label: String? = nil) {
-        self.kind = kind
-        self.size = size
-        self.label = label
-    }
-
-    init(job: JobItem, size: Size = .regular) {
-        self.init(StatusKind(job: job), size: size, label: job.state == .submitted ? nil : job.state.label)
-    }
-
-    var body: some View {
-        HStack(spacing: Space.xs) {
-            Image(systemName: kind.symbol)
-                .symbolRenderingMode(.palette)
-                .foregroundStyle(kind.color, Palette.textSecondary)
-                .imageScale(.small)
-            if size == .regular {
-                Text(label ?? kind.label).font(Typography.callout).foregroundStyle(Palette.textPrimary)
-            }
-        }
-        .padding(.horizontal, size == .regular ? Space.s : Space.xs)
-        .padding(.vertical, Space.xxs)
-        .background(Palette.sunken, in: Capsule())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(label ?? kind.label)
-    }
-}
-
-/// The 2pt leading status bar on cards.
+/// The 2pt leading status bar on pipeline cards.
 struct StatusBar: View {
     var kind: StatusKind
 
@@ -62,49 +116,7 @@ struct StatusBar: View {
     }
 }
 
-/// 0–100 match score, tinted by distance to the threshold.
-struct ScorePill: View {
-    var score: Int
-    var threshold: Int = 70
-
-    private var tint: Color {
-        if score >= threshold + 10 { return Palette.applied }
-        if score >= threshold { return Palette.accent }
-        if score >= threshold - 10 { return Palette.needsYou }
-        return Palette.textTertiary
-    }
-
-    var body: some View {
-        Text("\(score)")
-            .font(Typography.metricSmall)
-            .foregroundStyle(tint)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 1)
-            .background(tint.opacity(0.12), in: Capsule())
-            .accessibilityLabel("Match score \(score)\(score < threshold ? ", below threshold \(threshold)" : "")")
-    }
-}
-
-/// profile / CV / memory / story / generated / you.
-struct ProvenanceTag: View {
-    var origin: AnswerOrigin
-    var reference: String?
-
-    var body: some View {
-        HStack(spacing: 3) {
-            if origin == .neverGuess { Image(systemName: "lock.fill").imageScale(.small) }
-            Text(reference.map { "\(origin.label) \($0)" } ?? origin.label)
-        }
-        .font(Typography.monoSmall)
-        .foregroundStyle(origin == .user ? Palette.accent : Palette.textSecondary)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 1)
-        .background(Palette.sunken, in: Capsule())
-        .accessibilityLabel("Source: \(origin.label)")
-    }
-}
-
-/// green high · amber medium · grey low/n.a.
+/// green high · amber medium · red low · grey n/a.
 struct ConfidenceDot: View {
     var level: ApplicationAnswerItem.ConfidenceLevel
 
@@ -134,7 +146,7 @@ struct ConfidenceDot: View {
     }
 }
 
-/// Never-guess field styling: lock glyph + sunken well, everywhere ("locked = only I set this").
+/// A fact only you set: lock glyph + well. The agent never guesses these.
 struct LockedField<Content: View>: View {
     var title: String
     var isEmpty: Bool = false
@@ -151,24 +163,24 @@ struct LockedField<Content: View>: View {
             VStack(alignment: .leading, spacing: Space.xxs) {
                 content()
                 if isEmpty {
-                    Text("Always ask me").font(Typography.callout).foregroundStyle(Palette.textTertiary)
+                    Text("Not set: the agent will ask you").font(Typography.callout).foregroundStyle(Palette.textTertiary)
                 }
             }
             Spacer(minLength: 0)
         }
         .padding(.horizontal, Space.m)
         .padding(.vertical, Space.s)
-        .sunkenWell()
+        .well()
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(title), locked, set only by you")
+        .accessibilityLabel("\(title), a fact only you set")
     }
 }
 
-#Preview("Status") {
+#Preview("Badges") {
     VStack(alignment: .leading, spacing: Space.s) {
-        HStack { ForEach(StatusKind.allCases, id: \.self) { StatusChip($0, size: .small) } }
-        HStack { StatusChip(.needsYou); StatusChip(.applied); ScorePill(score: 91); ScorePill(score: 64) }
-        HStack { ProvenanceTag(origin: .cv); ProvenanceTag(origin: .neverGuess); ProvenanceTag(origin: .user) }
+        HStack { ForEach(StatusKind.allCases, id: \.self) { Badge(status: $0, compact: true) } }
+        HStack { Badge(status: .needsYou); Badge(status: .applied); Badge(score: 91); Badge(score: 64); Badge(site: .greenhouse) }
+        HStack { Badge(origin: .cv); Badge(origin: .neverGuess); Badge(origin: .user) }
         LockedField(title: "Notice period") { Text("60 days") }
         LockedField(title: "Start date", isEmpty: true) { EmptyView() }
     }

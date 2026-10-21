@@ -16,7 +16,7 @@ struct SystemCheckStep: View {
                 if index < model.checks.count - 1 { Divider().padding(.leading, 40) }
             }
         }
-        .surfaceCard()
+        .surface()
         if model.checks.contains(where: { $0.item?.ok == false && $0.item?.required == true }) {
             Text("Continue unlocks once the required checks pass.")
                 .font(Typography.callout).foregroundStyle(Palette.textSecondary)
@@ -46,7 +46,7 @@ private struct SystemCheckRowView: View {
                         showWell = true
                         onFix()
                     }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.secondaryLink)
                     .disabled(row.isFixing)
                 }
             }
@@ -70,7 +70,7 @@ private struct SystemCheckRowView: View {
                         .padding(Space.s)
                 }
                 .frame(maxHeight: 120)
-                .sunkenWell()
+                .well()
                 .padding(.leading, 32)
             }
         }
@@ -187,7 +187,7 @@ private struct ResumeTile: View {
             }
         }
         .padding(Space.m)
-        .surfaceCard()
+        .surface()
     }
 }
 
@@ -236,7 +236,7 @@ struct ConfirmProfileStep: View {
                 }
             }
             .padding(Space.m)
-            .surfaceCard()
+            .surface()
         }
         if !model.profileDraft.education.isEmpty {
             VStack(alignment: .leading, spacing: Space.s) {
@@ -246,7 +246,7 @@ struct ConfirmProfileStep: View {
                 }
             }
             .padding(Space.m)
-            .surfaceCard()
+            .surface()
         }
     }
 

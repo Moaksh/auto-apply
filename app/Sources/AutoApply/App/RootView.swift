@@ -1,6 +1,6 @@
-// RootView.swift — the main window: NavigationSplitView with the sidebar spine, a detail stack
-// rendering registry screens, the unified glass toolbar, contextual inspector, ⌘K palette
-// overlay and HUD toasts (§3.2).
+// RootView.swift — the main window: NavigationSplitView with the sidebar, a detail stack
+// rendering registry screens, the system glass toolbar (the only place Run lives besides ⌘K and
+// the Agent menu), the floating details panel, the ⌘K palette and HUD toasts.
 import SwiftUI
 
 struct RootView: View {
@@ -91,8 +91,9 @@ private struct PausedHairline: View {
     }
 }
 
-/// Toolbar: Run now, Pause/Resume, Auto|Review, search (⌘K), More. Every control is one click
-/// and icon-sized, so the bar fits even a narrow window (no ">>" overflow menu hiding them).
+/// Toolbar: Add job, Run (menu), Pause/Resume, Auto|Review, Search (⌘K), More, Details. Every
+/// control is icon-sized so the bar fits a narrow window. Run controls live only here, in ⌘K and
+/// in the Agent menu.
 struct MainToolbar: ToolbarContent {
     @Environment(AppStore.self) private var store
     @Environment(Router.self) private var router
@@ -109,22 +110,19 @@ struct MainToolbar: ToolbarContent {
             .labelStyle(.iconOnly)
             .help("Add a job by pasting its link (\(AppShortcut.addJobByLink.displayString))")
 
-            // Click: a full run. The arrow offers the shorter ones (only the queue, only prep).
             Menu {
-                Button("Full run: search, score and apply") { Task { await store.runNow() } }
+                Button("Run now: find, score and apply") { Task { await store.runNow() } }
                 Button("Apply queued jobs only (\(store.queuedCount))") { Task { await store.applyQueued() } }
                     .disabled(store.queuedCount == 0)
-                Button("Prep pass: collect questions") { Task { await store.runPrepPass() } }
+                Button("Collect questions only") { Task { await store.runPrepPass() } }
             } label: {
-                Label("Run now", systemImage: "bolt.fill")
+                Label("Run", systemImage: "play.fill")
             } primaryAction: {
                 Task { await store.runNow() }
             }
             .labelStyle(.iconOnly)
-            .menuIndicator(.visible)
-            .disabled(store.isPaused)
-            .help(store.isPaused ? "Resume the agent to run"
-                  : "Run now: search, score and apply (\(AppShortcut.runNow.displayString)). Apply only the queued jobs: \(AppShortcut.applyQueued.displayString)")
+            .disabled(store.isPaused || !store.isConnected)
+            .help(store.isPaused ? "Resume the agent to run" : "Run now: find, score and apply (\(AppShortcut.runNow.displayString)). Hold for more.")
 
             Button {
                 Haptics.levelChange()
@@ -150,16 +148,11 @@ struct MainToolbar: ToolbarContent {
             .pickerStyle(.segmented)
             .controlSize(.small)
             .fixedSize()
-            .help("Auto applies on its own; Review waits for your approval")
+            .help("Auto sends applications on its own; Review waits for your approval")
             .popover(isPresented: $showModeConfirm, arrowEdge: .bottom) {
-                ModeSwitchConfirm(pending: store.counts.awaitingReview) { approveAll in
+                ModeSwitchConfirm(pending: store.counts.awaitingReview) { switchMode in
                     showModeConfirm = false
-                    Task {
-                        if approveAll {
-                            await store.approve(applicationIDs: store.jobs.awaitingReview.compactMap(\.applicationID))
-                        }
-                        await store.setMode(.auto)
-                    }
+                    if switchMode { Task { await store.setMode(.auto) } }
                 }
             }
         }
@@ -173,9 +166,7 @@ struct MainToolbar: ToolbarContent {
             .help("Search and commands (\(AppShortcut.commandPalette.displayString))")
 
             Menu {
-                Button("Run Prep pass") { Task { await store.runPrepPass() } }.keyboardShortcut(.runPrep)
-                Divider()
-                Button("Open agent Chrome") { Task { await store.openAgentChrome() } }
+                Button("Open the agent's Chrome") { Task { await store.openAgentChrome() } }
                 Button("Open data folder") { Task { await store.perform(.openDataFolder) } }
                 Divider()
                 Button("Report a Bug…") { FeedbackRequest.kind = .bug; openWindow(id: WindowID.feedback) }
@@ -197,27 +188,41 @@ struct MainToolbar: ToolbarContent {
     }
 }
 
-/// "Approve 3 pending, or keep them in Review?" — inline decision, not a default (§3.2).
-private struct ModeSwitchConfirm: View {
+/// Switching to Auto only switches the mode. It never approves anything: applications already
+/// waiting in Review stay there until you approve them on the Review screen.
+struct ModeSwitchConfirm: View {
     var pending: Int
+    /// true = switch to Auto, false = cancel.
     var onChoose: (Bool) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            Text("Switch to Auto").font(Typography.title2)
-            Text("\(pending) application\(pending == 1 ? " is" : "s are") waiting for review.")
-                .font(Typography.body).foregroundStyle(Palette.textSecondary)
-            HStack {
-                Button("Keep in Review") { onChoose(false) }.buttonStyle(.glass)
-                Button("Approve \(pending)") { onChoose(true) }.buttonStyle(.glassProminent)
+            Text("Switch to Auto?").font(Typography.title2)
+            Text(ModeSwitchConfirm.message(pending: pending))
+                .font(Typography.body)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: Space.m) {
+                Spacer()
+                Button("Cancel") { onChoose(false) }
+                    .buttonStyle(.bordered)
+                    .keyboardShortcut(.cancelAction)
+                Button("Switch to Auto") { onChoose(true) }
+                    .buttonStyle(.primaryPill)
+                    .keyboardShortcut(.defaultAction)
             }
         }
         .padding(Space.l)
-        .frame(width: 300)
+        .frame(width: 320)
+    }
+
+    static func message(pending: Int) -> String {
+        "New applications will be sent without asking you. The \(pending) already waiting stay in Review until you approve them there."
     }
 }
 
-/// The details panel: a floating glass sheet on the trailing edge, over the screen's content.
+/// The details panel: a floating Liquid Glass pane on the trailing edge (like the system
+/// inspector), over the screen's content. No custom material, radius or shadow.
 private struct InspectorPanel: View {
     var close: () -> Void
 
@@ -238,11 +243,9 @@ private struct InspectorPanel: View {
             InspectorContent()
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
-        .frame(width: 360)
+        .frame(width: LayoutMetrics.inspectorWidth)
         .frame(maxHeight: .infinity)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.separator.opacity(0.6)))
-        .shadow(color: .black.opacity(0.35), radius: 18, x: -4, y: 0)
+        .glassChrome(in: RoundedRectangle(cornerRadius: Radius.palette, style: .continuous))
         .padding(Space.s)
     }
 }
@@ -258,7 +261,7 @@ private struct InspectorContent: View {
         } else if let view = registry.inspector(for: router.selection.screen) {
             view
         } else {
-            EmptyState(symbol: "sidebar.right", title: "Nothing to inspect", message: "Select an item to see its details here.")
+            EmptyState(symbol: "sidebar.right", title: "No details", message: "Select an item to see its details here.")
         }
     }
 }

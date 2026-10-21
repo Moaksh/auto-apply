@@ -103,7 +103,7 @@ enum FlowAccessibility {
     static func summary(verb: String, counts: RunStats, filling: Int, isRunning: Bool) -> String {
         let prefix = isRunning ? "Agent \(verb.lowercased()). Current run" : "Last run"
         return "\(prefix): \(counts.discovered) discovered, \(counts.scored) scored, \(counts.queued) queued, "
-            + "\(filling) filling, \(counts.submitted) submitted"
+            + "\(filling) filling, \(counts.submitted) applied"
     }
 
     static func stage(_ stage: FlowStage, counts: RunStats, filling: Int, threshold: Int) -> String {
@@ -320,7 +320,7 @@ struct PipelineFlowView: View {
             .buttonStyle(.plain)
             .position(x: end.x + 60, y: end.y)
             .accessibilityLabel(text)
-            .accessibilityHint(stage == .needsYou ? "Opens the Needs You inbox" : "Opens Pipeline filtered by skip reason")
+            .accessibilityHint(stage == .needsYou ? "Opens Needs You" : "Opens Pipeline filtered by skip reason")
         }
     }
 }

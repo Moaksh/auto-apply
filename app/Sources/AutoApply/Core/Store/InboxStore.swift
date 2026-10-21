@@ -46,16 +46,16 @@ final class InboxStore {
 
     var openCount: Int { clusters.count }
 
-    /// Agent blockers ("to do") vs form questions.
+    /// Tasks for you (agent blockers) vs form questions.
     var actionCount: Int { clusters.filter(\.isAction).count }
     var questionCount: Int { clusters.count - actionCount }
 
-    /// "3 to do · 34 questions" / "1 question" (empty when the inbox is empty).
+    /// "3 tasks · 34 questions" / "1 question" (empty when Needs You is empty).
     var summary: String { Self.summary(actions: actionCount, questions: questionCount) }
 
     nonisolated static func summary(actions: Int, questions: Int) -> String {
         var parts: [String] = []
-        if actions > 0 { parts.append("\(actions) to do") }
+        if actions > 0 { parts.append("\(actions) task\(actions == 1 ? "" : "s")") }
         if questions > 0 { parts.append("\(questions) question\(questions == 1 ? "" : "s")") }
         return parts.joined(separator: " · ")
     }

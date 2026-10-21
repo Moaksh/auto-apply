@@ -1,7 +1,7 @@
 // ActivityLogView.swift — the Activity log (docs/UI_UX_PLAN.md §5.11): SF Mono throughout, a
 // fixed-width colored type tag, scope filter (All | Agent | You | Errors), text filter, run
 // picker and follow mode. NSTableView-backed `Table` virtualizes rows (smooth at 100k).
-// Scrolling away or selecting a row pauses follow; a glass pill "12 new events ↑" resumes it.
+// Scrolling away or selecting a row pauses follow; a floating glass bar "12 new events ↑" resumes it.
 import SwiftUI
 
 @objc(ActivityLogFeature)
@@ -80,12 +80,6 @@ struct ActivityLogView: View {
                 }
             }
         }
-        .background {
-            Button("") { searchFocused = true }
-                .keyboardShortcut(.filter)
-                .hidden()
-                .accessibilityHidden(true)
-        }
     }
 
     private func scopePicker(_ filter: Binding<ActivityFilter>) -> some View {
@@ -102,15 +96,22 @@ struct ActivityLogView: View {
 
     private func searchField(_ filter: Binding<ActivityFilter>) -> some View {
         HStack(spacing: Space.xs) {
-            Image(systemName: "magnifyingglass").foregroundStyle(Palette.textSecondary)
-            TextField("filter…", text: filter.searchText)
+            // ⌘F focuses the filter (local to Activity).
+            Button { searchFocused = true } label: {
+                Image(systemName: "magnifyingglass").foregroundStyle(Palette.textSecondary)
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.filter)
+            .help("Filter (\(AppShortcut.filter.displayString))")
+            .accessibilityLabel("Filter")
+            TextField("Filter", text: filter.searchText)
                 .textFieldStyle(.plain)
                 .font(Typography.mono)
                 .focused($searchFocused)
                 .frame(minWidth: 80, maxWidth: 220)
         }
         .padding(.horizontal, Space.s).padding(.vertical, Space.xs)
-        .sunkenWell()
+        .well()
     }
 
     private var runMenu: some View {
@@ -150,18 +151,16 @@ struct ActivityLogView: View {
                 Circle().fill(model.isFollowing ? Palette.applied : Palette.textTertiary).frame(width: 7, height: 7)
             }
         }
-        .buttonStyle(.glass)
+        .buttonStyle(.secondaryLink)
         .help(model.isFollowing ? "Pause follow mode" : "Resume follow mode")
     }
 
     private func chip(_ text: String, clear: @escaping () -> Void) -> some View {
         HStack(spacing: Space.xs) {
-            Text(text).font(Typography.callout)
+            Badge(text)
             Button(action: clear) { Image(systemName: "xmark.circle.fill") }.buttonStyle(.borderless)
                 .accessibilityLabel("Clear \(text)")
         }
-        .padding(.horizontal, Space.s).padding(.vertical, 2)
-        .background(Palette.sunken, in: Capsule())
     }
 
     private var runTitle: String {
@@ -278,15 +277,14 @@ struct ActivityLogView: View {
     @ViewBuilder
     private func newEventsPill(proxy: ScrollViewProxy) -> some View {
         if !model.isFollowing && model.newEventCount > 0 {
-            Button {
-                model.resumeFollow()
-            } label: {
-                Text("\(model.newEventCount) new event\(model.newEventCount == 1 ? "" : "s") ↑")
-                    .font(Typography.bodyEmph)
-                    .padding(.horizontal, Space.l).padding(.vertical, Space.s)
+            GlassBar(interactive: true) {
+                Button {
+                    model.resumeFollow()
+                } label: {
+                    Text("\(model.newEventCount) new event\(model.newEventCount == 1 ? "" : "s") ↑").font(Typography.bodyEmph)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
-            .glassCapsule(interactive: true)
             .padding(.top, Space.l)
             .transition(reduced ? .opacity : .move(edge: .top).combined(with: .opacity))
             .accessibilityHint("Resumes follow mode and scrolls to the newest event")

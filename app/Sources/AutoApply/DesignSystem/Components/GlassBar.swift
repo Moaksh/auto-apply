@@ -1,28 +1,41 @@
-// Overlays.swift — HUDToast (+ host), Banner (single global issue), BulkActionBar
-// (floating glass, morphing), PausedOverlay.
+// GlassBar.swift — the floating control layer inside a window: GlassBar (the one in-window
+// glass capsule), the bulk-action bar built on it, HUD toasts, the paused bar, and the single
+// global Banner (flat, it's content).
 import SwiftUI
 
-/// Glass capsule toast.
+/// A floating Liquid Glass capsule holding controls. The only in-window glass besides the
+/// ⌘K palette; it floats over content and never contains content itself.
+struct GlassBar<Content: View>: View {
+    var interactive = false
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        HStack(spacing: Space.m) { content() }
+            .padding(.horizontal, Space.l)
+            .padding(.vertical, Space.s)
+            .glassChrome(in: Capsule(), interactive: interactive)
+    }
+}
+
+/// HUD toast: one sentence, an optional action.
 struct HUDToast: View {
     var toast: ToastCenter.Toast
     var onAction: () -> Void
 
     var body: some View {
-        HStack(spacing: Space.s) {
-            if let symbol = toast.symbol {
-                Image(systemName: symbol).foregroundStyle(iconColor)
+        GlassBar {
+            HStack(spacing: Space.s) {
+                if let symbol = toast.symbol {
+                    Image(systemName: symbol).foregroundStyle(iconColor)
+                }
+                Text(toast.message).font(Typography.body)
             }
-            Text(toast.message).font(Typography.bodyEmph)
             if let actionTitle = toast.actionTitle {
                 Button(actionTitle, action: onAction)
-                    .buttonStyle(.plain)
+                    .buttonStyle(.secondaryLink)
                     .font(Typography.bodyEmph)
-                    .foregroundStyle(Palette.accent)
             }
         }
-        .padding(.horizontal, Space.l)
-        .padding(.vertical, Space.s)
-        .glassCapsule(tint: Palette.accent.opacity(0.15))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isStaticText)
     }
@@ -62,8 +75,8 @@ extension View {
     func toastHost(_ center: ToastCenter) -> some View { modifier(HUDToastHost(center: center)) }
 }
 
-/// The single global banner (§4.4): amber or red tint, one sentence, one fix button.
-/// With several issues it reads "2 issues · View".
+/// The single global banner: one sentence and one fix, on a faint tint. With several issues it
+/// reads "2 issues · View".
 struct Banner: View {
     var issues: [AppIssue]
     var onFix: (AppIssue) -> Void
@@ -82,9 +95,9 @@ struct Banner: View {
                     .lineLimit(1)
                 Spacer(minLength: Space.s)
                 if issues.count > 1 {
-                    Button("View", action: onShowAll).buttonStyle(.glass)
+                    Button("View", action: onShowAll).buttonStyle(.secondaryLink)
                 } else if let title = first.fixTitle {
-                    Button(title) { onFix(first) }.buttonStyle(.glass)
+                    Button(title) { onFix(first) }.buttonStyle(.secondaryLink)
                 }
                 if let onDismiss, issues.count == 1 {
                     Button { onDismiss(first) } label: { Image(systemName: "xmark") }
@@ -94,7 +107,7 @@ struct Banner: View {
             }
             .padding(.horizontal, Space.m)
             .padding(.vertical, Space.s)
-            .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
+            .background(tint.opacity(0.10), in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
             .accessibilityElement(children: .contain)
         }
     }
@@ -113,14 +126,13 @@ struct BulkAction: Identifiable {
     var action: () -> Void
 }
 
-/// Floating glass action bar (Review queue): appears when ≥ 1 item is selected; buttons morph
-/// in/out with `glassEffectID` as the selection changes; the count rolls.
+/// Floating bulk-action bar (Review): "N selected", the actions (one primary pill), clear.
+/// An optional accessory row (a confirmation question) sits above it.
 struct BulkActionBar<Accessory: View>: View {
     var selectionCount: Int
     var actions: [BulkAction]
     var onClear: () -> Void
     @ViewBuilder var accessory: () -> Accessory
-    @Namespace private var glassNS
 
     init(selectionCount: Int, actions: [BulkAction], onClear: @escaping () -> Void,
          @ViewBuilder accessory: @escaping () -> Accessory = { EmptyView() }) {
@@ -131,86 +143,82 @@ struct BulkActionBar<Accessory: View>: View {
     }
 
     var body: some View {
-        GlassEffectContainer(spacing: Space.s) {
-            VStack(spacing: Space.s) {
-                accessory()
-                HStack(spacing: Space.s) {
-                    HStack(spacing: Space.xs) {
-                        Text("\(selectionCount)").font(Typography.metricSmall).numericRoll(Double(selectionCount))
-                        Text("selected").font(Typography.body)
-                    }
-                    .padding(.horizontal, Space.m)
-                    .padding(.vertical, Space.s)
-                    .glassEffect(.regular, in: Capsule())
-                    .glassEffectID("count", in: glassNS)
-
-                    ForEach(actions) { action in
-                        Button(action: action.action) {
-                            HStack(spacing: Space.xs) {
-                                if let symbol = action.symbol { Image(systemName: symbol) }
-                                Text(action.title)
-                                if let shortcut = action.shortcut { KeyCap(shortcut) }
-                            }
-                        }
-                        .buttonStyle(action.isProminent ? AnyPrimitiveButtonStyle(.glassProminent) : AnyPrimitiveButtonStyle(.glass))
-                        .tint(action.isDestructive ? Palette.error : nil)
-                        .disabled(action.isDisabled)
-                        .glassEffectID(action.id, in: glassNS)
-                    }
-
-                    Button(action: onClear) { Image(systemName: "xmark") }
-                        .buttonStyle(.glass)
-                        .accessibilityLabel("Clear selection")
-                        .glassEffectID("clear", in: glassNS)
+        VStack(spacing: Space.s) {
+            accessory()
+            GlassBar {
+                HStack(spacing: Space.xs) {
+                    Text("\(selectionCount)").font(Typography.metricSmall).numericRoll(Double(selectionCount))
+                    Text("selected").font(Typography.body).foregroundStyle(Palette.textSecondary)
                 }
+                ForEach(actions) { action in
+                    let label = HStack(spacing: Space.xs) {
+                        if let symbol = action.symbol { Image(systemName: symbol) }
+                        Text(action.title)
+                        if let shortcut = action.shortcut { KeyCap(shortcut) }
+                    }
+                    if action.isProminent {
+                        Button(action: action.action) { label }
+                            .buttonStyle(.primaryPill)
+                            .disabled(action.isDisabled)
+                    } else {
+                        Button(action: action.action) { label }
+                            .buttonStyle(.secondaryLink)
+                            .foregroundStyle(action.isDestructive ? Palette.error : Palette.accent)
+                            .disabled(action.isDisabled)
+                    }
+                }
+                Button(action: onClear) { Image(systemName: "xmark") }
+                    .buttonStyle(.borderless)
+                    .help("Clear selection")
+                    .accessibilityLabel("Clear selection")
             }
         }
-        .motion(Motion.snappy, value: actions.map(\.id))
     }
 }
 
-/// Type-erased primitive button style so a conditional can choose between glass styles.
-struct AnyPrimitiveButtonStyle: PrimitiveButtonStyle {
-    private let make: (Configuration) -> AnyView
+/// A confirmation question shown above the bulk bar: text, then its choices.
+struct GlassBarPrompt<Actions: View>: View {
+    var symbol: String?
+    var message: String
+    @ViewBuilder var actions: () -> Actions
 
-    init<S: PrimitiveButtonStyle>(_ style: S) {
-        make = { AnyView(style.makeBody(configuration: $0)) }
+    var body: some View {
+        GlassBar {
+            if let symbol { Image(systemName: symbol).foregroundStyle(Palette.needsYou) }
+            Text(message).font(Typography.bodyEmph)
+            actions()
+        }
     }
-
-    func makeBody(configuration: Configuration) -> some View { make(configuration) }
 }
 
-/// "Paused · Resume ⌘⇧P" glass capsule (hero, menu bar).
-struct PausedCapsule: View {
+/// "Paused · Resume ⇧⌘P" — floats over the live agent while paused.
+struct PausedBar: View {
     var onResume: () -> Void
 
     var body: some View {
-        Button(action: onResume) {
-            HStack(spacing: Space.s) {
-                Image(systemName: "pause.fill")
-                Text("Paused")
-                Text("·").foregroundStyle(Palette.textTertiary)
-                Text("Resume")
-                KeyCap(.togglePause)
+        GlassBar(interactive: true) {
+            Label("Paused", systemImage: "pause.fill").font(Typography.bodyEmph)
+            Button(action: onResume) {
+                HStack(spacing: Space.xs) {
+                    Text("Resume")
+                    KeyCap(.togglePause)
+                }
             }
+            .buttonStyle(.secondaryLink)
             .font(Typography.bodyEmph)
-            .padding(.horizontal, Space.l)
-            .padding(.vertical, Space.s)
         }
-        .buttonStyle(.plain)
-        .glassCapsule(interactive: true)
     }
 }
 
-#Preview("Overlays") {
+#Preview("Glass bar") {
     VStack(spacing: Space.l) {
-        Banner(issues: [AppIssue(id: "d", severity: .error, message: "Can't reach autoapplyd.", fixTitle: "Restart daemon", fix: .restartDaemon)],
+        Banner(issues: [AppIssue(id: "d", severity: .error, message: "Can't reach the agent.", fixTitle: "Restart agent", fix: .restartDaemon)],
                onFix: { _ in }, onShowAll: {})
         BulkActionBar(selectionCount: 2, actions: [
             BulkAction(id: "approve", title: "Approve & submit", shortcut: .approve, isProminent: true) {},
             BulkAction(id: "skip", title: "Skip", shortcut: .skip) {},
         ], onClear: {})
-        PausedCapsule {}
+        PausedBar {}
     }
     .padding()
     .frame(width: 640)

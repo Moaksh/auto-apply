@@ -112,7 +112,7 @@ struct ChartMathTests {
         let stats = [SourceStat(source: .greenhouse, discovered: 46, applied: 30), SourceStat(source: .linkedin, discovered: 60, applied: 10),
                      SourceStat(source: .lever, discovered: 0, applied: 0)]
         let segments = ChartMath.sourceSegments(stats, easyApply: 45)
-        #expect(segments.map(\.label) == ["Greenhouse", "LinkedIn→ATS", "LinkedIn Easy Apply (manual)"])
+        #expect(segments.map(\.label) == ["Greenhouse", "LinkedIn", "LinkedIn Easy Apply (manual)"])
         #expect(segments.map(\.count) == [46, 15, 45])
         #expect(segments.last?.isManual == true)
         #expect(abs(segments.reduce(0) { $0 + $1.share } - 1) < 1e-9)
@@ -175,7 +175,7 @@ struct ChartMathTests {
         var c = RunStats()
         c.discovered = 41; c.scored = 38; c.skipped = 27; c.queued = 12; c.submitted = 9; c.needsYou = 2
         #expect(FlowAccessibility.summary(verb: "Applying", counts: c, filling: 1, isRunning: true)
-            == "Agent applying. Current run: 41 discovered, 38 scored, 12 queued, 1 filling, 9 submitted")
+            == "Agent applying. Current run: 41 discovered, 38 scored, 12 queued, 1 filling, 9 applied")
         #expect(FlowAccessibility.summary(verb: "Idle", counts: c, filling: 0, isRunning: false).hasPrefix("Last run:"))
         #expect(FlowAccessibility.stage(.scored, counts: c, filling: 0, threshold: 70) == "Scored, 38 jobs, 27 skipped below threshold 70")
         #expect(FlowAccessibility.stage(.filling, counts: c, filling: 1, threshold: 70) == "Filling, 1 job, 2 need you")

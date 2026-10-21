@@ -1,6 +1,6 @@
-// JobCard.swift — the kanban card (§5.3): 2pt status bar, company monogram, company + title,
-// meta row (score pill, ATS badge, age, resume initial) and optional chips ("✋ 2 Qs",
-// "Heard back?", "⏱ 7d"). Equatable value props so rows don't re-render needlessly.
+// JobCard.swift — the pipeline card: 2pt status bar, company monogram, company + title, meta
+// row (score, application site by full name, age, resume initial) and optional badges ("2
+// questions", "Heard back?", "7 days"). Equatable value props so rows don't re-render needlessly.
 import SwiftUI
 
 struct JobCard: View, Equatable {
@@ -35,10 +35,9 @@ struct JobCard: View, Equatable {
                 }
                 Text(job.title).font(Typography.callout).foregroundStyle(Palette.textSecondary).lineLimit(1)
                 HStack(spacing: Space.xs) {
-                    if let score = job.score { ScorePill(score: score, threshold: threshold) }
-                    Text(job.ats.shortLabel).font(Typography.monoSmall).foregroundStyle(Palette.textSecondary)
-                        .padding(.horizontal, 4).background(Palette.sunken, in: RoundedRectangle(cornerRadius: 3))
-                        .help(job.ats.label)
+                    if let score = job.score { Badge(score: score, threshold: threshold) }
+                    Text(job.ats.label).font(Typography.callout).foregroundStyle(Palette.textSecondary).lineLimit(1)
+                        .help("Application site: \(job.ats.label)")
                     Text(BoardRules.ageText(since: BoardRules.ageReference(job), now: now))
                         .font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
                     Spacer(minLength: 0)
@@ -49,12 +48,7 @@ struct JobCard: View, Equatable {
                     }
                 }
                 if job.state == .skipped {
-                    Text(BoardRules.skipTag(job.skipReason ?? job.stateReason, score: job.score, threshold: threshold))
-                        .font(Typography.callout)
-                        .foregroundStyle(Palette.textSecondary)
-                        .padding(.horizontal, 6).padding(.vertical, 1)
-                        .background(Palette.sunken, in: Capsule())
-                        .lineLimit(1)
+                    Badge(BoardRules.skipTag(job.skipReason ?? job.stateReason, score: job.score, threshold: threshold))
                         .help("Why AutoApply skipped this job")
                 }
                 chips
@@ -63,7 +57,7 @@ struct JobCard: View, Equatable {
             .padding(.vertical, Space.s)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .surfaceCard(cornerRadius: Radius.inner, raised: isSelected)
+        .surface(cornerRadius: Radius.inner)
         .overlay {
             if isSelected {
                 RoundedRectangle(cornerRadius: Radius.inner + 2, style: .continuous)
@@ -83,39 +77,31 @@ struct JobCard: View, Equatable {
         if questionCount > 0 || nudge != nil || job.state == .failed || job.state == .unknownVerify || job.state == .awaitingReview || (stalled && ageDays >= 7) {
             HStack(spacing: Space.xs) {
                 if questionCount > 0 {
-                    chip("✋ \(questionCount) Q\(questionCount == 1 ? "" : "s")", tint: Palette.needsYou)
+                    Badge(C3Format.plural(questionCount, "question"), symbol: StatusKind.needsYou.symbol, tone: .warning)
                 }
-                if job.state == .awaitingReview { chip("Awaiting review", tint: Palette.accent) }
-                if job.state == .failed { chip("Failed", tint: Palette.error) }
-                if job.state == .unknownVerify { chip("Verify submission", tint: Palette.error) }
+                if job.state == .awaitingReview { Badge("Waiting for review", symbol: "checkmark.rectangle.stack", tone: .accent) }
+                if job.state == .failed { Badge("Failed", symbol: StatusKind.error.symbol, tone: .error) }
+                if job.state == .unknownVerify { Badge("Check if applied", symbol: StatusKind.error.symbol, tone: .error) }
                 if case .heardBack? = nudge {
                     Menu {
                         Button("Interview") { onNudgeAnswer(.interview) }
                         Button("Assessment") { onNudgeAnswer(.assessment) }
                         Button("Rejected") { onNudgeAnswer(.rejected) }
-                        Divider()
-                        Button("Not yet") {}
                     } label: {
                         Text("Heard back?").font(Typography.callout)
                     }
                     .menuStyle(.borderlessButton)
                     .menuIndicator(.hidden)
                     .fixedSize()
-                    .padding(.horizontal, 6).padding(.vertical, 1)
-                    .background(Palette.accent.opacity(0.12), in: Capsule())
+                    .padding(.horizontal, Space.s).padding(.vertical, Space.xxs)
+                    .background(Palette.sunken, in: Capsule())
                 }
-                if stalled && ageDays >= 7 { chip("⏱ \(ageDays)d", tint: Palette.textTertiary) }
+                if stalled && ageDays >= 7 { Badge("\(ageDays) days", symbol: "clock") }
             }
         }
     }
 
     private var ageDays: Int { Int(now.timeIntervalSince(BoardRules.ageReference(job)) / 86_400) }
-
-    private func chip(_ text: String, tint: Color) -> some View {
-        Text(text).font(Typography.callout)
-            .padding(.horizontal, 6).padding(.vertical, 1)
-            .background(tint.opacity(0.14), in: Capsule())
-    }
 
     private var accessibilityText: String {
         var parts = [job.company, job.title, StatusKind(job: job).label]

@@ -120,12 +120,12 @@ private struct OnboardingContent: View {
             Spacer()
             if model.step == .systemCheck {
                 Button("Re-check") { Task { await model.runSystemCheck() } }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.secondaryLink)
                     .disabled(model.isCheckingSystem)
             }
             if model.canGoBack {
                 Button("Back") { model.back() }
-                    .buttonStyle(.glass)
+                    .buttonStyle(.secondaryLink)
                     .keyboardShortcut(.cancelAction)
             }
             Button {
@@ -137,7 +137,7 @@ private struct OnboardingContent: View {
                     KeyCap("⌘↵")
                 }
             }
-            .buttonStyle(.glassProminent)
+            .buttonStyle(.primaryPill)
             .keyboardShortcut(.return, modifiers: .command)
             .disabled(model.isSaving || (model.step == .systemCheck && !model.canContinue))
             .errorShake(trigger: model.shakeTrigger)

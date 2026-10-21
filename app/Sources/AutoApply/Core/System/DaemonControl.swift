@@ -187,7 +187,7 @@ extension AppStore {
         switch issue.fix {
         case .restartDaemon?:
             let ok = await DaemonControl.ensureRunning()
-            toasts.show(ok ? "autoapplyd is running again." : "Couldn't start autoapplyd. Check the logs (Settings ▸ Data).",
+            toasts.show(ok ? "The agent is running again." : "Couldn't start the agent. Check the logs (Settings ▸ Agent ▸ Files).",
                         symbol: ok ? "arrow.clockwise" : "exclamationmark.triangle.fill", style: ok ? .info : .error,
                         duration: .seconds(3))
         case .reconnectSource(let source)?:

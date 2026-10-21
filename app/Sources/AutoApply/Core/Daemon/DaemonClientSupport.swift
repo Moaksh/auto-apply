@@ -49,8 +49,8 @@ extension DaemonConnectionState {
 extension DaemonClientError: LocalizedError {
     var errorDescription: String? {
         switch self {
-        case .notConnected: "Not connected to autoapplyd"
-        case .timeout: "Daemon didn't respond"
+        case .notConnected: "Not connected to the agent"
+        case .timeout: "The agent didn't respond"
         case .daemon(let payload): payload.message
         case .encoding(let m): "Couldn't encode command: \(m)"
         case .decoding(let m): "Couldn't decode reply: \(m)"

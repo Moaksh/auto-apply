@@ -36,8 +36,8 @@ struct InboxSplitTests {
         // List order (and keyboard navigation) puts the blocker first even with fewer jobs.
         #expect(model.clusters.map(\.clusterId) == ["a_account", "q_big", "q_small"])
         #expect(store.inbox.clusters.first?.clusterId == "a_account")
-        #expect(model.summary == "1 to do · 2 questions")
-        #expect(store.inbox.summary == "1 to do · 2 questions")
+        #expect(model.summary == "1 task · 2 questions")
+        #expect(store.inbox.summary == "1 task · 2 questions")
         model.ensureSelection()
         #expect(model.selectedClusterID == "a_account")
         #expect(model.title(for: model.clusters[0]) == "Create an account or sign in at JPMC")
@@ -70,7 +70,7 @@ struct InboxSplitTests {
         var unknown = C3Fixtures.cluster("u", jobs: [1], question: "x")
         unknown.kind = "something_new"
         #expect(!unknown.isAction)
-        #expect(InboxStore.summary(actions: 3, questions: 34) == "3 to do · 34 questions")
+        #expect(InboxStore.summary(actions: 3, questions: 34) == "3 tasks · 34 questions")
         #expect(InboxStore.summary(actions: 0, questions: 1) == "1 question")
     }
 }

@@ -1,6 +1,7 @@
-// BoardView.swift — the Pipeline screen (§5.3): header with Board | Table, filter, Source,
-// Score ≥, Resume and "Show skipped"; the kanban board (horizontal columns, keyboard
-// selection, legal-only drag & drop with matched-geometry flights) or the sortable table.
+// BoardView.swift — the Pipeline screen: header with Board | Table, filter, Source, Score ≥,
+// Resume and "Show skipped"; the kanban board (horizontal columns, keyboard selection,
+// legal-only drag & drop) or the sortable table. No primary action: you move jobs by dragging.
+// While the agent is unreachable, dragging is off and a line says why.
 import SwiftUI
 
 @objc(BoardFeature)
@@ -46,8 +47,14 @@ struct BoardView: View {
         @Bindable var router = router
         VStack(spacing: 0) {
             header(filter: $router.pipelineFilter)
-                .padding(.horizontal, Space.contentPadding)
-                .padding(.vertical, Space.m)
+            if store.hasSnapshot && !store.isConnected {
+                Label("Can't reach the agent. Moving jobs is off until it's back.", systemImage: "bolt.horizontal.circle")
+                    .font(Typography.callout)
+                    .foregroundStyle(Palette.textSecondary)
+                    .padding(.horizontal, Space.contentPadding)
+                    .padding(.bottom, Space.s)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
             Divider()
             content
         }
@@ -85,8 +92,7 @@ struct BoardView: View {
     // MARK: Header
 
     private func header(filter: Binding<PipelineFilter>) -> some View {
-        HStack(spacing: Space.m) {
-            Text("Pipeline").font(Typography.title1)
+        ScreenHeader("Pipeline", summary: C3Format.plural(store.jobs.all.count, "job")) {
             Picker("View", selection: $modeRaw) {
                 ForEach(BoardViewMode.allCases, id: \.self) { Text($0.title).tag($0.rawValue) }
             }
@@ -95,7 +101,14 @@ struct BoardView: View {
             .frame(width: 140)
 
             HStack(spacing: Space.xs) {
-                Image(systemName: "line.3.horizontal.decrease").foregroundStyle(Palette.textSecondary)
+                // ⌘F focuses the filter (local to Pipeline).
+                Button { searchFocused = true } label: {
+                    Image(systemName: "line.3.horizontal.decrease").foregroundStyle(Palette.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.filter)
+                .help("Filter (\(AppShortcut.filter.displayString))")
+                .accessibilityLabel("Filter")
                 TextField("Filter", text: filter.searchText)
                     .textFieldStyle(.plain)
                     .focused($searchFocused)
@@ -103,7 +116,7 @@ struct BoardView: View {
                     .onSubmit { boardFocused = true }
             }
             .padding(.horizontal, Space.s).padding(.vertical, Space.xs)
-            .sunkenWell()
+            .well()
 
             Menu(filter.wrappedValue.source?.label ?? "Source") {
                 Button("Any source") { filter.wrappedValue.source = nil }
@@ -140,15 +153,8 @@ struct BoardView: View {
                     filter.wrappedValue = PipelineFilter()
                     resumeFilter = nil
                 }
-                .buttonStyle(.link)
+                .buttonStyle(.secondaryLink)
             }
-            Spacer()
-            // ⌘F focuses the filter (local to Pipeline).
-            Button("") { searchFocused = true }
-                .keyboardShortcut(.filter)
-                .hidden()
-                .frame(width: 0, height: 0)
-                .accessibilityHidden(true)
         }
     }
 
@@ -166,13 +172,12 @@ struct BoardView: View {
                 boardSkeleton
             } else {
                 ErrorState(title: "Couldn't read the pipeline", message: "The local database isn't available yet.",
-                           actionTitle: "Retry") { store.recomputeStats() }
+                           actionTitle: "Try again") { store.recomputeStats() }
                     .frame(maxHeight: .infinity)
             }
         } else if store.jobs.all.isEmpty {
             EmptyState(symbol: "rectangle.split.3x1", title: "No jobs yet",
-                       message: "Jobs appear here as soon as the agent discovers them.",
-                       actionTitle: store.isConnected ? "Run now" : nil, prominent: true) { Task { await store.runNow() } }
+                       message: "Jobs appear here as the agent finds them. Start a run from the toolbar or with \(AppShortcut.runNow.displayString).")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if mode == .table {
             tableView(filter: filter)
@@ -224,7 +229,6 @@ struct BoardView: View {
         }
         .focusable()
         .focused($boardFocused)
-        .focusEffectDisabled()
         .onKeyPress(phases: .down) { press in
             handleKey(press, visible: visible, byColumn: byColumn)
         }
@@ -286,7 +290,7 @@ struct BoardView: View {
                 VStack(alignment: .leading, spacing: Space.s) {
                     Text(column.title).eyebrowStyle()
                     ForEach(0..<3, id: \.self) { _ in
-                        SkeletonBlock(lines: 2).padding(Space.s).surfaceCard(cornerRadius: Radius.inner)
+                        SkeletonBlock(lines: 2).padding(Space.s).surface(cornerRadius: Radius.inner)
                     }
                 }
                 .padding(Space.s)

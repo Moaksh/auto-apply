@@ -19,7 +19,7 @@ struct ActivityHeatmap: View {
         let weeks = ChartMath.weekCount(cells)
         let base = WidgetDataState.resolve(isLoaded: store.jobs.isLoaded, isAvailable: store.repository.isAvailable)
 
-        Card("Activity heatmap · 26 weeks", state: base, onRetry: { store.recomputeStats() }) {
+        Surface("Activity · 26 weeks", state: base, onRetry: { store.recomputeStats() }) {
             legend
         } content: {
             // 26 weeks × 14pt ≈ 364pt: fits every card width, so no scroll view is needed.

@@ -35,10 +35,8 @@ struct DashboardModelTests {
         #expect(DashboardFormat.deltaVsAverage(4.2) == "+4 vs avg")
         #expect(DashboardFormat.deltaVsAverage(-2.4) == "−2 vs avg")
         #expect(DashboardFormat.deltaVsAverage(0.3) == "On your average")
-        #expect(DashboardFormat.appliedTodayDelta(3.6) == KPICard.Delta(text: "4", isPositive: true))
-        #expect(DashboardFormat.appliedTodayDelta(0.2) == nil)
-        #expect(DashboardFormat.responseRateDelta(current: 0.18, previous: 0.15) == KPICard.Delta(text: "3pt", isPositive: true))
-        #expect(DashboardFormat.responseRateDelta(current: 0.10, previous: 0.15) == KPICard.Delta(text: "5pt", isPositive: false))
+        #expect(DashboardFormat.responseRateDelta(current: 0.18, previous: 0.15) == MetricDelta(text: "3pt", isPositive: true))
+        #expect(DashboardFormat.responseRateDelta(current: 0.10, previous: 0.15) == MetricDelta(text: "5pt", isPositive: false))
         #expect(DashboardFormat.responseRateDelta(current: nil, previous: 0.2) == nil)
     }
 
@@ -98,16 +96,6 @@ struct DashboardModelTests {
         #expect(HeroVerb.resolve(state: .capReached(used: 1, limit: 1), activeJobState: nil, lastStepAction: nil, openClusters: 0, hasError: false) == .doneForToday)
     }
 
-    @Test func countUpOnlyOnFirstLaunchOfTheDay() {
-        let today = at(9)
-        let stamp = CountUpPolicy.dayStamp(today, calendar: cal)
-        #expect(stamp == "2026-10-10")
-        #expect(CountUpPolicy.shouldCountUp(lastStamp: nil, now: today, reduceMotion: false, calendar: cal))
-        #expect(CountUpPolicy.shouldCountUp(lastStamp: "2026-10-09", now: today, reduceMotion: false, calendar: cal))
-        #expect(!CountUpPolicy.shouldCountUp(lastStamp: stamp, now: today, reduceMotion: false, calendar: cal))
-        #expect(!CountUpPolicy.shouldCountUp(lastStamp: nil, now: today, reduceMotion: true, calendar: cal), "Reduce Motion: instant")
-    }
-
     @Test func announcementsThrottledToOnePerTenSeconds() {
         var t = AnnouncementThrottle()
         let start = at(9)
@@ -124,10 +112,11 @@ struct DashboardModelTests {
         #expect(later)
     }
 
-    @Test func layoutBreakpoint() {
-        #expect(DashboardLayout(contentWidth: 1200) == .wide)
-        #expect(DashboardLayout(contentWidth: 1100) == .wide)
-        #expect(DashboardLayout(contentWidth: 1099) == .narrow)
+    @Test func adaptiveColumnsFitTheWidth() {
+        #expect(AdaptiveColumns.columns(for: 1200, minColumnWidth: 220, maxColumns: 4, spacing: 12) == 4)
+        #expect(AdaptiveColumns.columns(for: 800, minColumnWidth: 220, maxColumns: 4, spacing: 12) == 3)
+        #expect(AdaptiveColumns.columns(for: 300, minColumnWidth: 220, maxColumns: 4, spacing: 12) == 1)
+        #expect(AdaptiveColumns.columns(for: 0, minColumnWidth: 220, maxColumns: 4, spacing: 12) == 1)
     }
 
     @Test func tickerChipsCheckOffFromSteps() {

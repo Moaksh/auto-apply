@@ -40,7 +40,7 @@ struct FeedbackView: View {
                 .scrollContentBackground(.hidden)
                 .frame(minHeight: 140)
                 .padding(Space.xs)
-                .sunkenWell()
+                .well()
 
             if kind == .bug {
                 Toggle("Include recent logs (redacted)", isOn: $includeLogs).toggleStyle(.checkbox)
@@ -58,7 +58,7 @@ struct FeedbackView: View {
                 }
                 .frame(height: 180)
                 .padding(Space.xs)
-                .sunkenWell()
+                .well()
             }
 
             HStack {
@@ -71,7 +71,7 @@ struct FeedbackView: View {
                                        includeLogs: kind == .bug && includeLogs, env: env)
                     dismissWindow(id: WindowID.feedback)
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.secondaryLink)
                 .keyboardShortcut(.defaultAction)
             }
         }

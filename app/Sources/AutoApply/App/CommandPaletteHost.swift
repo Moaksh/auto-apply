@@ -1,5 +1,5 @@
-// CommandPaletteHost.swift — presents the ⌘K palette as a floating glass panel in the upper
-// third of the window. Content comes from the registry (`.commandPalette`, owned by C3); until
+// CommandPaletteHost.swift — presents the ⌘K palette as a floating Liquid Glass panel (control
+// layer) in the upper third of the window. Content comes from the registry (`.commandPalette`, owned by C3); until
 // C3 registers one, a basic functional palette (actions, navigation, jobs) is shown.
 import SwiftUI
 
@@ -22,8 +22,8 @@ struct CommandPaletteHost: View {
                     }
                 }
                 .frame(width: LayoutMetrics.paletteWidth)
-                .glassPanel()
-                .padding(.top, 90)
+                .glassChrome(in: RoundedRectangle(cornerRadius: Radius.palette, style: .continuous))
+                .padding(.top, Space.xxxl * 2)
                 .transition(reduced ? .opacity : .scale(scale: 0.96).combined(with: .opacity))
             }
         }
@@ -80,7 +80,7 @@ struct BasicCommandPalette: View {
                             .onTapGesture { selection = index; run(list) }
                     }
                     if list.isEmpty {
-                        Text("No matches").font(Typography.callout).foregroundStyle(Palette.textTertiary).padding(Space.l)
+                        Text("No matches").font(Typography.callout).foregroundStyle(Palette.textSecondary).padding(Space.l)
                     }
                 }
                 .padding(Space.s)
@@ -110,13 +110,10 @@ struct BasicCommandPalette: View {
                 StatusDot(kind: StatusKind(job: job))
                 Text(job.displayName).font(Typography.body).lineLimit(1)
                 Spacer()
-                if let score = job.score { ScorePill(score: score, threshold: store.preferences.matchThreshold) }
+                if let score = job.score { Badge(score: score, threshold: store.preferences.matchThreshold) }
             }
         }
-        .padding(.horizontal, Space.m)
-        .padding(.vertical, Space.s)
-        .background(selected ? Palette.accent.opacity(0.15) : .clear, in: RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
-        .contentShape(Rectangle())
+        .selectableRow(isSelected: selected)
     }
 
     private func run(_ list: [Item]) {

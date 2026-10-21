@@ -23,7 +23,7 @@ final class OnboardingModel {
             case .systemCheck: "System check"
             case .resumes: "Resumes"
             case .preferences: "Preferences"
-            case .neverGuess: "Never-guess facts"
+            case .neverGuess: "Facts only you set"
             case .stories: "Story bank"
             case .sources: "Sources"
             case .mode: "Mode"
@@ -582,6 +582,16 @@ final class OnboardingModel {
         careerURLDraft = ""
     }
 
+    /// The account-creation consent next to the email form; saved straight away (it isn't part
+    /// of the step's own save).
+    var createAccounts: Bool { store.preferences.createAccounts }
+
+    func setCreateAccounts(_ on: Bool) async {
+        var patch = PreferencesPatch()
+        try? patch.set(.createAccounts, on)
+        _ = await store.updatePreferences(patch, optimistic: { $0.createAccounts = on }, rollback: { $0.createAccounts = !on })
+    }
+
     @discardableResult
     func saveSources() async -> Bool {
         var enabled = store.preferences.sourcesEnabled
@@ -597,7 +607,7 @@ final class OnboardingModel {
 
     // MARK: Finish
 
-    /// "Run Prep pass" / "Not now". Returns true when onboarding is complete.
+    /// "Collect questions" / "Not now". Returns true when onboarding is complete.
     func finish(runPrep: Bool) async -> Bool {
         isSaving = true
         defer { isSaving = false }

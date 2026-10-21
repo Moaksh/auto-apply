@@ -39,6 +39,10 @@ final class ToastCenter {
     func enqueue(_ toast: Toast) {
         if current == nil {
             present(toast)
+        } else if toast.action != nil, current?.action == nil {
+            // A toast with an action (Undo) has a running clock: show it now, never behind an
+            // informational one, so its whole window is visible.
+            present(toast)
         } else {
             // Coalesce identical consecutive messages.
             if current?.message == toast.message || queue.last?.message == toast.message { return }

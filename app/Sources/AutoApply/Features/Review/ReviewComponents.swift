@@ -47,7 +47,7 @@ struct ReviewQAPanel: View {
                 .frame(height: embedded ? 560 : nil)
             VStack(alignment: .leading, spacing: Space.s) {
                 HStack {
-                    Text("Q&A (\(answers.count))").eyebrowStyle()
+                    Text("Answers (\(answers.count))").eyebrowStyle()
                     Spacer()
                     if !flagged.isEmpty {
                         Label("\(flagged.count) need\(flagged.count == 1 ? "s" : "") a look", systemImage: "exclamationmark.triangle.fill")
@@ -111,7 +111,7 @@ struct ReviewAnswerRow: View {
                             .scrollContentBackground(.hidden)
                             .frame(minHeight: 80)
                             .padding(Space.xs)
-                            .sunkenWell()
+                            .well()
                             .focused($fieldFocused)
                     } else {
                         TextField("Answer", text: $draft)
@@ -120,7 +120,7 @@ struct ReviewAnswerRow: View {
                             .onSubmit(save)
                     }
                     HStack {
-                        Button("Save", action: save).buttonStyle(.borderedProminent).controlSize(.small)
+                        Button("Save", action: save).buttonStyle(.bordered).controlSize(.small)
                         Button("Cancel") { editing = false }.buttonStyle(.bordered).controlSize(.small)
                     }
                 } else {
@@ -128,12 +128,7 @@ struct ReviewAnswerRow: View {
                         .font(Typography.body)
                         .lineLimit(3)
                         .textSelection(.enabled)
-                    HStack(spacing: Space.xs) {
-                        ProvenanceTag(origin: answer.origin)
-                        if let c = answer.confidence {
-                            Text(String(format: "%.2f", c)).font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
-                        }
-                    }
+                    Badge(origin: answer.origin)
                 }
             }
             Spacer(minLength: 0)
@@ -154,7 +149,7 @@ struct ReviewAnswerRow: View {
         .padding(.vertical, Space.s)
         .padding(.horizontal, Space.xs)
         .background(isHovered ? Palette.accent.opacity(0.06) : Color.clear)
-        .background(answer.confidenceLevel == .low || answer.confidenceLevel == .medium ? Palette.needsYou.opacity(0.06) : Color.clear)
+        .background(answer.confidenceLevel == .low || answer.confidenceLevel == .medium ? Palette.needsYou.opacity(0.08) : Color.clear)
         .onChange(of: editing) { _, now in onEditingChanged(now) }
         .onDisappear { if editing { onEditingChanged(false) } }
     }
@@ -175,7 +170,7 @@ struct ReviewAttachmentRows: View {
         VStack(spacing: 0) {
             if let resume = store.library.resume(id: job.resumeVariantID) ?? store.library.defaultResume {
                 // Two lines: the file name (truncated in the middle, never wrapped letter by letter in a
-                // narrow column), then the pick score and the Swap / Reveal controls.
+                // narrow column), then the Swap / Reveal controls.
                 HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                     Text("Resume").font(Typography.body).frame(width: 170, alignment: .leading)
                     VStack(alignment: .leading, spacing: Space.xs) {
@@ -185,10 +180,6 @@ struct ReviewAttachmentRows: View {
                                 .help("\(resume.label).pdf")
                         }
                         HStack(spacing: Space.s) {
-                            if let pick = job.resumePickScore {
-                                Text(String(format: "pick %.2f", pick)).font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
-                                    .fixedSize()
-                            }
                             Spacer(minLength: 0)
                             let alternatives = store.library.resumeVariants.filter { $0.enabled && $0.id != resume.id }
                             if !alternatives.isEmpty, let appID = job.applicationID {
@@ -207,7 +198,7 @@ struct ReviewAttachmentRows: View {
                                 .disabled(!store.isConnected)
                             }
                             if let url = LocalFiles.existing(resume.filePath) {
-                                Button("Reveal") { LocalFiles.reveal(url) }.buttonStyle(.link).fixedSize()
+                                Button("Reveal") { LocalFiles.reveal(url) }.buttonStyle(.secondaryLink).fixedSize()
                             }
                         }
                     }
@@ -223,7 +214,7 @@ struct ReviewAttachmentRows: View {
                     Text(URL(fileURLWithPath: path).lastPathComponent).font(Typography.body).lineLimit(1)
                     Spacer()
                     if let url = LocalFiles.existing(path) {
-                        Button("Open") { NSWorkspace.shared.open(url) }.buttonStyle(.link)
+                        Button("Open") { NSWorkspace.shared.open(url) }.buttonStyle(.secondaryLink)
                     }
                 }
                 .padding(.vertical, Space.s)
@@ -277,8 +268,8 @@ struct ReviewScreenshotPane: View {
             }
         }
         .padding(Space.xs)
-        .sunkenWell()
-        .accessibilityLabel("Pre-submit screenshot")
+        .well()
+        .accessibilityLabel("Screenshot before sending")
         .task(id: path) {
             loaded = false
             image = nil

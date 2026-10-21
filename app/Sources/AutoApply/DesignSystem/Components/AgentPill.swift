@@ -1,5 +1,5 @@
-// AgentPill.swift — compact live agent status (sidebar footer, menu bar popover, hero
-// compact): dot + sentence + progress ring. Same component everywhere (§3.2).
+// AgentPill.swift — compact live agent status (sidebar footer, menu bar): dot + sentence +
+// progress ring. Same component everywhere. Static at rest.
 import SwiftUI
 
 struct AgentPill: View {
@@ -39,34 +39,24 @@ struct AgentPill: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(Palette.surfaceRaised.opacity(size == .compact ? 1 : 0), in: RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
-        .overlay {
-            if size == .compact {
-                RoundedRectangle(cornerRadius: Radius.inner, style: .continuous).stroke(Palette.hairline, lineWidth: 0.5)
-            }
-        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Agent: \(status.sentence)")
         .accessibilityHint(action == nil ? "" : "Shows the live agent on the dashboard")
     }
 }
 
-/// Status dot: accent + pulse while active, amber when it needs you, red on error, grey idle.
+/// Status dot: accent while working, coral when it needs you, red on error, grey when idle.
+/// Static: nothing breathes or pulses; the progress ring shows work in progress.
 struct AgentStatusDot: View {
     var kind: AgentStatus.Kind
     var size: CGFloat = 8
-    @Environment(\.motionReduced) private var reduced
 
     var body: some View {
-        Image(systemName: "circle.fill")
-            .font(.system(size: size))
-            .foregroundStyle(color)
-            .symbolEffect(.pulse, options: .repeating, isActive: isActive && !reduced)
-            .symbolEffect(.breathe, options: .repeating, isActive: kind == .idle && !reduced)
+        Circle()
+            .fill(color)
+            .frame(width: size, height: size)
             .accessibilityHidden(true)
     }
-
-    private var isActive: Bool { [.discovering, .scoring, .prepping, .applying].contains(kind) }
 
     private var color: Color {
         switch kind {
@@ -102,7 +92,7 @@ struct ProgressRing: View {
         AgentPill(status: AgentStatus(kind: .applying, title: "Applying", detail: "3 of 12 today", progress: 0.25))
         AgentPill(status: AgentStatus(kind: .idle, title: "Idle", detail: "next run 14:00"))
         AgentPill(status: AgentStatus(kind: .pausing, title: "Pausing…"))
-        AgentPill(status: AgentStatus(kind: .disconnected, title: "Can't reach autoapplyd"), size: .large)
+        AgentPill(status: AgentStatus(kind: .disconnected, title: "Can't reach the agent"), size: .large)
     }
     .padding()
     .frame(width: 260)

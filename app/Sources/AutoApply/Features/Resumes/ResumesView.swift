@@ -25,18 +25,15 @@ struct ResumesView: View {
         let model = self.model
         let variants = model.variants
         ScrollView {
-            VStack(alignment: .leading, spacing: Space.l) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Resumes").font(Typography.title1)
-                    Text(C3Format.plural(variants.count, "variant")).font(Typography.body).foregroundStyle(Palette.textSecondary)
-                    Spacer()
-                    if !model.adding.isEmpty {
-                        ProgressView().controlSize(.small)
-                        Text("Adding \(model.adding.joined(separator: ", "))…").font(Typography.callout).foregroundStyle(Palette.textSecondary)
-                    }
-                    Button { model.chooseAndAdd() } label: { Label("Add resume", systemImage: "plus") }
-                        .buttonStyle(.glassProminent)
+            ScreenHeader("Resumes", summary: C3Format.plural(variants.count, "resume")) {
+                if !model.adding.isEmpty {
+                    ProgressView().controlSize(.small)
+                    Text("Adding \(model.adding.joined(separator: ", "))…").font(Typography.callout).foregroundStyle(Palette.textSecondary)
                 }
+                Button { model.chooseAndAdd() } label: { Label("Add resume", systemImage: "plus") }
+                    .buttonStyle(.primaryPill)
+            }
+            VStack(alignment: .leading, spacing: Space.l) {
                 if variants.isEmpty {
                     DropZone(title: "Drop approved resume PDFs here or", subtitle: "They're copied into AutoApply and never modified.",
                              onDrop: { urls in Task { await model.add(urls) } }, onChoose: { model.chooseAndAdd() })
@@ -57,7 +54,8 @@ struct ResumesView: View {
                 }
                 .padding(.top, Space.s)
             }
-            .padding(Space.contentPadding)
+            .padding(.horizontal, Space.contentPadding)
+            .padding(.bottom, Space.contentPadding)
         }
         .background(dropTargeted ? Palette.accent.opacity(0.05) : Palette.windowBackground)
         .dropDestination(for: URL.self) { urls, _ in
@@ -81,8 +79,6 @@ private struct ResumeCard: View {
     var model: ResumesModel
     var variant: ResumeVariantItem
     var isSelected: Bool
-    @State private var hovering = false
-    @Environment(\.motionReduced) private var reduced
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
@@ -115,17 +111,13 @@ private struct ResumeCard: View {
             }
         }
         .padding(Space.m)
-        .surfaceCard(raised: hovering)
+        .surface()
         .overlay {
             if isSelected {
                 RoundedRectangle(cornerRadius: Radius.card + 2, style: .continuous).stroke(Palette.accent, lineWidth: 2).padding(-2)
             }
         }
         .opacity(variant.enabled ? 1 : 0.6)
-        .offset(y: hovering && !reduced ? -2 : 0)
-        .shadow(color: .black.opacity(hovering ? 0.10 : 0), radius: hovering ? 8 : 0, y: hovering ? 4 : 0)
-        .animation(Motion.resolve(Motion.snappy, reduceMotion: reduced), value: hovering)
-        .onHover { hovering = $0 }
         .contentShape(Rectangle())
         .contextMenu {
             if let url = LocalFiles.existing(variant.filePath) {
@@ -208,7 +200,7 @@ struct ResumeInspector: View {
                             Button("Open PDF") { NSWorkspace.shared.open(url) }
                             Button("Reveal in Finder") { LocalFiles.reveal(url) }
                         }
-                        .buttonStyle(.glass)
+                        .buttonStyle(.secondaryLink)
                     }
                     Text("The file is read-only here: it's your approved resume and is never modified.")
                         .font(Typography.callout).foregroundStyle(Palette.textTertiary)

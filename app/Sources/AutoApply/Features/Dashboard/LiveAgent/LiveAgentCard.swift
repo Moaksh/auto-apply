@@ -1,15 +1,15 @@
-// LiveAgentCard.swift — the signature widget (§4.3 W2): status line, pipeline flow, live
-// Chrome thumbnail and step ticker, with every hero state (idle, discovering, scoring,
-// filling, paused, cap reached, unreachable, loading, first run).
+// LiveAgentCard.swift — what the agent is doing: a status line, the pipeline flow, the live
+// Chrome view and the steps, for every state (idle, discovering, scoring, filling, paused, daily
+// limit, unreachable, loading, first run). A flat surface: no gradient, nothing breathing. The
+// flow only moves while the agent works and the window is visible. Run lives in the toolbar;
+// the card offers it only before the very first run.
 import SwiftUI
 
 struct LiveAgentCard: View {
     @Environment(AppStore.self) private var store
     @Environment(Router.self) private var router
     @Environment(\.motionReduced) private var reduced
-    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
-    var layout: DashboardLayout = .wide
     var isWindowVisible: Bool = true
 
     @State private var announcer = AnnouncementThrottle()
@@ -35,35 +35,27 @@ struct LiveAgentCard: View {
     var body: some View {
         let state = heroState
         VStack(alignment: .leading, spacing: Space.l) {
-            HStack {
-                Text("Live agent").eyebrowStyle()
-                Spacer()
-            }
+            SectionHeader("Live agent")
             switch state {
             case .unreachable(let lastSeen):
                 unreachablePanel(lastSeen: lastSeen)
+            case .firstRun:
+                firstRunPanel
             default:
                 statusLine(state)
-                    .id(verb)
-                    .transition(reduced ? AnyTransition.opacity : AnyTransition(.blurReplace))
                 flow(state)
                     .frame(height: 150)
-                if state == .firstRun {
-                    firstRunMessage
-                } else if state != .loading {
+                if state != .loading {
                     lowerRow(state)
                 }
             }
         }
         .padding(Space.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background { meshBackground(isRunning: state.isRunning) }
-        .surfaceCard()
-        .saturation(state == .paused ? 0.6 : 1)
+        .surface()
         .overlay {
             if state == .paused {
-                PausedCapsule { Task { await store.resume() } }
-                    .transition(.opacity)
+                PausedBar { Task { await store.resume() } }
             }
         }
         .overlay(alignment: .topTrailing) {
@@ -72,14 +64,13 @@ struct LiveAgentCard: View {
                 .padding(Space.s)
                 .allowsHitTesting(false)
         }
-        .motion(Motion.snappy, value: verb)
         .onChange(of: store.live.submittedEventCount) { old, new in
             guard new > old else { return }
             let now = Date()
             if celebrationGate.shouldFire(at: now) { celebrationTrigger += 1 }
             if announcer.shouldAnnounce(at: now) {
                 let company = store.live.lastSubmittedFrame.flatMap { store.jobs.job(id: $0.jobID)?.company } ?? activeJob?.company
-                AccessibilityNotification.Announcement(company.map { "Submitted to \($0)" } ?? "Application submitted").post()
+                AccessibilityNotification.Announcement(company.map { "Applied to \($0)" } ?? "Application sent").post()
             }
         }
     }
@@ -91,33 +82,25 @@ struct LiveAgentCard: View {
             AgentStatusDot(kind: store.agentStatus.kind, size: 10)
             Text(verb.rawValue).font(Typography.title2)
             if case .capReached(let used, let limit) = state {
-                Text("· \(used)/\(limit) · resumes tomorrow\(store.nextRunAt.map { " " + $0.formatted(date: .omitted, time: .shortened) } ?? "")")
+                Text("· \(used)/\(limit) today · daily limit reached\(store.nextRunAt.map { ", next run " + $0.formatted(date: .omitted, time: .shortened) } ?? "")")
                     .font(Typography.body).foregroundStyle(Palette.textSecondary)
-                Image(systemName: "moon.zzz").symbolEffect(.breathe, options: .repeating, isActive: !reduced)
-                    .foregroundStyle(Palette.textTertiary)
             } else if state == .idle, let next = store.nextRunAt {
                 Text("· next run \(next.formatted(date: .omitted, time: .shortened))")
                     .font(Typography.body).foregroundStyle(Palette.textSecondary)
-                Image(systemName: "clock").symbolEffect(.breathe, options: .repeating, isActive: !reduced)
-                    .foregroundStyle(Palette.textTertiary)
             }
             if state.isRunning, let job = activeJob {
                 Text("·").foregroundStyle(Palette.textTertiary)
                 Button { router.openJobFromDashboard(job.id) } label: {
                     Text(job.displayName).font(Typography.body).lineLimit(1)
                 }
-                .buttonStyle(.link)
+                .buttonStyle(.secondaryLink)
                 .help("Open job detail")
             } else if state.isRunning, let message = store.live.message {
                 Text("· \(message)").font(Typography.body).foregroundStyle(Palette.textSecondary).lineLimit(1)
             }
             Spacer(minLength: Space.s)
             if state.isRunning, store.live.runCounts.needsYou > 0 {
-                Label("\(store.live.runCounts.needsYou) parked", systemImage: StatusKind.needsYou.symbol)
-                    .font(Typography.callout)
-                    .padding(.horizontal, Space.s).padding(.vertical, 2)
-                    .background(Palette.needsYou.opacity(0.12), in: Capsule())
-                    .foregroundStyle(Palette.textPrimary)
+                Badge("\(store.live.runCounts.needsYou) waiting for you", symbol: StatusKind.needsYou.symbol, tone: .warning)
             }
             if let since = store.live.activeSince, state.isRunning {
                 TimelineView(.periodic(from: since, by: 1)) { timeline in
@@ -127,40 +110,6 @@ struct LiveAgentCard: View {
                 }
                 .accessibilityLabel("Elapsed")
             }
-            heroButton(state)
-        }
-    }
-
-    @ViewBuilder
-    private func heroButton(_ state: HeroState) -> some View {
-        switch state {
-        case .idle, .capReached:
-            HStack(spacing: Space.s) {
-                if store.queuedCount > 0 {
-                    Button { Task { await store.applyQueued() } } label: {
-                        Label("Apply \(store.queuedCount) queued", systemImage: "paperplane.fill")
-                    }
-                    .buttonStyle(.glass)
-                    .disabled(!store.isConnected)
-                    .help("Fill and submit just the queued jobs, no new search (\(AppShortcut.applyQueued.displayString))")
-                }
-                Button { Task { await store.runNow() } } label: { Label("Run now", systemImage: "play.fill") }
-                    .buttonStyle(.glassProminent)
-                    .disabled(!store.isConnected)
-                    .help("Run now: search, score and apply (\(AppShortcut.runNow.displayString))")
-            }
-        case .discovering, .scoring, .prepping, .filling:
-            Button {
-                Haptics.levelChange()
-                Task { await store.pauseAll() }
-            } label: {
-                Image(systemName: "pause.fill").contentTransition(.symbolEffect(.replace))
-            }
-            .buttonStyle(.glass)
-            .help("Pause agent (\(AppShortcut.togglePause.displayString))")
-            .accessibilityLabel("Pause agent")
-        default:
-            EmptyView()
         }
     }
 
@@ -191,12 +140,11 @@ struct LiveAgentCard: View {
     private func lowerRow(_ state: HeroState) -> some View {
         let thumb = thumbnail(state)
         let ticker = StepTicker(steps: store.live.ticker, isActive: state == .filling, fallbackLines: fallbackLines(state))
-        if layout == .wide {
+        ViewThatFits(in: .horizontal) {
             HStack(alignment: .top, spacing: Space.xl) {
                 thumb.frame(width: 360)
-                ticker.frame(maxWidth: .infinity, alignment: .leading)
+                ticker.frame(minWidth: 320, maxWidth: .infinity, alignment: .leading)
             }
-        } else {
             VStack(alignment: .leading, spacing: Space.l) {
                 thumb.frame(maxWidth: 360)
                 ticker
@@ -217,9 +165,9 @@ struct LiveAgentCard: View {
             description += ", \(job.company) application"
             if let p = store.live.stepProgress { description += ", step \(p.index) of \(p.total)" }
         } else if caption != nil {
-            description = "Last submitted page"
+            description = "Last page the agent applied on"
         }
-        return LiveBrowserThumb(frame: frame, isLive: live, atsLabel: live ? job?.ats.label : nil, caption: caption,
+        return LiveBrowserThumb(frame: frame, isLive: live, siteLabel: live ? job?.ats.label : nil, caption: caption,
                                 accessibilityDescription: description) {
             Task { await store.openAgentChrome() }
         }
@@ -236,54 +184,39 @@ struct LiveAgentCard: View {
         }
     }
 
-    private var firstRunMessage: some View {
-        HStack(spacing: Space.s) {
-            Text("Your agent hasn't run yet.").font(Typography.body)
-            Button("Run a Prep pass") { Task { await store.runPrepPass() } }.buttonStyle(.link)
-            Text("to collect questions first, or").font(Typography.body).foregroundStyle(Palette.textSecondary)
-            Button("Run now") { Task { await store.runNow() } }.buttonStyle(.link)
+    /// Before the very first run: the dashboard's one primary action.
+    private var firstRunPanel: some View {
+        VStack(spacing: 0) {
+            EmptyState(symbol: "play.circle", title: "Your agent hasn't run yet",
+                       message: "It finds jobs that match your preferences, scores them, and fills in applications. "
+                           + "Questions only you can answer wait in Needs You.",
+                       actionTitle: store.isConnected ? "Run now" : nil, isPrimary: true) {
+                Task { await store.runNow() }
+            }
+            if store.isConnected {
+                Button("Or collect questions first, without applying") { Task { await store.runPrepPass() } }
+                    .buttonStyle(.secondaryLink)
+                    .font(Typography.callout)
+                    .padding(.bottom, Space.l)
+            }
         }
-        .disabled(!store.isConnected)
+        .frame(maxWidth: .infinity)
     }
 
     private func unreachablePanel(lastSeen: Date?) -> some View {
-        ErrorState(title: "Can't reach autoapplyd",
-                   message: lastSeen.map { "Last seen \($0.formatted(date: .abbreviated, time: .shortened))" } ?? "The background agent isn't responding.",
-                   actionTitle: "Restart daemon",
+        ErrorState(title: "Can't reach the agent",
+                   message: lastSeen.map { "Last seen \($0.formatted(date: .abbreviated, time: .shortened)). It runs in the background on this Mac." }
+                       ?? "The agent runs in the background on this Mac and isn't responding.",
+                   actionTitle: "Restart agent",
                    action: { Task { await store.fix(AppIssue(id: "daemon_down", severity: .error, message: "", fix: .restartDaemon)) } },
                    secondaryTitle: "View log",
                    secondaryAction: { DaemonControl.openLogs() })
             .frame(minHeight: 220)
     }
-
-    // MARK: Background
-
-    /// Accent mesh gradient (0–10% opacity) that slowly shifts only while running.
-    @ViewBuilder
-    private func meshBackground(isRunning: Bool) -> some View {
-        if !reduceTransparency {
-            let animate = isRunning && !reduced && isWindowVisible
-            TimelineView(.animation(minimumInterval: 1 / 15, paused: !animate)) { timeline in
-                let t = animate ? timeline.date.timeIntervalSinceReferenceDate / 6 : 0
-                let wobble = Float(sin(t) * 0.08)
-                MeshGradient(width: 3, height: 3, points: [
-                    [0, 0], [0.5 + wobble, 0], [1, 0],
-                    [0, 0.5 - wobble], [0.5 - wobble, 0.5 + wobble], [1, 0.5 + wobble],
-                    [0, 1], [0.5 + wobble, 1], [1, 1],
-                ], colors: [
-                    Palette.accent.opacity(0.08), .clear, Palette.accent.opacity(0.04),
-                    .clear, Palette.accent.opacity(isRunning ? 0.10 : 0.03), .clear,
-                    Palette.accent.opacity(0.03), .clear, Palette.accent.opacity(0.06),
-                ])
-            }
-            .clipShape(.card)
-            .allowsHitTesting(false)
-        }
-    }
 }
 
 extension Router {
-    /// Dashboard → Job detail: show it on top of Pipeline so ⌘←/⌘→ and the inspector work.
+    /// Dashboard → Job detail: show it on top of Pipeline so ⌘←/⌘→ and the details panel work.
     func openJobFromDashboard(_ id: Int) {
         selection = .pipeline
         openJob(id: id)

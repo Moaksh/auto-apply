@@ -13,8 +13,6 @@ enum Motion {
     static let celebrate = Animation.spring(duration: 0.55, bounce: 0.32)
     /// Chart data changes, mesh gradient shifts.
     static let gentle = Animation.smooth(duration: 0.9)
-    /// Button press scale 0.97.
-    static let press = Animation.spring(duration: 0.16, bounce: 0.0)
     /// Paired with `.contentTransition(.numericText(value:))`.
     static let numeric = snappy
     /// The Reduce Motion replacement: a short cross-fade, no movement or overshoot.
@@ -124,19 +122,6 @@ extension AnyTransition {
     /// Reduce-motion aware variant: plain fade when reduced.
     static func reduced(_ transition: AnyTransition, _ reduced: Bool) -> AnyTransition {
         reduced ? .opacity : transition
-    }
-}
-
-// MARK: - Press feedback
-
-/// Button style giving the `.press` scale (0.97) without changing the system look.
-struct PressScaleStyle: ButtonStyle {
-    @Environment(\.motionReduced) private var reduced
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed && !reduced ? 0.97 : 1)
-            .animation(Motion.press, value: configuration.isPressed)
     }
 }
 

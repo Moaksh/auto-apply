@@ -59,7 +59,8 @@ private struct SettingsTabContent: View {
                 }
                 if tab != .general && tab != .agent && tab != .data {
                     SaveStatusLine(state: tab == .guardrails ? model.neverGuessSave : model.preferencesSave,
-                                   secondary: tab == .guardrails ? model.preferencesSave : nil)
+                                   secondary: tab == .guardrails ? model.preferencesSave : nil,
+                                   blockedBy: model.issues.first?.message)
                 }
                 MadeWithLoveFooter()
             }
@@ -70,21 +71,34 @@ private struct SettingsTabContent: View {
     }
 }
 
-/// "Saved" / "Saving…" / inline error under each tab.
+/// "Saved" / "Saving…" / inline error under each tab. While a field is invalid it says nothing
+/// is being saved, instead of promising that changes save automatically.
 struct SaveStatusLine: View {
     var state: SettingsModel.SaveState
     var secondary: SettingsModel.SaveState?
+    /// The first validation problem: while set, edits are held, not saved.
+    var blockedBy: String? = nil
 
     var body: some View {
         HStack(spacing: Space.xs) {
+            if let blockedBy, effective != .saving {
+                Image(systemName: StatusKind.error.symbol).foregroundStyle(Palette.error)
+                Text("Not saved · \(blockedBy)").foregroundStyle(Palette.error)
+            } else {
+                content
+            }
+        }
+        .font(Typography.callout)
+    }
+
+    @ViewBuilder
+    private var content: some View {
             switch effective {
             case .idle: Text("Changes save automatically.").foregroundStyle(Palette.textTertiary)
             case .saving: ProgressView().controlSize(.small); Text("Saving…").foregroundStyle(Palette.textSecondary)
             case .saved: Image(systemName: "checkmark.circle.fill").foregroundStyle(Palette.applied); Text("Saved").foregroundStyle(Palette.textSecondary)
             case .failed(let message): Image(systemName: StatusKind.error.symbol).foregroundStyle(Palette.error); Text(message).foregroundStyle(Palette.error)
             }
-        }
-        .font(Typography.callout)
     }
 
     private var effective: SettingsModel.SaveState {
@@ -186,7 +200,7 @@ private struct UpdatesSettingsRow: View {
     private var updater: Updater { Updater.shared }
 
     var body: some View {
-        SettingsRow("Updates", help: "Updates come from the project's GitHub Releases. Free; nothing but the version check leaves your Mac.") {
+        SettingsRow("Updates", help: "Updates come from the project's GitHub Releases: checking asks GitHub for the latest version, and downloading fetches it. Both are on unless you turn them off here.") {
             Toggle("Check for updates automatically", isOn: $autoCheck)
             Toggle("Download updates and install them when I quit", isOn: $autoInstall).disabled(!autoCheck)
             HStack(spacing: Space.s) {
@@ -194,7 +208,7 @@ private struct UpdatesSettingsRow: View {
                 Text(status).font(Typography.callout).foregroundStyle(Palette.textTertiary)
                 Spacer()
                 if let v = updater.readyVersion {
-                    Button("Restart to Update to \(v)") { updater.installAndRelaunch() }.buttonStyle(.glass)
+                    Button("Restart to Update to \(v)") { updater.installAndRelaunch() }.buttonStyle(.secondaryLink)
                 } else {
                     Button("Check Now") { Task { await updater.check(userInitiated: true) } }
                         .disabled(updater.phase == .checking)
@@ -242,16 +256,16 @@ private struct AgentSettingsTab: View {
         SettingsRow("Connection") {
             HStack(spacing: Space.s) {
                 StatusDot(kind: store.isConnected ? .applied : .error)
-                Text(store.isConnected ? "Connected to autoapplyd" : "Not connected").font(Typography.body)
+                Text(store.isConnected ? "Connected to the agent" : "Not connected").font(Typography.body)
                 if let version = store.daemonVersion {
                     Text("v\(version)").font(Typography.mono).foregroundStyle(Palette.textSecondary)
                 }
             }
             if let mock = store.mockScenarioName {
-                Text("Mock daemon · scenario \(mock)").font(Typography.callout).foregroundStyle(Palette.needsYou)
+                Text("Mock agent · scenario \(mock)").font(Typography.callout).foregroundStyle(Palette.needsYou)
             }
         }
-        SettingsRow("LaunchAgent", help: "autoapplyd runs in the background as a user LaunchAgent, even when this window is closed.") {
+        SettingsRow("Background agent", help: "The agent runs in the background on this Mac, even when this window is closed.") {
             HStack(spacing: Space.s) {
                 if let status = agent.status {
                     StatusDot(kind: status.running ? .applied : (status.loaded ? .needsYou : .skipped))
@@ -264,10 +278,10 @@ private struct AgentSettingsTab: View {
                 Button("Refresh") { Task { await agent.refresh() } }.buttonStyle(.borderless)
             }
             HStack(spacing: Space.s) {
-                Button("Restart daemon") {
+                Button("Restart agent") {
                     Task {
                         let ok = await agent.restart()
-                        store.toasts.show(ok ? "Restarting autoapplyd…" : "Couldn't restart (is the LaunchAgent installed?)",
+                        store.toasts.show(ok ? "Restarting the agent…" : "Couldn't restart the agent. Is it installed?",
                                           symbol: ok ? "arrow.clockwise" : StatusKind.error.symbol, style: ok ? .info : .error)
                     }
                 }
@@ -276,17 +290,17 @@ private struct AgentSettingsTab: View {
                     Button("Uninstall") { Task { _ = await agent.runInstaller("uninstall") } }.disabled(agent.busy)
                 } else {
                     Button("Install") { Task { _ = await agent.runInstaller("install") } }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.bordered)
                         .disabled(agent.busy || agent.engineDir.isEmpty)
                 }
                 if agent.busy { ProgressView().controlSize(.small) }
             }
             if let output = agent.lastOutput, !output.isEmpty {
                 Text(output).font(Typography.mono).foregroundStyle(Palette.textSecondary).textSelection(.enabled)
-                    .padding(Space.s).frame(maxWidth: .infinity, alignment: .leading).sunkenWell()
+                    .padding(Space.s).frame(maxWidth: .infinity, alignment: .leading).well()
             }
         }
-        SettingsRow("Engine folder", help: "Where the Python engine lives (contains pyproject.toml). Used to install the LaunchAgent.") {
+        SettingsRow("Agent folder", help: "Where the agent's code lives on this Mac. Used to install it.") {
             HStack {
                 TextField("…/auto_apply/engine", text: $agent.engineDir).textFieldStyle(.roundedBorder).font(Typography.mono)
                 Button("Choose…") {
@@ -328,7 +342,7 @@ struct PathRow: View {
                 try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
                 NSWorkspace.shared.open(url)
             }
-            .buttonStyle(.link)
+            .buttonStyle(.secondaryLink)
         }
     }
 }
@@ -340,17 +354,17 @@ private struct DataSettingsTab: View {
     @State private var includeAll = false
 
     var body: some View {
-        SettingsRow("Database", help: "Read-only from the app. The daemon is the only writer.") {
+        SettingsRow("Database", help: "The app only reads it; the agent writes it.") {
             PathRow(title: "autoapply.db", url: AppPaths.resolve().database)
         }
-        SettingsRow("Receipts") {
+        SettingsRow("Application files") {
             PathRow(title: "Screenshots", url: AppPaths.resolve().screenshots)
             PathRow(title: "Cover letters", url: AppPaths.resolve().coverLetters)
             PathRow(title: "Resumes", url: AppPaths.resolve().resumes)
         }
-        SettingsRow("Export", help: "A CSV of the tracker: company, role, status, score, dates and links.") {
-            Toggle("Include jobs that were never submitted", isOn: $includeAll)
-            Button("Export tracker as CSV…") { export() }
+        SettingsRow("Export", help: "A CSV of the Pipeline: company, role, status, score, dates and links.") {
+            Toggle("Include jobs that were never applied to", isOn: $includeAll)
+            Button("Export Pipeline as CSV…") { export() }
                 .disabled(!store.jobs.isLoaded)
         }
     }

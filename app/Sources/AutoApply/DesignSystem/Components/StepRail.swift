@@ -24,7 +24,7 @@ struct StepRail: View {
                         .font(index == current ? Typography.bodyEmph : Typography.body)
                         .foregroundStyle(index <= current ? Palette.textPrimary : Palette.textSecondary)
                     if step.isOptional {
-                        Text("opt.").font(Typography.callout).foregroundStyle(Palette.textTertiary)
+                        Text("optional").font(Typography.callout).foregroundStyle(Palette.textTertiary)
                     }
                 }
                 .frame(height: 24)
@@ -40,7 +40,7 @@ struct StepRail: View {
                         Rectangle().fill(Palette.accent).frame(height: index < current ? 18 : 0)
                     }
                     .frame(width: 1.5, height: 18)
-                    .padding(.leading, 7.25)
+                    .padding(.leading, 7)
                     .motion(Motion.flow, value: current)
                 }
             }
@@ -59,7 +59,7 @@ private struct StepDot: View {
                 Circle().fill(Palette.accent)
                 Image(systemName: "checkmark")
                     .font(.system(size: 8, weight: .bold))
-                    .foregroundStyle(.white)
+                    .foregroundStyle(Palette.onAccent)
                     .transition(.symbolEffect(.drawOn))
             case .current:
                 Circle().fill(Palette.accent.opacity(0.18)).frame(width: 16, height: 16)
@@ -100,7 +100,7 @@ struct CompanyMonogram: View {
     HStack(spacing: Space.xxl) {
         StepRail(steps: [
             .init(id: 1, title: "System check"), .init(id: 2, title: "Resumes"), .init(id: 3, title: "Preferences"),
-            .init(id: 4, title: "Never-guess facts"), .init(id: 5, title: "Story bank", isOptional: true),
+            .init(id: 4, title: "Facts only you set"), .init(id: 5, title: "Story bank", isOptional: true),
             .init(id: 6, title: "Sources"), .init(id: 7, title: "Mode"),
         ], current: 2)
         VStack { CompanyMonogram(name: "Stripe"); CompanyMonogram(name: "Ramp", size: 32) }

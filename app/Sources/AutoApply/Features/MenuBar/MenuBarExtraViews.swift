@@ -1,13 +1,18 @@
-// MenuBarExtraViews.swift — the menu bar glyph (state variants) and popover panel (§3.5):
-// Agent Pill + kill switch, live Chrome thumbnail, current job + mono ticker, needs-you and
-// review rows, today's sparkline, caps, next run, Open AutoApply.
+// MenuBarExtraViews.swift — the menu bar glyph (state variants) and popover panel: agent pill +
+// Pause, live Chrome thumbnail, current job + step, Needs You and Review rows, today's
+// sparkline, the daily limit, next run, and the one primary action: Open AutoApply. The system
+// supplies the panel's glass; the content inside is flat.
 import SwiftUI
 
 /// Glyph states: idle outline · discovering (pulse) · applying filled + "3/12" · needs you ·
-/// paused · error/daemon down.
+/// paused · error / agent down. The pulse runs only while the agent works and never under
+/// Reduce Motion (the label lives outside the scene's motion environment, so it reads the
+/// system setting and the Debug simulation itself).
 struct MenuBarGlyph: View {
     let store: AppStore
     @AppStorage("menuBarCounter") private var showCounter = true
+    @AppStorage(DebugSettings.simulateReduceMotionKey) private var simulateReduceMotion = false
+    @Environment(\.accessibilityReduceMotion) private var systemReduceMotion
 
     enum GlyphState: Equatable { case idle, discovering, applying, needsYou, paused, error }
 
@@ -24,10 +29,11 @@ struct MenuBarGlyph: View {
 
     var body: some View {
         let state = Self.state(for: store)
+        let reduced = systemReduceMotion || simulateReduceMotion
         HStack(spacing: 3) {
             Image(systemName: symbol(state))
-                .symbolEffect(.pulse, options: .repeating, isActive: state == .discovering || state == .applying)
-                .symbolEffect(.bounce, value: state == .needsYou)
+                .symbolEffect(.pulse, options: .repeating, isActive: !reduced && (state == .discovering || state == .applying))
+                .symbolEffect(.bounce, value: reduced ? false : state == .needsYou)
             if state == .applying && showCounter {
                 let caps = store.caps
                 Text("\(caps.dailyUsed)/\(caps.dailyLimit)").monospacedDigit()
@@ -66,14 +72,12 @@ struct MenuBarPanel: View {
                         .contentTransition(.symbolEffect(.replace))
                         .frame(width: 28, height: 28)
                 }
-                .buttonStyle(.glass)
-                .help(store.isPaused ? "Resume agent" : "Pause agent (kill switch)")
+                .buttonStyle(.borderless)
+                .help(store.isPaused ? "Resume the agent" : "Pause the agent: it stops after the current step")
+                .accessibilityLabel(store.isPaused ? "Resume the agent" : "Pause the agent")
                 .disabled(!store.isConnected)
             }
-            .padding(Space.m)
             .frame(maxWidth: .infinity, alignment: .leading)
-            // Header band on the live brand field (pauses with the popover's window).
-            .brandHeroBand(cornerRadius: Radius.palette - Space.xs)
 
             if store.live.isRunning || store.live.frame != nil || store.live.lastSubmittedFrame != nil {
                 LiveThumbnail(frame: store.live.frame ?? store.live.lastSubmittedFrame,
@@ -101,9 +105,8 @@ struct MenuBarPanel: View {
                 Divider()
                 if store.inbox.openCount > 0 {
                     PanelRow(symbol: "hand.raised.fill", tint: Palette.needsYou,
-                             text: "Needs you · \(store.inbox.summary)",
+                             text: "Needs You · \(store.inbox.summary)",
                              action: store.inbox.actionCount > 0 ? "Open" : "Answer") { openMain(.needsYou) }
-                        .background(Palette.needsYou.opacity(0.12), in: RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
                 }
                 if store.counts.awaitingReview > 0 {
                     PanelRow(symbol: "checkmark.rectangle.stack", tint: Palette.accent,
@@ -118,7 +121,7 @@ struct MenuBarPanel: View {
                 Text("\(store.counts.submittedToday) applied · \(store.counts.discoveredToday) found")
                     .font(Typography.callout).monospacedDigit()
             }
-            CapBar(title: "Caps", used: store.caps.dailyUsed, limit: max(store.caps.dailyLimit, 1))
+            CapBar(title: "Daily limit", used: store.caps.dailyUsed, limit: max(store.caps.dailyLimit, 1))
 
             Divider()
             HStack {
@@ -134,7 +137,7 @@ struct MenuBarPanel: View {
                 } label: {
                     HStack(spacing: Space.xs) { Text("Open AutoApply"); KeyCap(.openMainWindow) }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(.primaryPill)
                 .keyboardShortcut(.openMainWindow)
             }
             HStack {
@@ -174,9 +177,7 @@ private struct PanelRow: View {
                 Spacer()
                 Text("\(action) ›").font(Typography.bodyEmph).foregroundStyle(Palette.accent)
             }
-            .padding(.horizontal, Space.s)
-            .padding(.vertical, Space.xs + 2)
-            .contentShape(Rectangle())
+            .selectableRow(isSelected: false, horizontalPadding: Space.s, verticalPadding: Space.xs + 2)
         }
         .buttonStyle(.plain)
     }

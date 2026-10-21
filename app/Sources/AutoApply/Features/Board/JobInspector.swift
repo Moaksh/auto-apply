@@ -1,5 +1,5 @@
-// JobInspector.swift — the trailing inspector for the focused Pipeline job (⌘⌥I): status, score
-// and factor bars, key facts, and actions (open detail / window / posting, legal moves).
+// JobInspector.swift — the details panel for the focused Pipeline job (⌥⌘I): status, score and
+// factor bars, key facts, and actions (open detail / window / posting, legal moves).
 import SwiftUI
 
 struct JobInspector: View {
@@ -20,8 +20,8 @@ struct JobInspector: View {
                         }
                     }
                     HStack(spacing: Space.s) {
-                        StatusChip(job: job)
-                        if let score = job.score { ScorePill(score: score, threshold: store.preferences.matchThreshold) }
+                        Badge(job: job)
+                        if let score = job.score { Badge(score: score, threshold: store.preferences.matchThreshold) }
                     }
                     if !job.scoreFactors.isEmpty {
                         VStack(alignment: .leading, spacing: Space.xs) {
@@ -46,7 +46,7 @@ struct JobInspector: View {
             SectionHeader("Details")
             fact("Location", job.location ?? "—")
             fact("Source", job.source.label)
-            fact("ATS", job.ats.label)
+            fact("Application site", job.ats.label)
             if let r = store.library.resume(id: job.resumeVariantID) { fact("Resume", r.label) }
             if let s = job.submittedAt { fact("Applied", s.formatted(date: .abbreviated, time: .shortened)) }
             fact("Discovered", job.discoveredAt.formatted(date: .abbreviated, time: .shortened))
@@ -56,18 +56,18 @@ struct JobInspector: View {
 
     private func fact(_ label: String, _ value: String) -> some View {
         HStack(alignment: .firstTextBaseline) {
-            Text(label).font(Typography.callout).foregroundStyle(Palette.textSecondary).frame(width: 84, alignment: .leading)
+            Text(label).font(Typography.callout).foregroundStyle(Palette.textSecondary).frame(width: 110, alignment: .leading)
             Text(value).font(Typography.callout).textSelection(.enabled)
         }
     }
 
     private func actions(_ job: JobItem) -> some View {
         VStack(alignment: .leading, spacing: Space.s) {
-            Button("Open job detail") { router.openJob(id: job.id) }.buttonStyle(.glassProminent)
+            Button("Open job detail") { router.openJob(id: job.id) }.buttonStyle(.bordered)
             HStack {
-                Button("New window") { router.openJobInWindow(id: job.id) }.buttonStyle(.glass)
+                Button("New window") { router.openJobInWindow(id: job.id) }.buttonStyle(.secondaryLink)
                 if let url = (job.applyURL ?? job.sourceURL).flatMap(URL.init(string:)) {
-                    Button("Open posting") { NSWorkspace.shared.open(url) }.buttonStyle(.glass)
+                    Button("Open posting") { NSWorkspace.shared.open(url) }.buttonStyle(.secondaryLink)
                 }
             }
             let targets = BoardRules.legalTargets(for: job)

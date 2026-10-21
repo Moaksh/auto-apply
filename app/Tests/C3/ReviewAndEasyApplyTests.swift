@@ -138,7 +138,7 @@ struct ReviewModelTests {
 
     @Test func modeSummaryListsOverrides() async {
         let (store, _, model) = await setup()
-        #expect(model.modeSummary == "Mode: Auto (Workday override: Review)")
+        #expect(model.modeSummary == "Mode: Auto (Workday: Review)")
         var p = store.preferences
         p.mode = .review
         store.setPreferences(p)

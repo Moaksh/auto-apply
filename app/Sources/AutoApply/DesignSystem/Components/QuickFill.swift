@@ -214,7 +214,7 @@ struct CountryCodeField: View {
                     }
                 }
                 .frame(width: 200, alignment: .leading)
-                .sunkenWell()
+                .well()
             }
             FlowLayout(spacing: Space.xs) {
                 ForEach(options.prefix(8), id: \.self) { c in

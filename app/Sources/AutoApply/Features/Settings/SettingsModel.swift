@@ -19,7 +19,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         case .guardrails: "Guardrails"
         case .modes: "Modes"
         case .sources: "Sources"
-        case .schedule: "Schedule & Caps"
+        case .schedule: "Schedule & Limits"
         case .agent: "Agent"
         case .data: "Data"
         }
@@ -410,7 +410,7 @@ enum GeneralSettings {
         ("RUN_SUMMARY", "Run summary", true),
         ("SUBMITTED", "Each submission", false),
         ("NUDGE", "Did you hear back? nudges", true),
-        ("ERROR", "Errors (daemon down, login expired)", true),
+        ("ERROR", "Errors (agent down, login expired)", true),
     ]
 
     static func isNotificationOn(_ key: String, defaults: UserDefaults = .standard) -> Bool {

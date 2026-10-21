@@ -52,12 +52,12 @@ enum JobDetailRules {
         var title: String {
             switch self {
             case .setStatus(let s): s.label
-            case .retry: "Retry application"
-            case .resolveSubmitted: "It was submitted"
-            case .resolveFailed: "It wasn't submitted"
+            case .retry: "Try again"
+            case .resolveSubmitted: "It was sent"
+            case .resolveFailed: "It wasn't sent"
             case .approve: "Approve & submit"
-            case .reject: "Skip (reject)"
-            case .applyAnyway: "Apply anyway"
+            case .reject: "Skip"
+            case .applyAnyway: "Queue for next run"
             }
         }
     }
@@ -90,8 +90,8 @@ enum JobDetailRules {
             switch self {
             case .approve: "Approve & submit"
             case .skip: "Skip"
-            case .retry: "Retry"
-            case .applyAnyway: "Apply anyway"
+            case .retry: "Try again"
+            case .applyAnyway: "Queue for next run"
             case .resolveSent: "It was sent"
             case .resolveNotSent: "It wasn't sent"
             }
@@ -121,12 +121,12 @@ enum JobDetailRules {
 
         var help: String {
             switch self {
-            case .approve: "Submit this application as filled (\(AppShortcut.submit.displayString))"
-            case .skip: "Don't submit; pick a reason"
-            case .retry: "Queue this application to be filled again"
-            case .applyAnyway: "Override the skip and queue this job for the next run"
-            case .resolveSent: "The form was submitted; mark it as applied"
-            case .resolveNotSent: "The form wasn't submitted; mark it as failed"
+            case .approve: "Send this application as filled (\(AppShortcut.submit.displayString))"
+            case .skip: "Don't send it; pick a reason"
+            case .retry: "Queue this application to be filled again on the next run"
+            case .applyAnyway: "Undo the skip: the agent applies on its next run"
+            case .resolveSent: "The form was sent; mark it as applied"
+            case .resolveNotSent: "The form wasn't sent; mark it as failed"
             }
         }
     }
@@ -209,7 +209,7 @@ enum JobDetailRules {
                                       detail: BoardRules.skipReasonLabel(job.skipReason ?? job.stateReason), actor: .agent))
         }
         if let submitted = job.submittedAt, !kinds.contains("submit") {
-            items.append(TimelineItem(id: "m-submitted", at: submitted, title: "Submitted",
+            items.append(TimelineItem(id: "m-submitted", at: submitted, title: "Applied",
                                       detail: job.mode == .manual ? "manually (Easy Apply)" : nil,
                                       actor: job.mode == .manual ? .user : .agent))
         }
@@ -242,7 +242,7 @@ enum JobDetailRules {
         case "answer": "Answered"
         case "review": "Ready for review"
         case "approve": "Approved"
-        case "submit": "Submitted"
+        case "submit": "Applied"
         case "status": event.actor == .user ? "Status changed (by you)" : "Status changed"
         case "nudge": "Nudge"
         case "error": "Error"
@@ -261,7 +261,7 @@ enum JobDetailRules {
     /// Pre-submit page first, then the post-submit confirmation (filmstrip order).
     static func screenshots(for job: JobItem) -> [Shot] {
         var out: [Shot] = []
-        if let p = job.screenshotPath, !p.isEmpty { out.append(Shot(label: "Pre-submit", path: p)) }
+        if let p = job.screenshotPath, !p.isEmpty { out.append(Shot(label: "Before sending", path: p)) }
         if let p = job.confirmationScreenshotPath, !p.isEmpty { out.append(Shot(label: "Confirmation", path: p)) }
         return out
     }
@@ -379,7 +379,7 @@ final class JobDetailActions {
         inFlight = true
         defer { inFlight = false }
         if await store.approve(applicationIDs: [appID]) {
-            store.toasts.show("Approved · submitting", symbol: "paperplane.fill", style: .success)
+            store.toasts.show("Approved · sending now", symbol: "paperplane.fill", style: .success)
         }
     }
 
@@ -407,7 +407,7 @@ final class JobDetailActions {
         inFlight = true
         defer { inFlight = false }
         if await store.retryApplication(applicationID: appID) {
-            store.toasts.show("Retrying · queued for the next run", symbol: "arrow.clockwise", style: .success)
+            store.toasts.show("Queued for the next run", symbol: "arrow.clockwise", style: .success)
         }
     }
 

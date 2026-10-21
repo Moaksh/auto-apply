@@ -120,7 +120,7 @@ struct JobDetailTests {
             C2.event(id: 2, ts: job.submittedAt!, kind: "submit", jobID: 7, message: "submitted stripe/7"),
         ]
         let items = JobDetailRules.timeline(job: job, events: events, now: Samples.now)
-        #expect(items.map(\.title) == ["Discovered", "Scored 91", "Submitted", "Nudge · day 7", "Nudge · day 14", "Moved to Interview"])
+        #expect(items.map(\.title) == ["Discovered", "Scored 91", "Applied", "Nudge · day 7", "Nudge · day 14", "Moved to Interview"])
         #expect(items.last?.actor == .user)
         #expect(items.first?.id == "e1", "logged events win over milestones")
         #expect(zip(items, items.dropFirst()).allSatisfy { $0.at <= $1.at })
@@ -137,7 +137,7 @@ struct JobDetailTests {
         var job = C2.job(id: 1, state: .submitted)
         job.screenshotPath = "/tmp/pre.png"
         job.confirmationScreenshotPath = "/tmp/post.png"
-        #expect(JobDetailRules.screenshots(for: job).map(\.label) == ["Pre-submit", "Confirmation"])
+        #expect(JobDetailRules.screenshots(for: job).map(\.label) == ["Before sending", "Confirmation"])
         #expect(JobDetailRules.screenshots(for: C2.job(id: 2)).isEmpty)
         #expect(JobDetailTab.initial(for: job) == .application)
         #expect(JobDetailTab.initial(for: C2.job(id: 2, state: .queued)) == .overview)

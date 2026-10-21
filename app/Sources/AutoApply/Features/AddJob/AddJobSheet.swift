@@ -54,8 +54,8 @@ struct AddJobSheet: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Start filling now")
                     Text(store.isPaused ? "The agent is paused: it will start when you resume."
-                         : store.mode == .review ? "Review mode: it waits for your approval before submitting."
-                         : "Auto mode: it submits on its own if every answer is confident.")
+                         : store.mode == .review ? "Review mode: it waits for your approval before sending."
+                         : "Auto mode: it sends on its own when the checks pass, and asks you when it's unsure.")
                         .font(Typography.callout).foregroundStyle(Palette.textSecondary)
                 }
             }
@@ -72,7 +72,7 @@ struct AddJobSheet: View {
                 Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Add job") { Task { await add() } }
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(.primaryPill)
                     .disabled(!canAdd)
             }
         }

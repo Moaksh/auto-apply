@@ -22,15 +22,7 @@ struct EasyApplyView: View {
         @Bindable var model = self.model
         let visible = model.visible
         VStack(spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: Space.m) {
-                Text("Easy Apply").font(Typography.title1)
-                HStack(spacing: Space.xs) {
-                    Text("\(model.toDoCount)").numericRoll(Double(model.toDoCount))
-                    Text("to do · LinkedIn only · applied manually by you")
-                }
-                .font(Typography.body)
-                .foregroundStyle(Palette.textSecondary)
-                Spacer()
+            ScreenHeader("Easy Apply", summary: "\(model.toDoCount) to do · LinkedIn jobs you apply to yourself") {
                 Picker("Filter", selection: $model.filter) {
                     ForEach(EasyApplyModel.Filter.allCases) { f in Text(f.title).tag(f) }
                 }
@@ -38,14 +30,11 @@ struct EasyApplyView: View {
                 .labelsHidden()
                 .frame(width: 240)
             }
-            .padding(.horizontal, Space.contentPadding)
-            .padding(.vertical, Space.l)
             Divider()
             if visible.isEmpty {
                 EmptyState(symbol: "bolt.horizontal",
                            title: model.filter == .done ? "Nothing marked as applied yet" : "No Easy Apply jobs to do",
-                           message: "LinkedIn Easy Apply jobs land here with drafted answers. The agent never submits them for you.",
-                           prominent: true)
+                           message: "LinkedIn Easy Apply jobs land here with drafted answers. The agent never submits them for you.")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 HStack(spacing: 0) {
@@ -90,7 +79,7 @@ private struct EasyApplyListRow: View {
                 Text(entry.title).font(Typography.callout).foregroundStyle(Palette.textSecondary).lineLimit(1)
             }
             Spacer()
-            if let score = entry.score { ScorePill(score: score, threshold: threshold) }
+            if let score = entry.score { Badge(score: score, threshold: threshold) }
         }
         .padding(.vertical, 2)
         .opacity(entry.item.done ? 0.6 : 1)
@@ -129,7 +118,7 @@ private struct EasyApplyDetail: View {
                             KeyCap(.openPosting)
                         }
                     }
-                    .buttonStyle(.glassProminent)
+                    .buttonStyle(.primaryPill)
                     .help("Opens in your browser. You apply; the agent never touches LinkedIn Easy Apply.")
                 }
 
@@ -145,7 +134,7 @@ private struct EasyApplyDetail: View {
                                 KeyCap(.copyAll)
                             }
                         }
-                        .buttonStyle(.glass)
+                        .buttonStyle(.secondaryLink)
                         .keyboardShortcut(.copyAll)
                     }
                     VStack(spacing: 0) {
@@ -166,7 +155,7 @@ private struct EasyApplyDetail: View {
                                     .font(Typography.callout)
                                     .foregroundStyle(Palette.needsYou)
                                 Spacer()
-                                Button("Answer in Needs You") { store.router.go(.needsYou) }.buttonStyle(.link)
+                                Button("Answer in Needs You") { store.router.go(.needsYou) }.buttonStyle(.secondaryLink)
                             }
                             .padding(.horizontal, Space.m)
                             .padding(.vertical, Space.s)
@@ -174,10 +163,9 @@ private struct EasyApplyDetail: View {
                         }
                         ResumeUploadRow(model: model, entry: entry)
                     }
-                    .surfaceCard(cornerRadius: Radius.inner)
+                    .surface(cornerRadius: Radius.inner)
                     .focusable()
                     .focused($rowsFocused)
-                    .focusEffectDisabled()
                     .onKeyPress(.downArrow) { model.moveFocusedRow(by: 1); return .handled }
                     .onKeyPress(.upArrow) { model.moveFocusedRow(by: -1); return .handled }
                     .onShortcut(.copyFocused) { model.copyFocused() }
@@ -191,14 +179,14 @@ private struct EasyApplyDetail: View {
                         Label("Applied manually\(entry.item.doneAt.map { " · \(C3Format.relative($0))" } ?? "")", systemImage: "checkmark.circle.fill")
                             .foregroundStyle(Palette.applied)
                     } else {
-                        Button("Dismiss") { Task { await model.dismiss() } }.buttonStyle(.glass)
+                        Button("Dismiss") { Task { await model.dismiss() } }.buttonStyle(.secondaryLink)
                         Button {
                             Task { await model.markApplied() }
                         } label: {
                             Label("Mark as applied", systemImage: "checkmark")
                         }
-                        .buttonStyle(.glassProminent)
-                        .help("Moves the job to the tracker as Applied (LinkedIn Easy Apply, manual)")
+                        .buttonStyle(.bordered)
+                        .help("Moves the job to the Pipeline as Applied (LinkedIn Easy Apply, by you)")
                     }
                 }
             }
@@ -288,7 +276,7 @@ private struct ResumeUploadRow: View {
                 .help(url == nil ? "The PDF isn't on disk yet" : "Drag into the LinkedIn upload field")
                 Spacer()
                 if let url {
-                    Button("Reveal in Finder") { LocalFiles.reveal(url) }.buttonStyle(.link)
+                    Button("Reveal in Finder") { LocalFiles.reveal(url) }.buttonStyle(.secondaryLink)
                 }
             } else {
                 Text("No resume yet").font(Typography.callout).foregroundStyle(Palette.textTertiary)

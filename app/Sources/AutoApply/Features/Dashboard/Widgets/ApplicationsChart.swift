@@ -1,14 +1,12 @@
 // ApplicationsChart.swift — W7 Applications · 30 days: daily bars (accent 70%) + 7-day moving
-// average (accent, 1.5pt, catmull-rom) + dashed daily-cap rule; scrubbing snaps to days with
+// average (accent, 1.5pt, catmull-rom) + dashed daily-limit rule; scrubbing snaps to days with
 // an alignment haptic and an annotation ("Tue 7 Oct · 12 applied · 3 skipped").
 import Charts
 import SwiftUI
 
 struct ApplicationsChart: View {
     @Environment(AppStore.self) private var store
-    @Environment(\.motionReduced) private var reduced
     @State private var selectedDate: Date?
-    @State private var hasAppeared = false
 
     private struct Point: Identifiable {
         var id: Date { day.day }
@@ -24,11 +22,11 @@ struct ApplicationsChart: View {
         let cap = store.preferences.dailyCap
         let state = chartState(total: total)
 
-        Card("Applications · 30 days", state: state, onRetry: { store.recomputeStats() }) {
+        Surface("Applications · 30 days", state: state, onRetry: { store.recomputeStats() }) {
             Chart {
                 ForEach(points) { p in
                     BarMark(x: .value("Day", p.day.day, unit: .day),
-                            y: .value("Applied", hasAppeared || reduced ? p.day.applied : 0))
+                            y: .value("Applied", p.day.applied))
                         .foregroundStyle(Palette.accentRamp(1))
                         .accessibilityLabel(p.day.day.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))
                         .accessibilityValue("\(p.day.applied) applied")
@@ -38,13 +36,13 @@ struct ApplicationsChart: View {
                         .interpolationMethod(.catmullRom)
                         .accessibilityHidden(true)
                 }
-                RuleMark(y: .value("Daily cap", cap))
+                RuleMark(y: .value("Daily limit", cap))
                     .foregroundStyle(Palette.textTertiary)
                     .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
                     .annotation(position: .top, alignment: .trailing) {
-                        Text("cap \(cap)").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
+                        Text("limit \(cap)").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
                     }
-                    .accessibilityLabel("Daily cap \(cap)")
+                    .accessibilityLabel("Daily limit \(cap)")
                 if let selected = selectedDay(days) {
                     RuleMark(x: .value("Selected", selected.day, unit: .day))
                         .foregroundStyle(Palette.textSecondary.opacity(0.5))
@@ -52,7 +50,7 @@ struct ApplicationsChart: View {
                             Text(ChartMath.dayAnnotation(selected))
                                 .font(Typography.callout)
                                 .padding(.horizontal, Space.s).padding(.vertical, Space.xs)
-                                .glassPanel(cornerRadius: Radius.inner)
+                                .surface(cornerRadius: Radius.inner)
                         }
                 }
             }
@@ -69,22 +67,17 @@ struct ApplicationsChart: View {
             .accessibilityChartDescriptor(ApplicationsDescriptor(days: days))
         }
         .onChange(of: selectedDay(days)?.day) { _, new in if new != nil { Haptics.alignment() } }
-        .onAppear {
-            guard !hasAppeared else { return }
-            // Bars grow from the baseline only on first appearance.
-            withMotion(Motion.gentle, reduceMotion: reduced) { hasAppeared = true }
-        }
     }
 
     private func selectedDay(_ days: [DayCount]) -> DayCount? {
         selectedDate.flatMap { ChartMath.nearestDay(to: $0, in: days) }
     }
 
-    private func chartState(total: Int) -> CardState {
+    private func chartState(total: Int) -> SurfaceState {
         let base = WidgetDataState.resolve(isLoaded: store.jobs.isLoaded, isAvailable: store.repository.isAvailable)
         guard base == .content else { return base }
         if store.stats.totalApplied == 0 {
-            return .empty(symbol: "chart.bar", message: "Charts fill in after your first ~10 applications")
+            return .empty(symbol: "chart.bar", message: "This fills in once the agent has applied to a few jobs")
         }
         return .content
     }

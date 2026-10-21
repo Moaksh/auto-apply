@@ -1,5 +1,6 @@
 // SidebarView.swift — the app's spine: Now / Library / System sections with badges, and the
-// Agent Pill footer (§3.2). Needs You badge is amber and wiggles once when a question lands.
+// agent pill footer. The Needs You badge is prominent and its icon wiggles once when a question
+// lands (an event, never idle).
 import SwiftUI
 
 struct SidebarView: View {
@@ -52,11 +53,6 @@ private struct SidebarRow: View {
     var body: some View {
         Label {
             Text(item.title)
-            if item == .coldEmail {
-                Text("BETA").font(.system(size: 9, weight: .bold)).foregroundStyle(Palette.accent)
-                    .padding(.horizontal, 4).padding(.vertical, 1)
-                    .background(Palette.accent.opacity(0.14), in: Capsule())
-            }
         } icon: {
             Image(systemName: item.symbol)
                 .symbolEffect(.wiggle, options: .nonRepeating, value: reduced ? 0 : arrivalCount)

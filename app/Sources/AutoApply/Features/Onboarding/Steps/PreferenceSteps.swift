@@ -1,4 +1,4 @@
-// PreferenceSteps.swift — onboarding steps 3–5: job preferences, never-guess facts (locked
+// PreferenceSteps.swift — onboarding steps 3–5: job preferences, facts only you set (locked
 // styling everywhere), and the optional story bank.
 import SwiftUI
 
@@ -116,7 +116,7 @@ struct PreferencesStep: View {
     }
 }
 
-// MARK: - Step 4: Never-guess facts
+// MARK: - Step 4: Facts only you set
 
 struct NeverGuessStep: View {
     @Bindable var model: OnboardingModel
@@ -126,9 +126,9 @@ struct NeverGuessStep: View {
     ]
 
     var body: some View {
-        StepHeader(title: "Facts the agent will never guess",
-                   subtitle: "These only ever come from you. If a form asks something not listed, the agent stops and asks.")
-        // Same editor as Settings ▸ Never-guess, so onboarding also asks *where you can work*
+        StepHeader(title: "Facts only you set",
+                   subtitle: "The agent never guesses these. When a form asks for one you haven't set, the question comes to Needs You.")
+        // Same editor as Settings ▸ Guardrails, so onboarding also asks *where you can work*
         // (per country). Without it every "authorized to work in …?" question stops the agent.
         NeverGuessEditor(draft: $model.neverGuessDraft, profile: model.profileDraft)
         Text("Leave anything blank to always be asked.").font(Typography.callout).foregroundStyle(Palette.textTertiary)
@@ -159,10 +159,10 @@ struct StoriesStep: View {
             } label: {
                 Label("Add another story", systemImage: "plus")
             }
-            .buttonStyle(.glass)
+            .buttonStyle(.secondaryLink)
             Spacer()
             Button("Skip for now") { model.go(to: .sources) }
-                .buttonStyle(.link)
+                .buttonStyle(.secondaryLink)
         }
         Text("The agent quotes these; it won't invent metrics.").font(Typography.callout).foregroundStyle(Palette.textTertiary)
     }
@@ -189,7 +189,7 @@ private struct StoryCard: View {
             ChipField(values: $story.tags, placeholder: "+ tag (leadership, conflict, scale…)")
         }
         .padding(Space.l)
-        .surfaceCard()
+        .surface()
     }
 
     private func starField(_ label: String, text: Binding<String>) -> some View {
@@ -199,7 +199,7 @@ private struct StoryCard: View {
                 .textFieldStyle(.plain)
                 .lineLimit(1...4)
                 .padding(Space.s)
-                .sunkenWell()
+                .well()
         }
     }
 }

@@ -57,18 +57,12 @@ enum DashboardFormat {
         return rounded > 0 ? "+\(rounded) vs avg" : "−\(abs(rounded)) vs avg"
     }
 
-    static func appliedTodayDelta(_ delta: Double) -> KPICard.Delta? {
-        let rounded = Int(delta.rounded())
-        guard rounded != 0 else { return nil }
-        return KPICard.Delta(text: "\(abs(rounded))", isPositive: rounded > 0)
-    }
-
-    /// W5: delta between two rates in percentage points ("3pt"), nil when either is missing.
-    static func responseRateDelta(current: Double?, previous: Double?) -> KPICard.Delta? {
+    /// Delta between two rates in percentage points ("3pt"), nil when either is missing.
+    static func responseRateDelta(current: Double?, previous: Double?) -> MetricDelta? {
         guard let current, let previous else { return nil }
         let points = Int(((current - previous) * 100).rounded())
         guard points != 0 else { return nil }
-        return KPICard.Delta(text: "\(abs(points))pt", isPositive: points > 0)
+        return MetricDelta(text: "\(abs(points))pt", isPositive: points > 0)
     }
 
     /// Submitted node glyphs: up to 12 checks, then "✓ × 21".
@@ -164,16 +158,16 @@ enum HeroVerb: String, Sendable, Equatable {
     case idle = "Idle"
     case discovering = "Discovering"
     case scoring = "Scoring"
-    case prepping = "Prepping"
+    case prepping = "Collecting questions"
     case filling = "Filling"
     case waitingOnPage = "Waiting on page"
-    case submitting = "Submitting"
+    case submitting = "Sending"
     case paused = "Paused"
     case needsYou = "Needs you"
     case error = "Error"
     case doneForToday = "Done for today"
     case connecting = "Connecting"
-    case unreachable = "Can't reach autoapplyd"
+    case unreachable = "Can't reach the agent"
 
     static func resolve(state: HeroState, activeJobState: AppState?, lastStepAction: String?, openClusters: Int, hasError: Bool) -> HeroVerb {
         switch state {
@@ -196,22 +190,6 @@ enum HeroVerb: String, Sendable, Equatable {
     }
 }
 
-/// "Count up from 0 only on the first launch of the day" (§2.5).
-enum CountUpPolicy {
-    static let storageKey = "dashboard.lastCountUpDay"
-
-    static func dayStamp(_ date: Date, calendar: Calendar = .current) -> String {
-        let c = calendar.dateComponents([.year, .month, .day], from: date)
-        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
-    }
-
-    /// True when today hasn't counted up yet.
-    static func shouldCountUp(lastStamp: String?, now: Date, reduceMotion: Bool, calendar: Calendar = .current) -> Bool {
-        guard !reduceMotion else { return false }
-        return lastStamp != dayStamp(now, calendar: calendar)
-    }
-}
-
 /// Throttle for VoiceOver announcements of pipeline stage changes (one per 10 s, §7).
 struct AnnouncementThrottle: Sendable {
     var interval: TimeInterval = 10
@@ -223,18 +201,6 @@ struct AnnouncementThrottle: Sendable {
         if let last = lastAnnouncedAt, now.timeIntervalSince(last) < interval { return false }
         lastAnnouncedAt = now
         return true
-    }
-}
-
-/// Adaptive dashboard grid (§4.2): under 1100pt content width the KPI row goes 2×2 and charts
-/// stack into a single column.
-enum DashboardLayout: Equatable {
-    case wide, narrow
-
-    static let breakpoint: CGFloat = 1100
-
-    init(contentWidth: CGFloat) {
-        self = contentWidth < Self.breakpoint ? .narrow : .wide
     }
 }
 

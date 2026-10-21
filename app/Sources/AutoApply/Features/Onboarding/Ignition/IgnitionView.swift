@@ -55,7 +55,7 @@ struct IgnitionView: View {
     @Environment(\.motionReduced) private var reduced
     @FocusState private var focused: Bool
 
-    private static let headline = ["Let's", "get", "you", "hired."]
+    private static let headline = ["Set", "up", "your", "job", "agent."]
 
     var body: some View {
         Group {
@@ -131,7 +131,7 @@ struct IgnitionView: View {
         .contentShape(Rectangle())
         .onTapGesture { skip() }
         .focusable()
-        .focusEffectDisabled()
+        .focusEffectDisabled()  // a full-window splash, not a control: no ring around the window
         .focused($focused)
         .onKeyPress { press in
             if skipped && press.key == .return { onGetStarted(); return .handled }
@@ -187,7 +187,7 @@ struct IgnitionView: View {
                                 .blur(radius: (1 - wordPhase) * 6)
                         }
                     }
-                    Text("AutoApply finds roles that fit and applies for you, only with facts you approve.")
+                    Text("AutoApply finds jobs that match what you want and fills in the applications. Questions it can't answer from your profile come to you.")
                         .font(Typography.title2)
                         .foregroundStyle(.white.opacity(0.7))
                         .multilineTextAlignment(.center)
@@ -197,10 +197,11 @@ struct IgnitionView: View {
                         Button(action: onGetStarted) {
                             Text("Get started").font(Typography.title2).padding(.horizontal, Space.xl).padding(.vertical, Space.xs)
                         }
-                        .buttonStyle(.glassProminent)
+                        .buttonStyle(.primaryPill)
                         .controlSize(.large)
                         .keyboardShortcut(.defaultAction)
-                        Label("Everything stays on this Mac.", systemImage: "lock.fill")
+                        .environment(\.colorScheme, .dark)
+                        Label("Your data stays on this Mac. Job pages and form questions go to Claude to draft answers.", systemImage: "lock.fill")
                             .font(Typography.callout)
                             .foregroundStyle(.white.opacity(0.55))
                     }
@@ -215,8 +216,8 @@ struct IgnitionView: View {
     }
 }
 
-/// Near-black canvas brightening into the live brand field (deep green → ink → navy, a hint of
-/// coral). Drifts slowly once lit; static under Reduce Motion.
+/// Near-black canvas brightening into the brand field (deep green → ink → navy, a hint of
+/// coral). The field itself is static: only the brightness fades in, once.
 private struct IgnitionBackground: View {
     var brightness: Double
 
@@ -297,7 +298,6 @@ struct PaperPlaneMark: View {
             PaperPlaneShape()
                 .trim(from: 0, to: trimEnd)
                 .stroke(Palette.Brand.signal, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-                .shadow(color: Palette.Brand.signal.opacity(0.6), radius: 8)
         }
         .accessibilityHidden(true)
     }

@@ -61,7 +61,7 @@ struct MatchBreakdown: View {
                     }
                 }
                 .padding(Space.m)
-                .surfaceCard(cornerRadius: Radius.inner)
+                .surface(cornerRadius: Radius.inner)
             }
             if let summary = job.scoreSummary, !summary.isEmpty {
                 Text("Why: \(summary)").font(Typography.callout).foregroundStyle(Palette.textSecondary)

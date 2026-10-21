@@ -1,58 +1,126 @@
-// States.swift — EmptyState, SkeletonBlock (static, no shimmer), LoadingState, ErrorState,
-// ThinkingDots.
+// States.swift — the one EmptyState, LoadingState and ErrorState, plus SkeletonBlock (static,
+// no shimmer) and ThinkingDots. All calm: no brand field, no animation at rest.
 import SwiftUI
 
-/// Symbol + title + body + optional action. `prominent` empty states (a whole screen with
-/// nothing in it yet) sit on the live brand field as a 22pt media card; small ones stay plain.
+/// Symbol + title + one line + at most one action. The action is a text link unless the state
+/// is a screen's first-run moment (`isPrimary`), when it is the screen's primary pill.
 struct EmptyState: View {
     var symbol: String
     var title: String
     var message: String?
     var actionTitle: String?
-    var prominent: Bool = false
+    var isPrimary: Bool = false
     var action: (() -> Void)?
 
     var body: some View {
-        if prominent {
-            content
-                .padding(.horizontal, Space.xxxl)
-                .padding(.vertical, Space.xxl + Space.s)
-                .frame(maxWidth: 560)
-                .brandHeroBand()
-                .padding(Space.xl)
-        } else {
-            content.padding(Space.xxl)
-        }
-    }
-
-    private var content: some View {
-        VStack(spacing: Space.m) {
+        VStack(spacing: Space.s) {
             Image(systemName: symbol)
-                .font(.system(size: 40, weight: .regular))
+                .font(.system(size: 32, weight: .light))
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(prominent ? Palette.Brand.signal : Palette.textTertiary)
-            if prominent {
-                Text(title).font(Typography.title1).tracking(-0.6).multilineTextAlignment(.center)
-            } else {
-                Text(title).font(Typography.title2)
-            }
+                .foregroundStyle(Palette.textTertiary)
+                .padding(.bottom, Space.xs)
+            Text(title).font(Typography.title2).multilineTextAlignment(.center)
             if let message {
                 Text(message)
                     .font(Typography.body)
                     .foregroundStyle(Palette.textSecondary)
                     .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 380)
             }
             if let actionTitle, let action {
-                Button(actionTitle, action: action).buttonStyle(.glassProminent)
-                    .padding(.top, prominent ? Space.s : 0)
+                Group {
+                    if isPrimary {
+                        Button(actionTitle, action: action).buttonStyle(.primaryPill)
+                    } else {
+                        Button(actionTitle, action: action).buttonStyle(.secondaryLink)
+                    }
+                }
+                .padding(.top, Space.s)
             }
         }
+        .padding(Space.xxl)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// "Loading…" for a screen or pane whose data hasn't arrived yet.
+struct LoadingState: View {
+    var message: String = "Loading…"
+
+    var body: some View {
+        HStack(spacing: Space.s) {
+            ProgressView().controlSize(.small)
+            Text(message).font(Typography.callout).foregroundStyle(Palette.textSecondary)
+        }
+        .padding(Space.xxl)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityElement(children: .combine)
     }
 }
 
-/// Static placeholder shapes (shimmer is decoration; we don't do it — §4.4).
+/// A screen- or widget-level error with one fix. `compact` is the inline widget form
+/// ("Couldn't read stats · Try again"); the rest of the screen keeps working.
+struct ErrorState: View {
+    var title: String
+    var message: String?
+    var compact: Bool = false
+    var actionTitle: String?
+    var action: (() -> Void)?
+    var secondaryTitle: String?
+    var secondaryAction: (() -> Void)?
+
+    init(title: String, message: String? = nil, compact: Bool = false, actionTitle: String? = nil, action: (() -> Void)? = nil,
+         secondaryTitle: String? = nil, secondaryAction: (() -> Void)? = nil) {
+        self.title = title
+        self.message = message
+        self.compact = compact
+        self.actionTitle = actionTitle
+        self.action = action
+        self.secondaryTitle = secondaryTitle
+        self.secondaryAction = secondaryAction
+    }
+
+    var body: some View {
+        if compact {
+            HStack(spacing: Space.s) {
+                Image(systemName: StatusKind.error.symbol).foregroundStyle(Palette.error)
+                Text(title).font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                if let actionTitle, let action {
+                    Button(actionTitle, action: action).buttonStyle(.secondaryLink).font(Typography.callout)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+        } else {
+            VStack(spacing: Space.s) {
+                Image(systemName: StatusKind.error.symbol)
+                    .font(.system(size: 28, weight: .light))
+                    .foregroundStyle(Palette.error)
+                    .padding(.bottom, Space.xs)
+                Text(title).font(Typography.title2).multilineTextAlignment(.center)
+                if let message {
+                    Text(message).font(Typography.body).foregroundStyle(Palette.textSecondary)
+                        .multilineTextAlignment(.center).frame(maxWidth: 380)
+                }
+                HStack(spacing: Space.l) {
+                    if let actionTitle, let action {
+                        Button(actionTitle, action: action).buttonStyle(.primaryPill)
+                    }
+                    if let secondaryTitle, let secondaryAction {
+                        Button(secondaryTitle, action: secondaryAction).buttonStyle(.secondaryLink)
+                    }
+                }
+                .padding(.top, Space.s)
+            }
+            .padding(Space.xl)
+            .frame(maxWidth: .infinity)
+            .accessibilityElement(children: .contain)
+        }
+    }
+}
+
+/// Static placeholder lines (no shimmer).
 struct SkeletonBlock: View {
     var lines: Int = 3
     var lineHeight: CGFloat = 10
@@ -70,48 +138,7 @@ struct SkeletonBlock: View {
     }
 }
 
-/// Skeleton circle (pipeline nodes, avatars).
-struct SkeletonCircle: View {
-    var diameter: CGFloat = 24
-    var body: some View {
-        Circle().stroke(Palette.hairline, lineWidth: 1).frame(width: diameter, height: diameter)
-    }
-}
-
-/// Full-area error with one fix action (e.g. "Can't reach autoapplyd · Restart daemon").
-struct ErrorState: View {
-    var title: String
-    var message: String?
-    var actionTitle: String?
-    var action: (() -> Void)?
-    var secondaryTitle: String?
-    var secondaryAction: (() -> Void)?
-
-    var body: some View {
-        VStack(spacing: Space.m) {
-            Image(systemName: StatusKind.error.symbol)
-                .font(.system(size: 32))
-                .foregroundStyle(Palette.error)
-            Text(title).font(Typography.title2)
-            if let message {
-                Text(message).font(Typography.callout).foregroundStyle(Palette.textSecondary).multilineTextAlignment(.center)
-            }
-            HStack(spacing: Space.s) {
-                if let secondaryTitle, let secondaryAction {
-                    Button(secondaryTitle, action: secondaryAction).buttonStyle(.glass)
-                }
-                if let actionTitle, let action {
-                    Button(actionTitle, action: action).buttonStyle(.glassProminent)
-                }
-            }
-        }
-        .padding(Space.xl)
-        .frame(maxWidth: .infinity)
-        .accessibilityElement(children: .contain)
-    }
-}
-
-/// Three 4pt dots, opacity 0.3/1.0 staggered — loops only while `isActive` (§2.4 #4).
+/// Three 4pt dots, opacity 0.3/1.0 staggered — loops only while `isActive` (the agent is working).
 struct ThinkingDots: View {
     var isActive: Bool
     var color: Color = Palette.textSecondary
@@ -139,11 +166,12 @@ struct ThinkingDots: View {
 
 #Preview("States") {
     VStack {
-        EmptyState(symbol: "tray", title: "All caught up.", message: "14 jobs resumed. The agent's back at it.", actionTitle: "Run Prep pass") {}
-        EmptyState(symbol: "checkmark.rectangle.stack", title: "Nothing to review", message: "Filled applications wait here.", prominent: true)
-        SkeletonBlock().frame(width: 240)
-        ErrorState(title: "Can't reach autoapplyd", message: "Last seen 14:02", actionTitle: "Restart daemon", action: {})
-        ThinkingDots(isActive: true)
+        EmptyState(symbol: "tray", title: "All clear", message: "Nothing needs you right now.")
+        EmptyState(symbol: "checkmark.rectangle.stack", title: "Nothing to review", message: "Filled applications wait here.",
+                   actionTitle: "Run now", isPrimary: true) {}
+        LoadingState()
+        ErrorState(title: "Can't reach the agent", message: "Last seen 14:02", actionTitle: "Restart agent", action: {})
+        ErrorState(title: "Couldn't read stats", compact: true, actionTitle: "Try again", action: {})
     }
     .padding()
 }

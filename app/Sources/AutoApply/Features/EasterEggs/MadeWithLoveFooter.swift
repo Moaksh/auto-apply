@@ -32,7 +32,7 @@ struct MadeWithLoveFooter: View {
             } else {
                 Text("by Moaksh Kakkar")
                 if let footer = accent?.footer {
-                    AccentMark(text: footer, seenKey: "settings.accent.seen")
+                    AccentMark(text: footer)
                 }
             }
             Spacer()

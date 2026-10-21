@@ -128,7 +128,7 @@ final class ReviewModel {
         let overrides = prefs.perAtsMode
             .filter { $0.value != prefs.mode }
             .sorted { $0.key < $1.key }
-            .map { "\(Ats(rawValue: $0.key)?.label ?? $0.key.capitalized) override: \($0.value.rawValue.capitalized)" }
+            .map { "\(Ats(rawValue: $0.key)?.label ?? $0.key.capitalized): \($0.value.rawValue.capitalized)" }
         let base = "Mode: \(prefs.mode.rawValue.capitalized)"
         return overrides.isEmpty ? base : "\(base) (\(overrides.joined(separator: ", ")))"
     }
@@ -281,7 +281,7 @@ final class ReviewModel {
         for id in jobIDs { departing.removeValue(forKey: id) }
         if ok {
             Sounds.play(.send)
-            store.toasts.show(appIDs.count == 1 ? "Approved · submitting" : "Approved \(appIDs.count) · submitting",
+            store.toasts.show(appIDs.count == 1 ? "Approved · sending now" : "Approved \(appIDs.count) · sending now",
                               symbol: "paperplane.fill", style: .success)
         }
         pruneSelection()

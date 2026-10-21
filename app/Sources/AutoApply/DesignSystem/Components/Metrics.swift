@@ -1,4 +1,4 @@
-// Metrics.swift — MetricText (rounded, rolling digits), KPICard, Sparkline, CapBar.
+// Metrics.swift — MetricText (rounded, rolling digits), Sparkline, CapBar.
 import Charts
 import SwiftUI
 
@@ -62,57 +62,6 @@ struct MetricText: View {
     }
 }
 
-/// Metric + caption + optional sparkline + delta (W3 Applied Today, W5 Response Rate).
-struct KPICard: View {
-    var title: String
-    var value: MetricText
-    var caption: String?
-    var delta: Delta?
-    var sparkline: [Int]?
-    var state: CardState = .content
-    /// Changing this triggers the one-shot accent hairline glow (new submission).
-    var glowTrigger: Int = 0
-
-    struct Delta: Equatable {
-        var text: String
-        var isPositive: Bool
-    }
-
-    @State private var glow = false
-    @Environment(\.motionReduced) private var reduced
-
-    var body: some View {
-        Card(title, state: state) {
-            VStack(alignment: .leading, spacing: Space.s) {
-                HStack(alignment: .firstTextBaseline, spacing: Space.s) {
-                    value
-                    if let delta {
-                        Label(delta.text, systemImage: delta.isPositive ? "arrowtriangle.up.fill" : "arrowtriangle.down.fill")
-                            .labelStyle(.titleAndIcon)
-                            .font(Typography.callout)
-                            .foregroundStyle(Palette.textSecondary)
-                    }
-                }
-                if let sparkline { Sparkline(values: sparkline).frame(height: 28) }
-                if let caption {
-                    Text(caption).font(Typography.callout).foregroundStyle(Palette.textSecondary)
-                }
-            }
-        }
-        .overlay {
-            RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
-                .stroke(Palette.accent.opacity(glow ? 0.4 : 0), lineWidth: 1)
-                .allowsHitTesting(false)
-        }
-        .onChange(of: glowTrigger) {
-            guard !reduced else { return }
-            withAnimation(.easeOut(duration: 0.3)) { glow = true }
-            withAnimation(.easeIn(duration: 0.3).delay(0.3)) { glow = false }
-        }
-        .accessibilityElement(children: .combine)
-    }
-}
-
 /// 7-day style sparkline: accent line + 15% area. Flat dotted line when all zero.
 struct Sparkline: View {
     var values: [Int]
@@ -147,8 +96,8 @@ struct Sparkline: View {
     }
 }
 
-/// Thin 4pt capsule progress. Amber at ≥ 80 %, neutral grey text at 100 % — never red:
-/// hitting a cap means the guardrail worked (W6).
+/// Thin 4pt capsule progress. Amber at ≥ 80 %, neutral grey at 100 % — never red: reaching a
+/// daily limit means the guardrail worked.
 struct CapBar: View {
     var title: String
     var used: Int
@@ -173,19 +122,19 @@ struct CapBar: View {
             .frame(height: 4)
             .motion(Motion.snappy, value: fraction)
             if fraction >= 1 {
-                Text("cap reached · resumes tomorrow").font(Typography.callout).foregroundStyle(Palette.textTertiary)
+                Text("Daily limit reached · continues tomorrow").font(Typography.callout).foregroundStyle(Palette.textTertiary)
             }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(title)
-        .accessibilityValue("\(used) of \(limit)\(fraction >= 1 ? ", cap reached" : "")")
+        .accessibilityValue("\(used) of \(limit)\(fraction >= 1 ? ", limit reached" : "")")
     }
 }
 
 #Preview("Metrics") {
     VStack(spacing: Space.gutter) {
-        KPICard(title: "Applied today", value: MetricText(9, size: .xl), caption: "+4 vs avg",
-                delta: .init(text: "4", isPositive: true), sparkline: [2, 3, 5, 3, 6, 7, 9])
+        MetricText(9, size: .xl)
+        Sparkline(values: [2, 3, 5, 3, 6, 7, 9]).frame(height: 28)
         CapBar(title: "Applications", used: 13, limit: 15)
         CapBar(title: "Per company", used: 1, limit: 1)
     }

@@ -246,7 +246,7 @@ enum InboxActionCopy {
 
     /// Numbered steps shown under the explanation.
     static func steps(_ cluster: QuestionCluster, jobs: Int) -> [String] {
-        let retry = jobs == 1 ? "Click Done, retry. The agent picks the job up again." : "Click Done, retry. The agent picks the \(jobs) jobs up again."
+        let retry = jobs == 1 ? "Click Done, try again. The job goes back in the queue." : "Click Done, try again. The \(jobs) jobs go back in the queue."
         switch cluster.action {
         case .account:
             return ["Open the agent's Chrome. The application page loads there.",
@@ -557,7 +557,7 @@ final class InboxModel {
             Sounds.play(.pop)
         }
         let jobsText = C3Format.plural(cluster.jobCount, "job")
-        let message = answer == nil ? "Skipped · \(jobsText)" : cluster.isAction ? "Retrying · \(jobsText)" : "Answered · \(jobsText) resumed"
+        let message = answer == nil ? "Skipped · \(jobsText)" : "\(cluster.isAction ? "Done" : "Answered") · \(jobsText) back in the queue"
         store.toasts.show(message, symbol: answer == nil ? "arrow.uturn.right" : "checkmark", style: .success,
                           duration: window, actionTitle: "Undo") { [weak self] in self?.undo(clusterID: id) }
         if let undoManager {

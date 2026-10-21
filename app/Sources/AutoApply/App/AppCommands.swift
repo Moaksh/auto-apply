@@ -5,6 +5,7 @@ import SwiftUI
 struct AppCommands: Commands {
     let store: AppStore
     @Environment(\.openWindow) private var openWindow
+    @FocusedValue(\.copyAllAnswers) private var copyAllAnswers
 
     var body: some Commands {
         CommandGroup(after: .appInfo) {
@@ -49,9 +50,9 @@ struct AppCommands: Commands {
                 Text("Review").tag(Mode.review)
             }
             Divider()
-            Button("Open Agent Chrome") { Task { await store.openAgentChrome() } }
+            Button("Open the Agent's Chrome") { Task { await store.openAgentChrome() } }
             Button("Open Data Folder") { Task { await store.perform(.openDataFolder) } }
-            Button("Restart Daemon") { Task { _ = await DaemonControl.restart() } }
+            Button("Restart Agent") { Task { _ = await DaemonControl.restart() } }
         }
 
         CommandMenu("Go") {
@@ -87,6 +88,9 @@ struct AppCommands: Commands {
                 if let url = (focused?.applyURL ?? focused?.sourceURL).flatMap(URL.init(string:)) { NSWorkspace.shared.open(url) }
             }
             .disabled(focused?.applyURL == nil && focused?.sourceURL == nil)
+            Button(AppShortcut.copyAll.title) { copyAllAnswers?.perform() }
+                .keyboardShortcut(.copyAll)
+                .disabled(copyAllAnswers == nil)
         }
 
         #if DEBUG

@@ -1,6 +1,7 @@
 // SettingsTabs.swift — the preference-backed Settings tabs: Preferences (everything from
-// onboarding step 3), Guardrails (never-guess facts + ask confidence + attestations + always-ask
-// patterns), Modes (global, per-ATS, per-company, per-job), Sources, and Schedule & Caps.
+// onboarding step 3), Guardrails (facts only you set + when to ask + attestations + always-ask
+// phrases + job-site accounts), Modes (app-wide, per application site, per company, per job),
+// Sources (incl. the email inbox and its account-creation consent), and Schedule & Limits.
 import SwiftUI
 
 // MARK: - Preferences
@@ -23,11 +24,11 @@ struct PreferencesSettingsTab: View {
                 }
                 Spacer()
                 Button("Fill from resume") { fill(from: s) }
-                    .buttonStyle(.glass)
-                    .help("Adds the suggested roles and locations and sets seniority. Review, then Save.")
+                    .buttonStyle(.secondaryLink)
+                    .help("Adds the suggested roles and locations and sets seniority. Changes save automatically.")
             }
             .padding(Space.m)
-            .sunkenWell()
+            .well()
         }
         SettingsRow("Roles") {
             ChipField(values: $model.preferencesDraft.roles, placeholder: "+ add role",
@@ -146,11 +147,11 @@ struct GuardrailsSettingsTab: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
             HStack {
-                Text("Never-guess facts").font(Typography.title2)
+                Text("Facts only you set").font(Typography.title2)
                 Spacer()
-                Label("only you", systemImage: "lock.fill").font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                Label("the agent never guesses these", systemImage: "lock.fill").font(Typography.callout).foregroundStyle(Palette.textSecondary)
             }
-            Text("These only ever come from you. If a form asks something not listed here, the agent stops and asks.")
+            Text("These only ever come from you. When a form asks for one you haven't set, the question comes to Needs You.")
                 .font(Typography.callout).foregroundStyle(Palette.textSecondary)
             NeverGuessEditor(draft: $model.neverGuessDraft, profile: model.store.library.profile)
         }
@@ -174,14 +175,14 @@ struct GuardrailsSettingsTab: View {
 
     private var confidenceHelp: String {
         switch model.preferencesDraft.askConfidence {
-        case .strict: "Strict: anything generated below high confidence is parked for you. Fewer surprises, more questions."
-        case .balanced: "Balanced: medium-confidence generated answers go through; low confidence asks you."
-        case .lenient: "Lenient: only very low confidence asks you. Fastest, but review more receipts."
+        case .strict: "Strict: any drafted answer the agent isn't highly sure of comes to Needs You. Fewer surprises, more questions."
+        case .balanced: "Balanced: drafted answers the agent is fairly sure of are sent; unsure ones come to Needs You."
+        case .lenient: "Lenient: only answers the agent is very unsure of come to you. Fastest; check more answers in Review."
         }
     }
 }
 
-/// Never-guess facts editor (same fields as onboarding step 4) with locked styling. Blank
+/// Editor for facts only you set (same fields as onboarding step 4) with locked styling. Blank
 /// means "always ask me".
 struct NeverGuessEditor: View {
     @Binding var draft: NeverGuess
@@ -314,7 +315,7 @@ struct ModesSettingsTab: View {
     static let atsRows: [Ats] = [.greenhouse, .lever, .ashby, .workday, .other]
 
     var body: some View {
-        SettingsRow("Global mode", help: "Auto submits when guardrails pass. Review parks filled applications for your OK.") {
+        SettingsRow("Mode", help: "Auto sends applications when the checks pass. Review holds each filled application for your OK.") {
             Picker("Mode", selection: Binding(get: { model.preferencesDraft.mode }, set: { m in Task { await model.setGlobalMode(m) } })) {
                 Text("Auto").tag(Mode.auto)
                 Text("Review").tag(Mode.review)
@@ -323,7 +324,7 @@ struct ModesSettingsTab: View {
             .labelsHidden()
             .frame(width: 200)
         }
-        SettingsRow("Per ATS", help: "Overrides win over the global mode. Workday defaults to Review.") {
+        SettingsRow("Per application site", help: "A setting here wins over the app-wide mode. Workday starts on Review.") {
             Grid(alignment: .leading, horizontalSpacing: Space.l, verticalSpacing: Space.s) {
                 ForEach(Self.atsRows, id: \.self) { ats in
                     GridRow {
@@ -331,7 +332,7 @@ struct ModesSettingsTab: View {
                         Picker(ats.label, selection: Binding(
                             get: { model.preferencesDraft.perAtsMode[ats.rawValue] },
                             set: { m in Task { await model.setAtsMode(ats, m) } })) {
-                            Text("Inherit").tag(Mode?.none)
+                            Text("App setting").tag(Mode?.none)
                             Text("Auto").tag(Mode?.some(.auto))
                             Text("Review").tag(Mode?.some(.review))
                         }
@@ -345,7 +346,7 @@ struct ModesSettingsTab: View {
         SettingsRow("Per company") {
             let overrides = model.preferencesDraft.perCompanyMode.sorted { model.companyName($0.key) < model.companyName($1.key) }
             if overrides.isEmpty {
-                Text("No company overrides.").font(Typography.callout).foregroundStyle(Palette.textTertiary)
+                Text("No company settings.").font(Typography.callout).foregroundStyle(Palette.textTertiary)
             }
             ForEach(overrides, id: \.key) { key, mode in
                 HStack(spacing: Space.s) {
@@ -363,7 +364,7 @@ struct ModesSettingsTab: View {
                 }
             }
             let available = model.knownCompanies.filter { model.preferencesDraft.perCompanyMode[String($0.id)] == nil }
-            Menu("Add company override") {
+            Menu("Set a mode for a company") {
                 ForEach(available, id: \.id) { company in
                     Button(company.name) { Task { await model.setCompanyMode(companyID: company.id, .review) } }
                 }
@@ -374,14 +375,14 @@ struct ModesSettingsTab: View {
         SettingsRow("Per job", help: "Set from a job's detail or the Review queue.") {
             let jobs = model.jobsWithModeOverride
             if jobs.isEmpty {
-                Text("No job overrides.").font(Typography.callout).foregroundStyle(Palette.textTertiary)
+                Text("No job settings.").font(Typography.callout).foregroundStyle(Palette.textTertiary)
             }
             ForEach(jobs) { job in
                 HStack(spacing: Space.s) {
                     Text(job.displayName).font(Typography.body).lineLimit(1)
                     Text(job.modeOverride?.rawValue.capitalized ?? "").font(Typography.callout).foregroundStyle(Palette.textSecondary)
                     Spacer()
-                    Button("Clear") { Task { await store.setJobMode(jobID: job.id, mode: nil) } }.buttonStyle(.link)
+                    Button("Clear") { Task { await store.setJobMode(jobID: job.id, mode: nil) } }.buttonStyle(.secondaryLink)
                 }
             }
         }
@@ -421,17 +422,17 @@ struct SourcesSettingsTab: View {
             .errorShake(trigger: urlShake)
         }
         CompanySuggestionsRows()
-        MailAccountRow()
-        SettingsRow("Read budgets", help: "Short, human-paced read-only sessions per day. LinkedIn and Glassdoor are never used to apply.") {
-            Stepper("LinkedIn: \(model.preferencesDraft.linkedinSessionsPerDay) sessions / day",
+        MailAccountRow(createAccounts: $model.preferencesDraft.createAccounts)
+        SettingsRow("LinkedIn & Glassdoor", help: "Short, human-paced visits that only read job listings. LinkedIn and Glassdoor are never used to apply.") {
+            Stepper("LinkedIn: \(model.preferencesDraft.linkedinSessionsPerDay) visits a day",
                     value: $model.preferencesDraft.linkedinSessionsPerDay, in: 0...10)
-            Stepper("Glassdoor: \(model.preferencesDraft.glassdoorSessionsPerDay) sessions / day",
+            Stepper("Glassdoor: \(model.preferencesDraft.glassdoorSessionsPerDay) visits a day",
                     value: $model.preferencesDraft.glassdoorSessionsPerDay, in: 0...10)
-            Stepper("Searches per session: \(model.preferencesDraft.searchesPerSession) result pages",
+            Stepper("Search pages per visit: \(model.preferencesDraft.searchesPerSession)",
                     value: $model.preferencesDraft.searchesPerSession, in: 1...10)
-            Stepper("Jobs per session: \(model.preferencesDraft.jobsPerSession) job pages",
+            Stepper("Job pages per visit: \(model.preferencesDraft.jobsPerSession)",
                     value: $model.preferencesDraft.jobsPerSession, in: 5...200, step: 5)
-            Text("A session is one LinkedIn or Glassdoor visit at human pace. More jobs per session finds more, but takes longer and looks more like a bot.")
+            Text("A visit reads listings at a human pace. More job pages per visit finds more, but takes longer and looks more like a bot.")
                 .font(Typography.callout).foregroundStyle(Palette.textSecondary)
             HStack(spacing: Space.m) {
                 Text("Used today: LinkedIn \(store.snapshotCaps.linkedinSessionsUsed) · Glassdoor \(store.snapshotCaps.glassdoorSessionsUsed)")
@@ -465,7 +466,7 @@ struct SourcesSettingsTab: View {
                 Button("Reconnect") {
                     Task { _ = await store.onboardingConnectSource(source == .linkedin ? .linkedin : .glassdoor) }
                 }
-                .buttonStyle(.glass)
+                .buttonStyle(.secondaryLink)
             }
             Toggle("Enabled", isOn: Binding(get: { model.isSourceEnabled(source) }, set: { model.toggleSource(source, $0) }))
                 .toggleStyle(.switch)
@@ -473,7 +474,7 @@ struct SourcesSettingsTab: View {
                 .accessibilityLabel("\(C3Format.sourceName(source)) enabled")
         }
         .padding(Space.m)
-        .surfaceCard(cornerRadius: Radius.inner)
+        .surface(cornerRadius: Radius.inner)
     }
 
     private func statusLine(_ source: SourceName, _ status: SourceStatus?) -> String {
@@ -508,7 +509,7 @@ struct CompanySuggestionsRows: View {
             ForEach(pending) { item in
                 row(item) {
                     Button("Add") { Task { await store.acceptCompanySuggestion(item) } }
-                        .buttonStyle(.glass)
+                        .buttonStyle(.secondaryLink)
                         .accessibilityLabel("Add \(item.companyName) to watched companies")
                     Button("Dismiss") { Task { await store.dismissCompanySuggestion(item) } }
                         .buttonStyle(.borderless)
@@ -549,7 +550,7 @@ struct CompanySuggestionsRows: View {
             actions()
         }
         .padding(Space.s)
-        .surfaceCard(cornerRadius: Radius.inner)
+        .surface(cornerRadius: Radius.inner)
     }
 
     private func detail(_ item: CompanySuggestionItem) -> String {
@@ -581,7 +582,7 @@ struct ScheduleSettingsTab: View {
                 .foregroundStyle(Palette.textSecondary)
                 .monospacedDigit()
         }
-        SettingsRow("Daily cap", issue: model.issue(for: .dailyCap)) {
+        SettingsRow("Daily limit", issue: model.issue(for: .dailyCap)) {
             HStack(spacing: Space.m) {
                 Slider(value: Binding(get: { Double(model.preferencesDraft.dailyCap) },
                                       set: { model.preferencesDraft.dailyCap = Int($0.rounded()) }), in: 1...60, step: 1)
@@ -597,25 +598,23 @@ struct ScheduleSettingsTab: View {
                     value: $model.preferencesDraft.parallelApplications, in: 1...4)
                 .monospacedDigit()
         }
-        SettingsRow("Per-company cooldown", help: "At most one application per company in this window.",
+        SettingsRow("Per company", help: "At most one application to the same company in this many days.",
                     issue: model.issue(for: .perCompanyCooldownDays)) {
             Stepper("\(model.preferencesDraft.perCompanyCooldownDays) days", value: $model.preferencesDraft.perCompanyCooldownDays, in: 0...365)
         }
-        SettingsRow("Auto-ghost after", issue: model.issue(for: .ghostAfterDays)) {
+        SettingsRow("Mark as ghosted after", issue: model.issue(for: .ghostAfterDays)) {
             Stepper("\(model.preferencesDraft.ghostAfterDays) days without a reply", value: $model.preferencesDraft.ghostAfterDays, in: 1...180)
         }
         SettingsRow("“Heard back?” nudges", help: "Days after applying.", issue: model.issue(for: .nudgeDays)) {
             HStack(spacing: Space.xs) {
                 ForEach(model.preferencesDraft.nudgeDays, id: \.self) { day in
-                    HStack(spacing: 3) {
-                        Text("day \(day)").font(Typography.body).monospacedDigit()
+                    HStack(spacing: Space.xxs) {
+                        Badge("day \(day)")
                         Button { model.preferencesDraft.nudgeDays.removeAll { $0 == day } } label: { Image(systemName: "xmark").imageScale(.small) }
                             .buttonStyle(.plain)
                             .foregroundStyle(Palette.textSecondary)
                             .accessibilityLabel("Remove day \(day)")
                     }
-                    .padding(.horizontal, Space.s).padding(.vertical, 3)
-                    .background(Palette.sunken, in: Capsule())
                 }
                 TextField("+ day", text: $nudgeDraft)
                     .textFieldStyle(.roundedBorder)
@@ -675,9 +674,15 @@ struct ScheduleHourGrid: View {
 }
 
 
-/// "Email for security codes": some ATSs (Greenhouse) email a code that must be typed before the
-/// application is accepted. With a connected mailbox the agent reads it itself.
+/// "Email inbox": some application sites (Greenhouse) email a code that must be typed before the
+/// application is accepted, and some (Workday, iCIMS…) want an account first. With a connected
+/// inbox the agent reads codes itself and, if you leave "Create accounts on job sites for me" on,
+/// signs up on those sites. The consent toggle and what it does sit right next to the connect
+/// form, so the consequence is visible before you connect (here and in onboarding).
 struct MailAccountRow: View {
+    /// The "create accounts" preference (Settings: the draft that auto-saves; onboarding: the
+    /// store, saved straight away).
+    @Binding var createAccounts: Bool
     @Environment(AppStore.self) private var store
     @State private var email = ""
     @State private var password = ""
@@ -686,8 +691,8 @@ struct MailAccountRow: View {
     @State private var message: String?
 
     var body: some View {
-        SettingsRow("Email for security codes",
-                    help: "Greenhouse and others email a code before they accept an application. Connect the inbox they send it to and the agent reads the code itself; otherwise it asks you in Needs You.") {
+        SettingsRow("Email inbox",
+                    help: "Some application sites email a security code before they accept an application. Connect the inbox they send it to and the agent reads the code itself; otherwise it asks you in Needs You.") {
             VStack(alignment: .leading, spacing: Space.s) {
                 if let s = status, s.connected, let addr = s.email {
                     HStack(spacing: Space.s) {
@@ -703,14 +708,15 @@ struct MailAccountRow: View {
                         Button(busy ? "Connecting…" : "Connect") {
                             Task { await run { await store.setMailAccount(email: email, appPassword: password) } }
                         }
-                        .buttonStyle(.glass)
+                        .buttonStyle(.secondaryLink)
                         .disabled(busy || !email.contains("@") || password.replacingOccurrences(of: " ", with: "").count < 8)
                         Link("Create a Gmail app password", destination: URL(string: "https://myaccount.google.com/apppasswords")!)
                             .font(Typography.callout)
                     }
-                    Text("Needs 2-Step Verification on your Google account. The password is kept in your Mac's Keychain and only used to read security-code emails.")
+                    Text("Needs 2-Step Verification on your Google account. The app password is kept in your Mac's Keychain and used to read security-code and account-confirmation emails.")
                         .font(Typography.callout).foregroundStyle(Palette.textSecondary)
                 }
+                AccountCreationConsent(createAccounts: $createAccounts)
                 if let message {
                     Text(message).font(Typography.callout).foregroundStyle(status?.connected == true ? Palette.applied : Palette.needsYou)
                 }

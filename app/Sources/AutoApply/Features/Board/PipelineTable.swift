@@ -68,7 +68,7 @@ struct PipelineTable: View {
             }
             .width(min: 44, ideal: 54)
             TableColumn("Source", value: \.source).width(min: 70, ideal: 90)
-            TableColumn("ATS", value: \.ats).width(min: 70, ideal: 90)
+            TableColumn("Application site", value: \.ats).width(min: 90, ideal: 120)
             TableColumn("Resume", value: \.resume).width(min: 60, ideal: 80)
             TableColumn("Applied", value: \.applied) { row in
                 Text(row.applied == .distantPast ? "—" : row.applied.formatted(date: .abbreviated, time: .omitted))

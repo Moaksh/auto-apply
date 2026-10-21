@@ -1,15 +1,15 @@
-// BrandGradient.swift — the live, media-led gradient field: deep green → ink → navy with a hint
-// of coral, drifting very slowly. Used only in a few hero/brand places (dashboard greeting band,
-// onboarding, big empty states, the menu bar header); never as a fill on ordinary controls.
+// BrandGradient.swift — the brand media field: deep green → ink → navy with a hint of coral.
+// Used only behind onboarding (the one place the app is "media"); never on ordinary screens or
+// controls.
 //
-// Motion: a 3×3 `MeshGradient` whose interior points wander on long, co-prime periods (23–41 s),
-// redrawn at ≤ 20 fps. It pauses when the hosting window is occluded/hidden or the caller says
-// it's inactive, and is fully static (phase 0) under Reduce Motion.
+// Calm by default: the field is a static frame. It drifts (a 3×3 `MeshGradient` on long,
+// co-prime periods, ≤ 20 fps) only when the caller says the agent is working (`isActive`), the
+// window is visible, and Reduce Motion is off.
 import SwiftUI
 
 struct BrandGradientField: View {
-    /// Caller-side pause (e.g. the dashboard window being occluded).
-    var isActive: Bool = true
+    /// Drift only while the agent is actually working. Static otherwise.
+    var isActive: Bool = false
     /// 0…1 — scales the colour against the ink ground (Ignition fades it in).
     var brightness: Double = 1
 
@@ -66,9 +66,9 @@ enum BrandMesh {
 }
 
 extension View {
-    /// A hero band: content on the live brand field, 22pt continuous corners, dark appearance so
-    /// every token resolves to its on-dark value.
-    func brandHeroBand(isActive: Bool = true, cornerRadius: CGFloat = Radius.hero) -> some View {
+    /// Content on the brand field (onboarding only), dark appearance so every token resolves to
+    /// its on-dark value. Static unless `isActive`.
+    func brandHeroBand(isActive: Bool = false, cornerRadius: CGFloat = Radius.hero) -> some View {
         self
             .background { BrandGradientField(isActive: isActive) }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))

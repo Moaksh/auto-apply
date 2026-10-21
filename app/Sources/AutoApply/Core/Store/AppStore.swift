@@ -128,6 +128,9 @@ final class AppStore {
                 for await state in states { self?.setConnection(state) }
             })
         }
+        // Poll 2 of 2 (documented, Rams audit #9): every 500 ms, drop finished pipeline-flow
+        // particles. Pure in-memory bookkeeping, no I/O; it keeps the flow's transition list from
+        // growing while the agent runs. (Poll 1 is GRDBRepository's data_version check.)
         pruneTask = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(500))
@@ -394,11 +397,11 @@ final class AppStore {
 
     var agentStatus: AgentStatus {
         if !hasSnapshot && !isDaemonUnreachable && !connection.isConnected {
-            if case .failed = connection { return AgentStatus(kind: .disconnected, title: "Can't reach autoapplyd") }
+            if case .failed = connection { return AgentStatus(kind: .disconnected, title: "Can't reach the agent") }
             return AgentStatus(kind: .loading, title: "Connecting…")
         }
         if !connection.isConnected && (isDaemonUnreachable || hasSnapshot) {
-            return AgentStatus(kind: .disconnected, title: "Can't reach autoapplyd",
+            return AgentStatus(kind: .disconnected, title: "Can't reach the agent",
                                detail: lastConnectedAt.map { "last seen \($0.formatted(date: .omitted, time: .shortened))" })
         }
         if live.pauseRequest == .pausing { return AgentStatus(kind: .pausing, title: "Pausing…") }
@@ -412,7 +415,7 @@ final class AppStore {
         case .scoring:
             return AgentStatus(kind: .scoring, title: "Scoring", detail: progressText, progress: progress)
         case .prepping:
-            return AgentStatus(kind: .prepping, title: "Prepping", detail: progressText, progress: progress)
+            return AgentStatus(kind: .prepping, title: "Collecting questions", detail: progressText, progress: progress)
         case .applying:
             let c = caps
             return AgentStatus(kind: .applying, title: "Applying",
@@ -420,13 +423,13 @@ final class AppStore {
                                progress: c.dailyLimit > 0 ? min(1, Double(c.dailyUsed) / Double(c.dailyLimit)) : progress)
         case .idle:
             if let cap = live.capReached, cap.cap == .daily {
-                return AgentStatus(kind: .capReached, title: "Done for today", detail: "\(cap.used)/\(cap.limit) · resumes tomorrow")
+                return AgentStatus(kind: .capReached, title: "Done for today", detail: "\(cap.used)/\(cap.limit) · daily limit reached")
             }
             if live.lastError != nil {
                 return AgentStatus(kind: .error, title: "Needs attention", detail: live.lastError?.message)
             }
             if inbox.openCount > 0 {
-                return AgentStatus(kind: .needsYou, title: "Needs you", detail: inbox.summary)
+                return AgentStatus(kind: .needsYou, title: "Needs You", detail: inbox.summary)
             }
             return AgentStatus(kind: .idle, title: "Idle", detail: nextRunAt.map { "next run \($0.formatted(date: .omitted, time: .shortened))" })
         }
@@ -436,8 +439,8 @@ final class AppStore {
     var issues: [AppIssue] {
         var out: [AppIssue] = []
         if isDaemonUnreachable {
-            out.append(AppIssue(id: "daemon_down", severity: .error, message: "Can't reach autoapplyd.",
-                                fixTitle: "Restart daemon", fix: .restartDaemon))
+            out.append(AppIssue(id: "daemon_down", severity: .error, message: "Can't reach the agent.",
+                                fixTitle: "Restart agent", fix: .restartDaemon))
         }
         for source in [SourceName.linkedin, .glassdoor] {
             if let s = sources[source], s.enabled, !s.connected, s.checkedAt != nil {

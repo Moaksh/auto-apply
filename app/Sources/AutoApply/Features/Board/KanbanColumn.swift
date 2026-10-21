@@ -69,7 +69,7 @@ struct KanbanColumn: View {
         .padding(Space.s)
         .frame(width: LayoutMetrics.boardColumnWidth)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Palette.sunken.opacity(0.5), in: RoundedRectangle(cornerRadius: Radius.card, style: .continuous))
+        .well(cornerRadius: Radius.card)
         .overlay {
             if isDragging && isLegal {
                 RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
@@ -198,7 +198,7 @@ struct KanbanColumn: View {
                         Text("\(group.count)").font(Typography.metricSmall).foregroundStyle(Palette.textSecondary)
                     }
                     .padding(.horizontal, Space.s).padding(.vertical, Space.s)
-                    .surfaceCard(cornerRadius: Radius.inner)
+                    .surface(cornerRadius: Radius.inner)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -238,7 +238,7 @@ private struct DragSource: ViewModifier {
     var threshold: Int
 
     func body(content: Content) -> some View {
-        if BoardRules.isDraggable(job) {
+        if BoardRules.isDraggable(job) && model.store.isConnected {
             content.onDrag {
                 model.beginDrag(jobID: job.id)
                 return NSItemProvider(object: BoardModel.payload(for: job.id) as NSString)

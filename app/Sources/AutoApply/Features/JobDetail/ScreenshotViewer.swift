@@ -121,7 +121,7 @@ struct ScreenshotViewer: View {
             toolbar
             if shots.isEmpty {
                 EmptyState(symbol: "photo.on.rectangle", title: "No screenshot yet",
-                           message: "The agent records a full-page screenshot before every submit.")
+                           message: "The agent saves a full-page screenshot before it sends each application.")
                     .frame(maxWidth: .infinity, minHeight: 260)
             } else if loadFailed {
                 EmptyState(symbol: "photo.badge.exclamationmark", title: "Screenshot not available",
@@ -138,7 +138,6 @@ struct ScreenshotViewer: View {
         .onChange(of: highlighted?.id) { scrollToHighlight() }
         .quickLookPreview($quickLookURL)
         .focusable()
-        .focusEffectDisabled()
         .onKeyPress(.space) {
             openQuickLook()
             return .handled
@@ -149,7 +148,7 @@ struct ScreenshotViewer: View {
 
     private var toolbar: some View {
         HStack(spacing: Space.s) {
-            Text(selected?.label ?? "Submitted page").eyebrowStyle()
+            Text(selected?.label ?? "Page as sent").eyebrowStyle()
             Spacer()
             Button { zoom = ScreenshotGeometry.zoom(zoom, step: -1) } label: { Image(systemName: "minus.magnifyingglass") }
                 .keyboardShortcut("-", modifiers: .command)

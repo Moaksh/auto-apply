@@ -23,7 +23,7 @@ struct SiteAccountsSection: View {
                         .toggleStyle(.switch)
                         .disabled(!mailboxConnected && !createAccounts)
                     if !mailboxConnected {
-                        Label("Connect your email in Sources ▸ Email for security codes first: the agent needs it to confirm new accounts.",
+                        Label("Connect your email in Sources ▸ Email inbox first: the agent needs it to confirm new accounts.",
                               systemImage: "envelope.badge")
                             .font(Typography.callout)
                             .foregroundStyle(Palette.needsYou)
@@ -39,7 +39,7 @@ struct SiteAccountsSection: View {
                     }
                 }
                 .padding(.horizontal, Space.m)
-                .background(Palette.surface, in: RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
+                .surface(cornerRadius: Radius.inner)
                 Text("Passwords are stored in your Mac's Keychain as \"AutoApply: <site>\" (Keychain Access ▸ login).")
                     .font(Typography.callout)
                     .foregroundStyle(Palette.textTertiary)
@@ -102,18 +102,11 @@ struct SiteAccountsSection: View {
 
     @ViewBuilder
     private func statusBadge(_ status: String?) -> some View {
-        let (text, color): (String?, Color) = switch status {
-        case "creating": ("signing up…", Palette.textSecondary)
-        case "resetting": ("resetting…", Palette.textSecondary)
-        case "unconfirmed": ("unconfirmed", Palette.needsYou)
-        default: (nil, Palette.textSecondary)
-        }
-        if let text {
-            Text(text)
-                .font(Typography.monoSmall)
-                .foregroundStyle(color)
-                .padding(.horizontal, 6).padding(.vertical, 1)
-                .background(Palette.sunken, in: Capsule())
+        switch status {
+        case "creating": Badge("signing up…")
+        case "resetting": Badge("resetting password…")
+        case "unconfirmed": Badge("not confirmed yet", tone: .warning)
+        default: EmptyView()
         }
     }
 
@@ -142,5 +135,27 @@ struct SiteAccountsSection: View {
             revealed[account.host] = nil
             await reload()
         }
+    }
+}
+
+/// The account-creation consent, shown right next to the email connect form (Settings ▸ Sources
+/// and onboarding): the toggle and, in one plain line, what turning it on lets the agent do.
+struct AccountCreationConsent: View {
+    @Binding var createAccounts: Bool
+
+    static let explanation = "When an application site requires an account, the agent signs up with this email and a unique password saved in your Keychain. You can see and remove these accounts in Settings ▸ Guardrails."
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.xxs) {
+            Toggle("Create accounts on job sites for me", isOn: $createAccounts)
+                .toggleStyle(.checkbox)
+            Text(Self.explanation)
+                .font(Typography.callout)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, Space.l + 2)
+        }
+        .padding(.top, Space.xs)
+        .accessibilityElement(children: .combine)
     }
 }
