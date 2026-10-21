@@ -123,6 +123,33 @@ def samples() -> list[Envelope]:
     c("mark_applied", {"application_id": 7, "status": "interview"})
     c("onboarding_set_step", {"step": 3})
     c("onboarding_complete", {"run_prep": True})
+    # cold outreach
+    c("scout_contacts", {"application_id": 11, "purpose": "application"})
+    c("add_contact", {"company_name": "Acme", "full_name": "Jane Doe", "email": "jane@acme.com", "title": "Senior Recruiter",
+                      "relationship": "ex_colleague", "notes": "Met at PyCon", "share_ok": False})
+    c("update_contact", {"id": 5, "title": "Head of Talent", "notes": None})
+    c("delete_contact", {"id": 5, "suppress": True})
+    c("import_contacts", {"file_path": "/Users/me/contacts.csv"})
+    c("draft_outreach", {"contact_id": 5, "kind": "application", "application_id": 11, "instructions": "Mention Go."})
+    c("edit_outreach_draft", {"message_id": 8, "subject": "Backend Engineer application – Asha Rao",
+                              "body": "Hi Jane,\n\nI applied for the Backend Engineer role…", "confirm_claims": False})
+    c("approve_outreach", {"message_ids": [8, 9], "include_followups": True, "send_anyway": [9]})
+    c("cancel_outreach", {"message_ids": [8]})
+    c("discard_outreach", {"thread_id": 3})
+    c("resolve_outreach_unknown", {"message_id": 8, "sent": True})
+    c("mark_reply_read", {"thread_id": 3})
+    c("set_thread_outcome", {"thread_id": 3, "outcome": "positive", "close": True})
+    c("suppress", {"email": "someone@acme.com", "reason": "user"})
+    c("unsuppress", {"domain": "acme.com"})
+    c("enable_sending", {"enabled": True})
+    c("search_prospects", {"query": "Series B fintech", "location": "Bangalore"})
+    c("add_prospect", {"company_name": "Acme", "url": "https://acme.com"})
+    c("update_prospect", {"id": 2, "status": "shortlisted", "watch": False})
+    c("suggest_referrers", {"company_id": 1, "job_id": 11})
+    c("add_referral", {"contact_id": 5, "basis": "alumni", "basis_detail": "IIT Madras"})
+    c("draft_referral", {"id": 4})
+    c("update_referral", {"id": 4, "state": "requested"})
+    c("set_provider_key", {"provider": "hunter", "api_key": "hunter-key"})
 
     # ---- events
     e("ack", {"ok": True, "result": {"application_ids": [11, 12]}}, reply_to=CMD)
@@ -163,9 +190,19 @@ def samples() -> list[Envelope]:
                                      action='answering "Years with Go"', detail="cv · 0.93", confidence=0.93,
                                      screenshot_thumb="/9j/4AAQSkZJRgABAQ==", at=TS))
     e("cap_reached", {"cap": "daily", "used": 15, "limit": 15, "resets_at": "2026-10-11T00:00:00.000Z"})
+    e("cap_reached", {"cap": "outreach_daily", "used": 5, "limit": 5, "resets_at": "2026-10-11T00:00:00.000Z"})
     e("source_status", {"source": {"source": "linkedin", "enabled": True, "connected": False,
                                    "checked_at": TS, "detail": "Waiting for you to log in in Chrome…"}})
     e("nudge_due", {"application_id": 11, "job_id": 11, "day": 7, "company": "Stripe", "title": "Backend Engineer"})
+    e("outreach_state", {"thread_id": 3, "message_id": 8, "entity": "message", "from_state": "scheduled",
+                         "to_state": "sending", "reason": None, "at": TS})
+    e("outreach_state", {"thread_id": 3, "entity": "thread", "from_state": "active", "to_state": "replied",
+                         "reason": "reply: positive", "at": TS})
+    e("outreach_reply", {"thread_id": 3, "message_id": 12, "contact_name": "Jane Doe", "company": "Acme", "label": "positive",
+                         "snippet": "Thanks, I've passed your profile to the team.", "application_id": 11,
+                         "suggested_status": "interview"})
+    e("scout_finished", {"company_id": 1, "purpose": "application", "application_id": 11, "found": 6, "with_email": 4,
+                         "best_confidence": 95, "queued_google": True, "thread_id": 3})
     e("log", {"level": "warning", "message": "selector timeout on step 5 · retried ok", "logger": "apply.lever",
               "job_id": 11, "application_id": 11, "at": TS})
     return out

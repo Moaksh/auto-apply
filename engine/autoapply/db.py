@@ -38,6 +38,7 @@ import numpy as np
 from autoapply import paths as _paths
 from autoapply.config import NeverGuess, Preferences
 from autoapply.enums import (
+    MessageState,
     Actor,
     AnswerOrigin,
     AnswerSource,
@@ -62,6 +63,8 @@ from autoapply.models import (
     ACTIVE_STATES,
     ALLOWED_TRANSITIONS,
     MANUAL_SUBMIT_FROM,
+    MESSAGE_TRANSITIONS,
+    OutreachStatePayload,
     PROFILE_FIELDS,
     USER_ONLY_TRANSITIONS,
     Answer,
@@ -95,7 +98,7 @@ from autoapply.models import (
 )
 
 #: Must equal MAX(version) seeded by contract/schema.sql.
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 #: Forward migrations: version -> SQL to go from (version-1) to version. Append-only.
 #: Version 1 is the baseline created by contract/schema.sql itself.
@@ -139,6 +142,7 @@ CREATE INDEX IF NOT EXISTS ix_company_suggestions_status ON company_suggestions(
 """,
     8: "python:_migrate_v8",
     9: "python:_migrate_v9",
+    10: "python:_migrate_v10",
 }
 
 
@@ -231,6 +235,216 @@ def _migrate_v9(conn: sqlite3.Connection) -> None:
     except BaseException:
         conn.execute("ROLLBACK")
         raise
+
+
+#: v10 (cold outreach) tables, frozen copy of the block in contract/schema.sql (the migration
+#: test checks both produce the same columns and indexes).
+_V10_DDL = """
+-- contacts: people at companies (scouted, typed by the user, imported). email_norm is unique.
+CREATE TABLE IF NOT EXISTS contacts (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id        INTEGER REFERENCES companies(id) ON DELETE CASCADE,
+    full_name         TEXT NOT NULL,
+    first_name        TEXT,
+    last_name         TEXT,
+    title             TEXT,
+    role_category     TEXT NOT NULL DEFAULT 'other' CHECK (role_category IN ('recruiter','talent_lead','hiring_manager','eng_leader','engineer','founder','role_mailbox','other')),
+    email             TEXT,
+    email_norm        TEXT,                                 -- lower(trim(nfkc(email)))
+    email_status      TEXT NOT NULL DEFAULT 'none' CHECK (email_status IN ('none','pattern','published','provider_verified','user','delivered','replied','bounced')),
+    email_confidence  INTEGER NOT NULL DEFAULT 0 CHECK (email_confidence BETWEEN 0 AND 100),
+    role_fit          INTEGER CHECK (role_fit IS NULL OR role_fit BETWEEN 0 AND 100),
+    linkedin_url      TEXT,                                 -- reference only: never opened by AutoApply
+    github_login      TEXT,
+    location          TEXT,
+    origin            TEXT NOT NULL CHECK (origin IN ('scout','user','import','shared')),
+    relationship      TEXT CHECK (relationship IS NULL OR relationship IN ('friend','ex_colleague','alumni','met','other')),
+    share_ok          INTEGER NOT NULL DEFAULT 0 CHECK (share_ok IN (0, 1)),
+    shared_at         TEXT,
+    notes             TEXT,
+    last_contacted_at TEXT,
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_contacts_email ON contacts(email_norm) WHERE email_norm IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_contacts_company ON contacts(company_id);
+
+-- contact_evidence: one row per observation (provenance shown in the UI).
+CREATE TABLE IF NOT EXISTS contact_evidence (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    contact_id  INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL CHECK (kind IN ('user','job_posting','company_page','github','google_serp','pattern','provider','shared_library','reply','bounce')),
+    field       TEXT NOT NULL CHECK (field IN ('name','title','email')),
+    url         TEXT,
+    snippet     TEXT,                                       -- <= 280 chars
+    provider    TEXT,
+    observed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS ix_contact_evidence_contact ON contact_evidence(contact_id);
+
+-- domain_patterns: per email domain, the inferred address pattern and MX provider.
+CREATE TABLE IF NOT EXISTS domain_patterns (
+    domain      TEXT PRIMARY KEY,
+    company_id  INTEGER REFERENCES companies(id) ON DELETE SET NULL,
+    pattern     TEXT,                                       -- first.last | first | flast | ...
+    confidence  INTEGER NOT NULL DEFAULT 0,
+    samples     TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(samples)),   -- [{name,email,source,url}]
+    mx_provider TEXT CHECK (mx_provider IS NULL OR mx_provider IN ('google','microsoft','other','none')),
+    bounces     INTEGER NOT NULL DEFAULT 0,
+    checked_at  TEXT
+);
+
+-- outreach_threads: one conversation with one contact.
+CREATE TABLE IF NOT EXISTS outreach_threads (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind              TEXT NOT NULL CHECK (kind IN ('application','prospect','referral_email')),
+    contact_id        INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
+    company_id        INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    job_id            INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+    application_id    INTEGER REFERENCES applications(id) ON DELETE SET NULL,
+    state             TEXT NOT NULL DEFAULT 'draft' CHECK (state IN ('draft','active','replied','bounced','opted_out','closed','cancelled')),
+    outcome           TEXT CHECK (outcome IS NULL OR outcome IN ('positive','referred','not_interested','question','other')),
+    subject           TEXT,
+    gmail_thread_id   TEXT,
+    next_action_at    TEXT,                                 -- earliest follow-up (pushed back by an out-of-office reply)
+    unread_reply      INTEGER NOT NULL DEFAULT 0 CHECK (unread_reply IN (0, 1)),
+    followup_approved INTEGER NOT NULL DEFAULT 0 CHECK (followup_approved IN (0, 1)),  -- pre-approved in the first batch
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS ix_outreach_threads_state ON outreach_threads(state);
+CREATE INDEX IF NOT EXISTS ix_outreach_threads_application ON outreach_threads(application_id);
+
+-- outreach_messages: drafts, sent mail and inbound replies / bounces. The footer is stored
+-- apart from the editable body and always appended when sending.
+CREATE TABLE IF NOT EXISTS outreach_messages (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id          INTEGER NOT NULL REFERENCES outreach_threads(id) ON DELETE CASCADE,
+    seq                INTEGER NOT NULL DEFAULT 0,
+    direction          TEXT NOT NULL CHECK (direction IN ('out','in')),
+    kind               TEXT CHECK (kind IS NULL OR kind IN ('application_followup','prospect','followup','referral_email')),
+    state              TEXT NOT NULL CHECK (state IN ('draft','approved','scheduled','sending','sent','failed','unknown','cancelled','received')),
+    to_email           TEXT,
+    from_email         TEXT,
+    subject            TEXT,
+    body               TEXT NOT NULL,
+    footer             TEXT,
+    origin             TEXT NOT NULL DEFAULT 'generated' CHECK (origin IN ('generated','user')),
+    grounded           INTEGER NOT NULL DEFAULT 1 CHECK (grounded IN (0, 1)),
+    unsupported_claims TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(unsupported_claims)),
+    claims_overridden  INTEGER NOT NULL DEFAULT 0 CHECK (claims_overridden IN (0, 1)),
+    story_ids          TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(story_ids)),
+    message_id_header  TEXT,
+    in_reply_to        TEXT,
+    batch_uid          TEXT,
+    approved_at        TEXT,
+    send_at            TEXT,
+    sent_at            TEXT,
+    classification     TEXT,
+    error              TEXT,
+    tokens_in          INTEGER NOT NULL DEFAULT 0,
+    tokens_out         INTEGER NOT NULL DEFAULT 0,
+    created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS ix_outreach_messages_due ON outreach_messages(state, send_at);
+CREATE INDEX IF NOT EXISTS ix_outreach_messages_thread ON outreach_messages(thread_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_outreach_messages_mid ON outreach_messages(message_id_header) WHERE message_id_header IS NOT NULL;
+
+-- suppression: the do-not-contact list (an address or a whole domain). Checked when drafting,
+-- approving and immediately before sending. Opt-outs are never removed by the UI.
+CREATE TABLE IF NOT EXISTS suppression (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    email_norm  TEXT,
+    domain      TEXT,
+    reason      TEXT NOT NULL CHECK (reason IN ('opt_out','hard_bounce','user','shared_removal','complaint')),
+    source      TEXT,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    CHECK (email_norm IS NOT NULL OR domain IS NOT NULL)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_suppression_email ON suppression(email_norm) WHERE email_norm IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_suppression_domain ON suppression(domain) WHERE domain IS NOT NULL;
+
+-- referrals: the LinkedIn referral copilot. The USER does every LinkedIn step in their own
+-- browser; AutoApply only finds people through Google results and drafts the notes.
+CREATE TABLE IF NOT EXISTS referrals (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id         INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    job_id             INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+    contact_id         INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
+    person_name        TEXT NOT NULL,
+    title              TEXT,
+    linkedin_url       TEXT,
+    basis              TEXT NOT NULL CHECK (basis IN ('alumni','ex_colleague','same_function','user','other')),
+    basis_detail       TEXT,
+    evidence_url       TEXT,
+    evidence_snippet   TEXT,
+    state              TEXT NOT NULL DEFAULT 'suggested' CHECK (state IN ('suggested','to_connect','requested','connected','asked','referred','declined','no_response','dismissed')),
+    connect_note       TEXT,
+    referral_dm        TEXT,
+    grounded           INTEGER NOT NULL DEFAULT 1 CHECK (grounded IN (0, 1)),
+    unsupported_claims TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(unsupported_claims)),
+    state_updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_referrals_person ON referrals(company_id, linkedin_url) WHERE linkedin_url IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_referrals_state ON referrals(state);
+
+-- prospects: companies to reach out to without an application (company search, watchlist).
+CREATE TABLE IF NOT EXISTS prospects (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id      INTEGER NOT NULL UNIQUE REFERENCES companies(id) ON DELETE CASCADE,
+    status          TEXT NOT NULL DEFAULT 'suggested' CHECK (status IN ('suggested','shortlisted','contacted','dismissed')),
+    fit_score       INTEGER CHECK (fit_score IS NULL OR fit_score BETWEEN 0 AND 100),
+    fit_reasons     TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(fit_reasons)),
+    summary         TEXT,                                   -- homepage description: evidence drafts may cite
+    summary_url     TEXT,
+    matching_roles  INTEGER,
+    found_via       TEXT,                                   -- search | watchlist | user
+    search_query    TEXT,
+    cooldown_until  TEXT,                                   -- no new prospect thread before this
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS ix_prospects_status ON prospects(status);
+"""
+
+#: v10 preference columns: (name, column definition).
+_V10_PREF_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("outreach_auto_scout", "INTEGER NOT NULL DEFAULT 1 CHECK (outreach_auto_scout IN (0, 1))"),
+    ("outreach_auto_draft", "INTEGER NOT NULL DEFAULT 1 CHECK (outreach_auto_draft IN (0, 1))"),
+    ("outreach_daily_cap", "INTEGER NOT NULL DEFAULT 10 CHECK (outreach_daily_cap BETWEEN 0 AND 40)"),
+    ("outreach_followup_days", "INTEGER NOT NULL DEFAULT 5 CHECK (outreach_followup_days BETWEEN 1 AND 30)"),
+    ("outreach_max_followups", "INTEGER NOT NULL DEFAULT 1 CHECK (outreach_max_followups BETWEEN 0 AND 2)"),
+    ("outreach_send_window", "TEXT NOT NULL DEFAULT '[\"09:30\",\"17:30\"]' CHECK (json_valid(outreach_send_window))"),
+    ("outreach_weekdays_only", "INTEGER NOT NULL DEFAULT 1 CHECK (outreach_weekdays_only IN (0, 1))"),
+    ("outreach_min_email_confidence", "INTEGER NOT NULL DEFAULT 60 CHECK (outreach_min_email_confidence BETWEEN 0 AND 100)"),
+    ("people_finder_visits_per_day", "INTEGER NOT NULL DEFAULT 6 CHECK (people_finder_visits_per_day BETWEEN 0 AND 30)"),
+)
+
+
+def _migrate_v10(conn: sqlite3.Connection) -> None:
+    """v10: cold outreach (contacts, evidence, domain patterns, threads, messages, the
+    do-not-contact list, referrals, prospects) and the outreach preference columns. Idempotent."""
+    conn.execute("BEGIN")
+    try:
+        for stmt in _split_sql(_V10_DDL):
+            conn.execute(stmt)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(preferences)")}
+        for name, definition in _V10_PREF_COLUMNS:
+            if name not in cols:
+                conn.execute(f"ALTER TABLE preferences ADD COLUMN {name} {definition}")
+        conn.execute("INSERT INTO schema_version(version) VALUES (10)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def _split_sql(script: str) -> list[str]:
+    """Statements of a DDL script (no triggers / string literals with ';' in it)."""
+    body = "\n".join(line for line in script.splitlines() if not line.strip().startswith("--"))
+    return [s.strip() for s in body.split(";") if s.strip()]
 
 
 def action_group_key(conn: sqlite3.Connection, canonical_question: str, reason: str | None, job_ids: Iterable[int]) -> tuple[str, str]:
@@ -612,9 +826,9 @@ def save_never_guess(conn: sqlite3.Connection, ng: NeverGuess) -> NeverGuess:
 _PREF_JSON = {
     "roles", "seniority", "locations", "remote_policy", "exclude_companies", "exclude_industries",
     "exclude_keywords", "per_ats_mode", "per_company_mode", "schedule", "nudge_days",
-    "sources_enabled", "career_page_urls", "always_ask_patterns",
+    "sources_enabled", "career_page_urls", "always_ask_patterns", "outreach_send_window",
 }
-_PREF_BOOL = {"hide_without_salary", "create_accounts"}
+_PREF_BOOL = {"hide_without_salary", "create_accounts", "outreach_auto_scout", "outreach_auto_draft", "outreach_weekdays_only"}
 
 
 def get_preferences(conn: sqlite3.Connection) -> Preferences:
@@ -1479,6 +1693,7 @@ def complete_submit(
 class RecoveryReport:
     unknown_verify: list[Transition] = field(default_factory=list)  # were 'submitting'
     requeued: list[Transition] = field(default_factory=list)  # were 'prepping' / 'filling'
+    outreach_unknown: list[OutreachTransition] = field(default_factory=list)  # emails left in 'sending'
 
 
 def recover_interrupted_submissions(conn: sqlite3.Connection) -> list[Transition]:
@@ -1497,10 +1712,16 @@ def recover_after_crash(conn: sqlite3.Connection) -> RecoveryReport:
 
     * ``submitting`` -> ``unknown_verify`` (the click may or may not have happened).
     * ``prepping`` / ``filling`` -> ``queued`` (nothing was submitted; safe to redo).
+    * outreach messages in ``sending`` -> ``unknown`` (the SMTP conversation may have finished;
+      the Sent Mail check or the user resolves them, they are never resent automatically).
     """
     report = RecoveryReport()
     with transaction(conn):
         report.unknown_verify = recover_interrupted_submissions(conn)
+        for r in conn.execute("SELECT id FROM outreach_messages WHERE state = 'sending'").fetchall():
+            report.outreach_unknown.append(
+                transition_outreach(conn, int(r["id"]), MessageState.UNKNOWN, reason="crash_during_send", actor=Actor.SYSTEM)
+            )
         stale = [s.value for s in ACTIVE_STATES if s is not AppState.SUBMITTING]
         rows = conn.execute(
             f"SELECT id FROM applications WHERE state IN ({','.join('?' * len(stale))})", stale
@@ -1621,12 +1842,16 @@ def company_attempt_at(
 
 
 def ghost_stale_applications(conn: sqlite3.Connection, ghost_after_days: int, now: datetime | None = None) -> list[ApplicationStatusPayload]:
-    """Auto-move ``applied`` applications with no status change for N days to ``ghosted``."""
+    """Auto-move ``applied`` applications with no status change for N days to ``ghosted``
+    (never one whose outreach thread got a reply)."""
     cutoff = format_ts((now or utcnow()) - timedelta(days=ghost_after_days))
     out: list[ApplicationStatusPayload] = []
     with transaction(conn):
         rows = conn.execute(
-            "SELECT id FROM applications WHERE state = 'submitted' AND status = 'applied' AND status_updated_at < ?", (cutoff,)
+            "SELECT id FROM applications WHERE state = 'submitted' AND status = 'applied' AND status_updated_at < ? "
+            # Somebody answered an outreach email about it: not ghosted.
+            "AND id NOT IN (SELECT application_id FROM outreach_threads WHERE application_id IS NOT NULL AND state = 'replied')",
+            (cutoff,),
         ).fetchall()
         for r in rows:
             out.append(set_status(conn, int(r["id"]), BoardStatus.GHOSTED, actor=Actor.SYSTEM))
@@ -2159,6 +2384,11 @@ def compute_counts(conn: sqlite3.Connection, now: datetime | None = None) -> Cou
         discovered_today=int(conn.execute("SELECT COUNT(*) FROM jobs WHERE discovered_at >= ?", (day,)).fetchone()[0]),
         submitted_total=by_state.get("submitted", 0),
         suggestions_pending=count_pending_suggestions(conn),
+        outreach_drafts=int(conn.execute(
+            "SELECT COUNT(*) FROM outreach_messages m JOIN outreach_threads t ON t.id = m.thread_id "
+            "WHERE m.direction = 'out' AND m.state = 'draft' AND t.state IN ('draft','active')").fetchone()[0]),
+        outreach_replies_unread=int(conn.execute("SELECT COUNT(*) FROM outreach_threads WHERE unread_reply = 1").fetchone()[0]),
+        outreach_unknown=int(conn.execute("SELECT COUNT(*) FROM outreach_messages WHERE state = 'unknown'").fetchone()[0]),
     )
 
 
@@ -2177,4 +2407,120 @@ def compute_caps(conn: sqlite3.Connection, prefs: Preferences | None = None, now
         linkedin_sessions_limit=prefs.linkedin_sessions_per_day,
         glassdoor_sessions_used=get_source_sessions(conn, "glassdoor"),
         glassdoor_sessions_limit=prefs.glassdoor_sessions_per_day,
+        outreach_sent_today=outreach_new_threads_today(conn, now),
+        outreach_daily_limit=outreach_daily_limit(conn, prefs, now),
+        people_finder_used=get_source_sessions(conn, "people_finder"),
+        people_finder_limit=prefs.people_finder_visits_per_day,
     )
+
+
+# =====================================================================================
+# Cold outreach: message state machine + daily counters (the rest lives in autoapply.outreach)
+# =====================================================================================
+
+#: meta key: local date (YYYY-MM-DD) of the first outreach email ever sent (the ramp starts there).
+META_OUTREACH_FIRST_SEND = "outreach_first_send_day"
+#: Ramp for a mailbox that has never sent cold email: (days since the first send, limit).
+OUTREACH_RAMP: tuple[tuple[int, int], ...] = ((3, 5), (7, 8))
+
+
+@dataclass(frozen=True, slots=True)
+class OutreachTransition:
+    message_id: int
+    thread_id: int
+    from_state: MessageState
+    to_state: MessageState
+    reason: str | None
+    at: str
+
+    def to_payload(self) -> OutreachStatePayload:
+        return OutreachStatePayload(
+            thread_id=self.thread_id, message_id=self.message_id, entity="message",
+            from_state=self.from_state.value, to_state=self.to_state.value, reason=self.reason, at=self.at,
+        )
+
+
+class IllegalOutreachTransition(DBError):
+    code = "illegal_transition"
+
+    def __init__(self, message_id: int, frm: MessageState | str, to: MessageState | str, why: str = "") -> None:
+        self.message_id = message_id
+        self.from_state = MessageState(frm)
+        self.to_state = MessageState(to)
+        msg = f"outreach message {message_id}: illegal transition {frm} -> {to}"
+        super().__init__(f"{msg} ({why})" if why else msg)
+
+
+def transition_outreach(
+    conn: sqlite3.Connection,
+    message_id: int,
+    to_state: MessageState | str,
+    *,
+    reason: str | None = None,
+    actor: Actor | str = Actor.SYSTEM,
+    expected_from: MessageState | str | Iterable[MessageState | str] | None = None,
+    fields: dict[str, Any] | None = None,
+) -> OutreachTransition:
+    """Move an outreach message along ``models.MESSAGE_TRANSITIONS`` (plus extra column
+    ``fields`` in the same write) and append an ``events`` row (kind ``outreach``).
+
+    ``sending`` is committed before the SMTP conversation starts (the connection runs with
+    ``synchronous=FULL``), exactly like ``submitting`` for applications."""
+    to = MessageState(to_state)
+    with transaction(conn):
+        row = _require(_one(conn, "SELECT id, thread_id, state FROM outreach_messages WHERE id = ?", (message_id,)), "outreach message", message_id)
+        frm = MessageState(row["state"])
+        if expected_from is not None:
+            exp = {MessageState(expected_from)} if isinstance(expected_from, (str, MessageState)) else {MessageState(s) for s in expected_from}
+            if frm not in exp:
+                raise IllegalOutreachTransition(message_id, frm, to, f"expected from {sorted(e.value for e in exp)}")
+        if to not in MESSAGE_TRANSITIONS[frm]:
+            raise IllegalOutreachTransition(message_id, frm, to, "edge not allowed")
+        ts = now_ts()
+        upd: dict[str, Any] = {**(fields or {}), "state": to.value, "updated_at": ts}
+        if reason is not None and to in (MessageState.FAILED, MessageState.UNKNOWN, MessageState.CANCELLED):
+            upd.setdefault("error", reason[:500])
+        sql, params = _update_sql("outreach_messages", upd, "id = ? AND state = ?")
+        if conn.execute(sql, [*params, message_id, frm.value]).rowcount != 1:  # pragma: no cover - guarded by tx
+            raise Conflict(f"outreach message {message_id} changed concurrently")
+        log_event(
+            conn, "outreach", f"email {frm.value} → {to.value}" + (f" ({reason})" if reason else ""), actor=actor,
+            level=LogLevel.WARNING if to in (MessageState.FAILED, MessageState.UNKNOWN) else LogLevel.INFO,
+            payload={"thread_id": int(row["thread_id"]), "message_id": message_id, "from": frm.value, "to": to.value, "reason": reason},
+        )
+    return OutreachTransition(message_id, int(row["thread_id"]), frm, to, reason, ts)
+
+
+def outreach_sends_since(conn: sqlite3.Connection, since: datetime, *, first_only: bool = False, domain: str | None = None) -> int:
+    """Outbound emails that went out (or may have: ``sending`` / ``unknown``) since ``since``.
+    ``first_only`` counts only first messages of a thread (new threads)."""
+    sql = ("SELECT COUNT(*) FROM outreach_messages WHERE direction = 'out' AND "
+           "(state IN ('sent','unknown','sending')) AND COALESCE(sent_at, updated_at) >= ?")
+    params: list[Any] = [format_ts(since)]
+    if first_only:
+        sql += " AND seq = 0"
+    if domain:
+        sql += " AND lower(to_email) LIKE ?"
+        params.append(f"%@{domain.lower()}")
+    return int(conn.execute(sql, params).fetchone()[0])
+
+
+def outreach_new_threads_today(conn: sqlite3.Connection, now: datetime | None = None) -> int:
+    return outreach_sends_since(conn, local_day_start(now), first_only=True)
+
+
+def outreach_daily_limit(conn: sqlite3.Connection, prefs: Preferences | None = None, now: datetime | None = None) -> int:
+    """Today's limit for new threads: the cap, lowered during the first week of sending (5, 8, then the cap)."""
+    prefs = prefs or get_preferences(conn)
+    cap = prefs.outreach_daily_cap
+    first = get_meta(conn, META_OUTREACH_FIRST_SEND, None)
+    if not first:
+        return min(cap, OUTREACH_RAMP[0][1])
+    try:
+        days = (local_day_start(now).date() - datetime.fromisoformat(str(first)).date()).days
+    except ValueError:
+        return cap
+    for upto, limit in OUTREACH_RAMP:
+        if days < upto:
+            return min(cap, limit)
+    return cap

@@ -94,6 +94,7 @@ from autoapply.models import (
     make_event,
     utcnow,
 )
+from autoapply.outreach.service import OutreachError, OutreachService
 from autoapply.paths import Paths, get_paths
 from autoapply.pipeline import Pipeline, PipelineHooks, SubmitCheck
 from autoapply.scheduler import Caffeinate, RunConflict, RunCoordinator, Scheduler
@@ -105,6 +106,8 @@ CLIENT_QUEUE_MAX = 10_000
 MAX_INFLIGHT_PER_CLIENT = 32  # commands read ahead per client (backpressure beyond this)
 LOCK_FILENAME = "autoapplyd.lock"
 MAINTENANCE_INTERVAL = 3600.0
+#: Cold outreach: the sender / mail-watch tick.
+OUTREACH_INTERVAL = 60.0
 #: Extra directories searched for CLIs (launchd gives a minimal PATH).
 EXTRA_PATH = ("/opt/homebrew/bin", "/usr/local/bin", str(Path.home() / ".local/bin"), str(Path.home() / ".cargo/bin"))
 
@@ -517,6 +520,7 @@ class Daemon:
         source_factory: Callable[[str], BrowserListingBase] | None = None,
         scheduler: Scheduler | None = None,
         notifier: Notifier | None = None,
+        outreach_options: dict[str, Any] | None = None,
     ) -> None:
         self.paths = paths
         self.notifier = notifier
@@ -536,6 +540,9 @@ class Daemon:
         self.chrome_launcher = chrome_launcher or open_chrome_window
         self._source_factory = source_factory
         self._scheduler_arg = scheduler
+        #: Extra OutreachService arguments (tests inject SMTP / IMAP / HTTP / DNS fakes here).
+        self._outreach_options = outreach_options or {}
+        self.outreach: OutreachService | None = None
 
         self.clients: set[Client] = set()
         self.lock = InstanceLock(paths.home / LOCK_FILENAME)
@@ -585,6 +592,11 @@ class Daemon:
             is_paused=self.is_paused, hooks=self.hooks,
         )
         self.pipeline.notifier = self.notifier
+        self.outreach = OutreachService(
+            self.conn, self.llm, self.emit, is_paused=self.is_paused, spawn=lambda coro, name: self._spawn(coro, name=name),
+            notifier=self.notifier, profile_dir=self.paths.chrome_profile, **self._outreach_options,
+        )
+        self.pipeline.outreach = self.outreach
         self.coordinator = RunCoordinator(self._begin_run, self.pipeline.execute, caffeinate_factory=self.caffeinate_factory)
         prefs = db.get_preferences(self.conn)
         last = db.get_current_run(self.conn) or db.get_last_run(self.conn)
@@ -602,9 +614,14 @@ class Daemon:
                 message=f"{len(report.unknown_verify)} application(s) were mid-submit when the daemon stopped; please verify them.",
                 details={"application_ids": [t.application_id for t in report.unknown_verify], "reason": "crash_during_submit"},
             ))
-        if report.unknown_verify or report.requeued or abandoned:
-            log.warning("recovery: %d unknown_verify, %d requeued, %d runs abandoned",
-                        len(report.unknown_verify), len(report.requeued), abandoned)
+        for ot in report.outreach_unknown:
+            await self.broadcast("outreach_state", ot.to_payload())
+        if report.outreach_unknown and self.outreach is not None:
+            # Resolved through the Sent Mail check; never resent automatically.
+            self._spawn(self.outreach.verify_unknown(), name="outreach-verify-unknown")
+        if report.unknown_verify or report.requeued or abandoned or report.outreach_unknown:
+            log.warning("recovery: %d unknown_verify, %d requeued, %d runs abandoned, %d emails unknown",
+                        len(report.unknown_verify), len(report.requeued), abandoned, len(report.outreach_unknown))
         return report
 
     async def start(self) -> None:
@@ -634,6 +651,7 @@ class Daemon:
             self._spawn(self._scheduler_loop(), name="scheduler")
         if self.enable_maintenance:
             self._spawn(self._maintenance_loop(), name="maintenance")
+            self._spawn(self._outreach_loop(), name="outreach")
         log.info("autoapplyd %s listening on %s (pid %d)", __version__, self.socket_path, os.getpid())
 
     async def serve(self) -> None:
@@ -809,6 +827,11 @@ class Daemon:
             return self._error(env, e.code, e.message, details=e.details)
         except CommandError as e:
             return self._error(env, e.code, e.message, details=e.details, job_id=e.job_id, application_id=e.application_id)
+        except OutreachError as e:
+            return self._error(env, e.code, e.message, details=e.details)
+        except db.IllegalOutreachTransition as e:
+            return self._error(env, ErrorCode.ILLEGAL_TRANSITION, str(e),
+                               details={"message_id": e.message_id, "state": e.from_state.value, "to": e.to_state.value})
         except db.IllegalTransition as e:
             return self._error(env, ErrorCode.ILLEGAL_TRANSITION, str(e),
                                details={"state": e.from_state.value if e.from_state else None, "to": e.to_state.value},
@@ -915,6 +938,32 @@ class Daemon:
             except Exception:  # noqa: BLE001
                 log.exception("maintenance failed")
             await asyncio.sleep(MAINTENANCE_INTERVAL)
+
+    async def _outreach_loop(self) -> None:
+        """Every minute: send one due approved email, watch the mailbox (every 10 min), and do
+        queued Google work for outreach when no run holds the browser."""
+        while True:
+            try:
+                if self.outreach is not None:
+                    await self.outreach.tick()
+                    await self.outreach_google_if_idle()
+            except Exception:  # noqa: BLE001
+                log.exception("outreach tick failed")
+            await asyncio.sleep(OUTREACH_INTERVAL)
+
+    async def outreach_google_if_idle(self) -> bool:
+        """Run queued outreach Google work if the browser is free (never during a run)."""
+        from autoapply.outreach import service as outreach_service
+
+        if not outreach_service.AUTO_ENABLED:
+            return False
+        if self.outreach is None or self.pipeline is None or self.paused or not self.outreach.has_google_work():
+            return False
+        if (self.coordinator and self.coordinator.busy) or self.pipeline.browser_lock.locked():
+            return False
+        async with self.pipeline.browser_lock:
+            await self.outreach.run_google_work()
+        return True
 
     # =================================================================================
     # Command handlers (one per protocol command; payloads are already validated)
@@ -1093,6 +1142,10 @@ class Daemon:
         self._spawn(self.pipeline.submit_approved(ids), name="submit-approved")
         return {"application_ids": ids}
 
+    def _submitted(self, application_id: int) -> None:
+        if self.pipeline is not None:
+            self.pipeline.submitted_hook(application_id)
+
     async def _cmd_reject(self, p: Any) -> None:
         await self._transition(p.application_id, AppState.SKIPPED, reason=p.reason, expected_from=AppState.AWAITING_REVIEW)
 
@@ -1174,6 +1227,8 @@ class Daemon:
         to = AppState.SUBMITTED if p.submitted else AppState.FAILED
         reason = "user_verified_submitted" if p.submitted else "user_verified_not_submitted"
         await self._transition(p.application_id, to, reason=reason, expected_from=AppState.UNKNOWN_VERIFY)
+        if p.submitted:
+            self._submitted(p.application_id)
 
     async def _cmd_apply_anyway(self, p: Any) -> None:
         await self._transition(p.application_id, AppState.QUEUED, reason="user_apply_anyway", expected_from=AppState.SKIPPED)
@@ -1218,6 +1273,7 @@ class Daemon:
             application_id=app.id, job_id=app.job_id, from_state=before.state, to_state=AppState.SUBMITTED,
             reason="user_applied", actor=Actor.USER, at=app.state_updated_at,
         ))
+        self._submitted(app.id)
         return {"application_id": app.id, "status": app.status.value if app.status else "applied"}
 
     async def _cmd_add_job_url(self, p: Any) -> dict[str, Any]:
@@ -1284,6 +1340,7 @@ class Daemon:
             application_id=app.id, job_id=app.job_id, from_state=before.state, to_state=AppState.SUBMITTED,
             reason="manual_easy_apply", actor=Actor.USER, at=app.state_updated_at,
         ))
+        self._submitted(app.id)
         return {"application_id": app.id}
 
     async def _cmd_mark_easy_apply_opened(self, p: Any) -> None:
@@ -1509,6 +1566,91 @@ class Daemon:
             except RunConflict:
                 run_id = None
         return {"run_id": run_id}
+
+    # ---- cold outreach (docs/COLD_EMAIL_PLAN.md; logic in autoapply.outreach.service) -------------
+
+    @property
+    def _out(self) -> OutreachService:
+        assert self.outreach is not None
+        return self.outreach
+
+    async def _cmd_scout_contacts(self, p: Any) -> dict[str, Any]:
+        return self._out.scout_command(p.company_id, p.application_id, p.purpose)
+
+    async def _cmd_add_contact(self, p: Any) -> dict[str, Any]:
+        return self._out.add_contact(p)
+
+    async def _cmd_update_contact(self, p: Any) -> None:
+        patch = p.model_dump(exclude_unset=True)
+        patch.pop("id", None)
+        self._out.update_contact(p.id, patch)
+
+    async def _cmd_delete_contact(self, p: Any) -> None:
+        await self._out.delete_contact(p.id, p.suppress)
+
+    async def _cmd_import_contacts(self, p: Any) -> dict[str, Any]:
+        return self._out.import_contacts(p.file_path)
+
+    async def _cmd_draft_outreach(self, p: Any) -> dict[str, Any]:
+        return await self._out.draft(p.contact_id, p.kind, application_id=p.application_id, instructions=p.instructions)
+
+    async def _cmd_edit_outreach_draft(self, p: Any) -> dict[str, Any]:
+        return self._out.edit_draft(p.message_id, p.subject, p.body, p.confirm_claims)
+
+    async def _cmd_approve_outreach(self, p: Any) -> dict[str, Any]:
+        return await self._out.approve(list(p.message_ids), p.include_followups, list(p.send_anyway))
+
+    async def _cmd_cancel_outreach(self, p: Any) -> dict[str, Any]:
+        return await self._out.cancel(list(p.message_ids))
+
+    async def _cmd_discard_outreach(self, p: Any) -> None:
+        await self._out.discard(p.thread_id)
+
+    async def _cmd_resolve_outreach_unknown(self, p: Any) -> None:
+        await self._out.resolve_unknown(p.message_id, p.sent)
+
+    async def _cmd_mark_reply_read(self, p: Any) -> None:
+        self._out.mark_reply_read(p.thread_id)
+
+    async def _cmd_set_thread_outcome(self, p: Any) -> None:
+        await self._out.set_outcome(p.thread_id, p.outcome, p.close)
+
+    async def _cmd_suppress(self, p: Any) -> None:
+        await self._out.suppress(p.email, p.domain, p.reason)
+
+    async def _cmd_unsuppress(self, p: Any) -> None:
+        self._out.unsuppress(p.email, p.domain)
+
+    async def _cmd_enable_sending(self, p: Any) -> dict[str, Any]:
+        return await self._out.enable_sending(p.enabled)
+
+    async def _cmd_search_prospects(self, p: Any) -> dict[str, Any]:
+        out = self._out.search_prospects(p.query, p.location)
+        self._spawn(self.outreach_google_if_idle(), name="outreach-google")
+        return out
+
+    async def _cmd_add_prospect(self, p: Any) -> dict[str, Any]:
+        return await self._out.add_prospect(p.company_name, p.url)
+
+    async def _cmd_update_prospect(self, p: Any) -> None:
+        await self._out.update_prospect(p.id, p.status, p.watch)
+
+    async def _cmd_suggest_referrers(self, p: Any) -> dict[str, Any]:
+        out = self._out.suggest_referrers(p.company_id, p.job_id)
+        self._spawn(self.outreach_google_if_idle(), name="outreach-google")
+        return out
+
+    async def _cmd_add_referral(self, p: Any) -> dict[str, Any]:
+        return self._out.add_referral(p)
+
+    async def _cmd_draft_referral(self, p: Any) -> dict[str, Any]:
+        return await self._out.draft_referral(p.id, p.instructions)
+
+    async def _cmd_update_referral(self, p: Any) -> None:
+        self._out.update_referral(p.id, p.state, p.connect_note, p.referral_dm)
+
+    async def _cmd_set_provider_key(self, p: Any) -> dict[str, Any]:
+        return await self._out.set_provider_key(p.provider, p.api_key)
 
     async def log_line(self, level: LogLevel, message: str) -> None:
         await self.emit("log", LogPayload(level=level, message=message, logger=log.name, at=utcnow()))

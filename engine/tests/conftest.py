@@ -28,6 +28,15 @@ def _no_starter_watchlist(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(starter, "AUTO_SEED", False)
 
 
+@pytest.fixture(autouse=True)
+def _no_outreach_automation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A submitted application must not start a real scout (HTTP / DNS / Google) in tests.
+    Outreach tests that want the automation turn it back on with injected fakes."""
+    from autoapply.outreach import service
+
+    monkeypatch.setattr(service, "AUTO_ENABLED", False)
+
+
 @pytest.fixture
 def autoapply_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Paths:
     home = tmp_path / "AutoApplyHome"

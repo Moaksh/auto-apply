@@ -23,6 +23,8 @@ dependencies = [
     "jsonschema>=4.22",
     # Live-browser thumbnails (agent_step.screenshot_thumb).
     "pillow>=10.0",
+    # Cold outreach: MX lookups for contact domains (never SMTP probing).
+    "dnspython>=2.9.0",
 ]
 
 [project.optional-dependencies]

@@ -189,6 +189,7 @@ enum CapKind: String, Codable, Sendable, CaseIterable, Hashable {
     case linkedinBudget = "linkedin_budget"
     case glassdoorBudget = "glassdoor_budget"
     case googleBudget = "google_budget"
+    case outreachDaily = "outreach_daily"
 }
 
 enum DaemonActivity: String, Codable, Sendable, CaseIterable, Hashable {
@@ -250,6 +251,19 @@ enum Mode: String, Codable, Sendable, CaseIterable, Hashable {
     case review
 }
 
+enum OutreachKind: String, Codable, Sendable, CaseIterable, Hashable {
+    case application
+    case prospect
+    case referralEmail = "referral_email"
+}
+
+enum ProspectStatus: String, Codable, Sendable, CaseIterable, Hashable {
+    case suggested
+    case shortlisted
+    case contacted
+    case dismissed
+}
+
 enum QuestionReason: String, Codable, Sendable, CaseIterable, Hashable {
     case unknown
     case neverGuess = "never_guess"
@@ -258,10 +272,49 @@ enum QuestionReason: String, Codable, Sendable, CaseIterable, Hashable {
     case alwaysAsk = "always_ask"
 }
 
+enum ReferralBasis: String, Codable, Sendable, CaseIterable, Hashable {
+    case alumni
+    case exColleague = "ex_colleague"
+    case sameFunction = "same_function"
+    case user
+    case other
+}
+
+enum ReferralState: String, Codable, Sendable, CaseIterable, Hashable {
+    case suggested
+    case toConnect = "to_connect"
+    case requested
+    case connected
+    case asked
+    case referred
+    case declined
+    case noResponse = "no_response"
+    case dismissed
+}
+
+enum Relationship: String, Codable, Sendable, CaseIterable, Hashable {
+    case friend
+    case exColleague = "ex_colleague"
+    case alumni
+    case met
+    case other
+}
+
 enum RemotePolicy: String, Codable, Sendable, CaseIterable, Hashable {
     case remote
     case hybrid
     case onsite
+}
+
+enum ReplyLabel: String, Codable, Sendable, CaseIterable, Hashable {
+    case positive
+    case referred
+    case notInterested = "not_interested"
+    case optOut = "opt_out"
+    case question
+    case other
+    case ooo
+    case bounce
 }
 
 enum RunKind: String, Codable, Sendable, CaseIterable, Hashable {
@@ -285,6 +338,12 @@ enum RunTrigger: String, Codable, Sendable, CaseIterable, Hashable {
     case cli
 }
 
+enum ScoutPurpose: String, Codable, Sendable, CaseIterable, Hashable {
+    case application
+    case prospect
+    case referral
+}
+
 enum Seniority: String, Codable, Sendable, CaseIterable, Hashable {
     case junior
     case mid
@@ -301,6 +360,22 @@ enum SourceName: String, Codable, Sendable, CaseIterable, Hashable {
     case lever
     case ashby
     case careers
+}
+
+enum SuppressionReason: String, Codable, Sendable, CaseIterable, Hashable {
+    case optOut = "opt_out"
+    case hardBounce = "hard_bounce"
+    case user
+    case sharedRemoval = "shared_removal"
+    case complaint
+}
+
+enum ThreadOutcome: String, Codable, Sendable, CaseIterable, Hashable {
+    case positive
+    case referred
+    case notInterested = "not_interested"
+    case question
+    case other
 }
 
 // MARK: - Payload and shared types
@@ -339,6 +414,45 @@ extension AckPayload {
     }
 }
 
+struct AddContactPayload: Codable, Sendable, Hashable {
+    var companyId: Int? = nil
+    var companyName: String? = nil
+    var fullName: String
+    var email: String? = nil
+    var title: String? = nil
+    var linkedinUrl: String? = nil
+    var relationship: Relationship? = nil
+    var notes: String? = nil
+    var shareOk: Bool = false
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case companyId = "company_id"
+        case companyName = "company_name"
+        case fullName = "full_name"
+        case email
+        case title
+        case linkedinUrl = "linkedin_url"
+        case relationship
+        case notes
+        case shareOk = "share_ok"
+    }
+}
+
+extension AddContactPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        companyId = try c.decodeIfPresent(Int.self, forKey: .companyId)
+        companyName = try c.decodeIfPresent(String.self, forKey: .companyName)
+        fullName = try c.decode(String.self, forKey: .fullName)
+        email = try c.decodeIfPresent(String.self, forKey: .email)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        linkedinUrl = try c.decodeIfPresent(String.self, forKey: .linkedinUrl)
+        relationship = try c.decodeIfPresent(Relationship.self, forKey: .relationship)
+        notes = try c.decodeIfPresent(String.self, forKey: .notes)
+        shareOk = try c.decodeIfPresent(Bool.self, forKey: .shareOk) ?? false
+    }
+}
+
 /// Add a job from any apply link (manual source) and queue it as a user choice.
 struct AddJobUrlPayload: Codable, Sendable, Hashable {
     var url: String
@@ -361,6 +475,61 @@ extension AddJobUrlPayload {
         title = try c.decodeIfPresent(String.self, forKey: .title)
         company = try c.decodeIfPresent(String.self, forKey: .company)
         applyNow = try c.decodeIfPresent(Bool.self, forKey: .applyNow) ?? true
+    }
+}
+
+struct AddProspectPayload: Codable, Sendable, Hashable {
+    var companyName: String? = nil
+    var url: String? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case companyName = "company_name"
+        case url
+    }
+}
+
+extension AddProspectPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        companyName = try c.decodeIfPresent(String.self, forKey: .companyName)
+        url = try c.decodeIfPresent(String.self, forKey: .url)
+    }
+}
+
+/// 'Could refer me': a contact (or a typed person) as a would-be referrer.
+struct AddReferralPayload: Codable, Sendable, Hashable {
+    var companyId: Int? = nil
+    var jobId: Int? = nil
+    var contactId: Int? = nil
+    var personName: String? = nil
+    var title: String? = nil
+    var linkedinUrl: String? = nil
+    var basis: ReferralBasis = .user
+    var basisDetail: String? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case companyId = "company_id"
+        case jobId = "job_id"
+        case contactId = "contact_id"
+        case personName = "person_name"
+        case title
+        case linkedinUrl = "linkedin_url"
+        case basis
+        case basisDetail = "basis_detail"
+    }
+}
+
+extension AddReferralPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        companyId = try c.decodeIfPresent(Int.self, forKey: .companyId)
+        jobId = try c.decodeIfPresent(Int.self, forKey: .jobId)
+        contactId = try c.decodeIfPresent(Int.self, forKey: .contactId)
+        personName = try c.decodeIfPresent(String.self, forKey: .personName)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        linkedinUrl = try c.decodeIfPresent(String.self, forKey: .linkedinUrl)
+        basis = try c.decodeIfPresent(ReferralBasis.self, forKey: .basis) ?? .user
+        basisDetail = try c.decodeIfPresent(String.self, forKey: .basisDetail)
     }
 }
 
@@ -537,6 +706,27 @@ extension ApplyAnywayPayload {
     }
 }
 
+struct ApproveOutreachPayload: Codable, Sendable, Hashable {
+    var messageIds: [Int]
+    var includeFollowups: Bool = false
+    var sendAnyway: [Int] = []
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case messageIds = "message_ids"
+        case includeFollowups = "include_followups"
+        case sendAnyway = "send_anyway"
+    }
+}
+
+extension ApproveOutreachPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        messageIds = try c.decode([Int].self, forKey: .messageIds)
+        includeFollowups = try c.decodeIfPresent(Bool.self, forKey: .includeFollowups) ?? false
+        sendAnyway = try c.decodeIfPresent([Int].self, forKey: .sendAnyway) ?? []
+    }
+}
+
 struct ApprovePayload: Codable, Sendable, Hashable {
     var applicationIds: [Int]
 
@@ -549,6 +739,21 @@ extension ApprovePayload {
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         applicationIds = try c.decode([Int].self, forKey: .applicationIds)
+    }
+}
+
+struct CancelOutreachPayload: Codable, Sendable, Hashable {
+    var messageIds: [Int]
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case messageIds = "message_ids"
+    }
+}
+
+extension CancelOutreachPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        messageIds = try c.decode([Int].self, forKey: .messageIds)
     }
 }
 
@@ -587,6 +792,10 @@ struct CapsStatus: Codable, Sendable, Hashable {
     var linkedinSessionsLimit: Int = 0
     var glassdoorSessionsUsed: Int = 0
     var glassdoorSessionsLimit: Int = 0
+    var outreachSentToday: Int = 0
+    var outreachDailyLimit: Int = 0
+    var peopleFinderUsed: Int = 0
+    var peopleFinderLimit: Int = 0
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case dailyUsed = "daily_used"
@@ -596,6 +805,10 @@ struct CapsStatus: Codable, Sendable, Hashable {
         case linkedinSessionsLimit = "linkedin_sessions_limit"
         case glassdoorSessionsUsed = "glassdoor_sessions_used"
         case glassdoorSessionsLimit = "glassdoor_sessions_limit"
+        case outreachSentToday = "outreach_sent_today"
+        case outreachDailyLimit = "outreach_daily_limit"
+        case peopleFinderUsed = "people_finder_used"
+        case peopleFinderLimit = "people_finder_limit"
     }
 }
 
@@ -609,6 +822,10 @@ extension CapsStatus {
         linkedinSessionsLimit = try c.decodeIfPresent(Int.self, forKey: .linkedinSessionsLimit) ?? 0
         glassdoorSessionsUsed = try c.decodeIfPresent(Int.self, forKey: .glassdoorSessionsUsed) ?? 0
         glassdoorSessionsLimit = try c.decodeIfPresent(Int.self, forKey: .glassdoorSessionsLimit) ?? 0
+        outreachSentToday = try c.decodeIfPresent(Int.self, forKey: .outreachSentToday) ?? 0
+        outreachDailyLimit = try c.decodeIfPresent(Int.self, forKey: .outreachDailyLimit) ?? 0
+        peopleFinderUsed = try c.decodeIfPresent(Int.self, forKey: .peopleFinderUsed) ?? 0
+        peopleFinderLimit = try c.decodeIfPresent(Int.self, forKey: .peopleFinderLimit) ?? 0
     }
 }
 
@@ -653,6 +870,9 @@ struct Counts: Codable, Sendable, Hashable {
     var discoveredToday: Int = 0
     var submittedTotal: Int = 0
     var suggestionsPending: Int = 0
+    var outreachDrafts: Int = 0
+    var outreachRepliesUnread: Int = 0
+    var outreachUnknown: Int = 0
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case queued
@@ -667,6 +887,9 @@ struct Counts: Codable, Sendable, Hashable {
         case discoveredToday = "discovered_today"
         case submittedTotal = "submitted_total"
         case suggestionsPending = "suggestions_pending"
+        case outreachDrafts = "outreach_drafts"
+        case outreachRepliesUnread = "outreach_replies_unread"
+        case outreachUnknown = "outreach_unknown"
     }
 }
 
@@ -685,6 +908,9 @@ extension Counts {
         discoveredToday = try c.decodeIfPresent(Int.self, forKey: .discoveredToday) ?? 0
         submittedTotal = try c.decodeIfPresent(Int.self, forKey: .submittedTotal) ?? 0
         suggestionsPending = try c.decodeIfPresent(Int.self, forKey: .suggestionsPending) ?? 0
+        outreachDrafts = try c.decodeIfPresent(Int.self, forKey: .outreachDrafts) ?? 0
+        outreachRepliesUnread = try c.decodeIfPresent(Int.self, forKey: .outreachRepliesUnread) ?? 0
+        outreachUnknown = try c.decodeIfPresent(Int.self, forKey: .outreachUnknown) ?? 0
     }
 }
 
@@ -700,6 +926,24 @@ extension DeleteAnswerPayload {
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         answerId = try c.decode(Int.self, forKey: .answerId)
+    }
+}
+
+struct DeleteContactPayload: Codable, Sendable, Hashable {
+    var id: Int
+    var suppress: Bool = true
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id
+        case suppress
+    }
+}
+
+extension DeleteContactPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        suppress = try c.decodeIfPresent(Bool.self, forKey: .suppress) ?? true
     }
 }
 
@@ -733,6 +977,21 @@ extension DeleteStoryPayload {
     }
 }
 
+struct DiscardOutreachPayload: Codable, Sendable, Hashable {
+    var threadId: Int
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case threadId = "thread_id"
+    }
+}
+
+extension DiscardOutreachPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        threadId = try c.decode(Int.self, forKey: .threadId)
+    }
+}
+
 struct DismissCompanySuggestionPayload: Codable, Sendable, Hashable {
     var suggestionId: Int
 
@@ -763,6 +1022,48 @@ extension DismissEasyApplyPayload {
     }
 }
 
+struct DraftOutreachPayload: Codable, Sendable, Hashable {
+    var contactId: Int
+    var kind: OutreachKind = .application
+    var applicationId: Int? = nil
+    var instructions: String? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case contactId = "contact_id"
+        case kind
+        case applicationId = "application_id"
+        case instructions
+    }
+}
+
+extension DraftOutreachPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        contactId = try c.decode(Int.self, forKey: .contactId)
+        kind = try c.decodeIfPresent(OutreachKind.self, forKey: .kind) ?? .application
+        applicationId = try c.decodeIfPresent(Int.self, forKey: .applicationId)
+        instructions = try c.decodeIfPresent(String.self, forKey: .instructions)
+    }
+}
+
+struct DraftReferralPayload: Codable, Sendable, Hashable {
+    var id: Int
+    var instructions: String? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id
+        case instructions
+    }
+}
+
+extension DraftReferralPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        instructions = try c.decodeIfPresent(String.self, forKey: .instructions)
+    }
+}
+
 struct EditApplicationAnswerPayload: Codable, Sendable, Hashable {
     var applicationAnswerId: Int
     var answer: String
@@ -778,6 +1079,30 @@ extension EditApplicationAnswerPayload {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         applicationAnswerId = try c.decode(Int.self, forKey: .applicationAnswerId)
         answer = try c.decode(String.self, forKey: .answer)
+    }
+}
+
+struct EditOutreachDraftPayload: Codable, Sendable, Hashable {
+    var messageId: Int
+    var subject: String? = nil
+    var body: String
+    var confirmClaims: Bool = false
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case messageId = "message_id"
+        case subject
+        case body
+        case confirmClaims = "confirm_claims"
+    }
+}
+
+extension EditOutreachDraftPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        messageId = try c.decode(Int.self, forKey: .messageId)
+        subject = try c.decodeIfPresent(String.self, forKey: .subject)
+        body = try c.decode(String.self, forKey: .body)
+        confirmClaims = try c.decodeIfPresent(Bool.self, forKey: .confirmClaims) ?? false
     }
 }
 
@@ -805,6 +1130,21 @@ extension EducationItem {
         field = try c.decodeIfPresent(String.self, forKey: .field)
         start = try c.decodeIfPresent(String.self, forKey: .start)
         end = try c.decodeIfPresent(String.self, forKey: .end)
+    }
+}
+
+struct EnableSendingPayload: Codable, Sendable, Hashable {
+    var enabled: Bool
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case enabled
+    }
+}
+
+extension EnableSendingPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        enabled = try c.decode(Bool.self, forKey: .enabled)
     }
 }
 
@@ -908,6 +1248,21 @@ extension HelloPayload {
         client = try c.decodeIfPresent(Client.self, forKey: .client) ?? .app
         clientVersion = try c.decodeIfPresent(String.self, forKey: .clientVersion)
         protocolVersion = try c.decodeIfPresent(Int.self, forKey: .protocolVersion) ?? 1
+    }
+}
+
+struct ImportContactsPayload: Codable, Sendable, Hashable {
+    var filePath: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case filePath = "file_path"
+    }
+}
+
+extension ImportContactsPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        filePath = try c.decode(String.self, forKey: .filePath)
     }
 }
 
@@ -1109,6 +1464,21 @@ extension MarkEasyApplyOpenedPayload {
     }
 }
 
+struct MarkReplyReadPayload: Codable, Sendable, Hashable {
+    var threadId: Int
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case threadId = "thread_id"
+    }
+}
+
+extension MarkReplyReadPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        threadId = try c.decode(Int.self, forKey: .threadId)
+    }
+}
+
 /// Facts the agent never guesses. ``None`` means "always ask me".
 ///
 /// Each field is one row in the ``never_guess`` table (key = field name, value = JSON).
@@ -1301,6 +1671,80 @@ extension OpenAgentChromePayload {
     }
 }
 
+struct OutreachReplyPayload: Codable, Sendable, Hashable {
+    var threadId: Int
+    var messageId: Int? = nil
+    var contactName: String
+    var company: String
+    var label: ReplyLabel
+    var snippet: String = ""
+    var applicationId: Int? = nil
+    var suggestedStatus: BoardStatus? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case threadId = "thread_id"
+        case messageId = "message_id"
+        case contactName = "contact_name"
+        case company
+        case label
+        case snippet
+        case applicationId = "application_id"
+        case suggestedStatus = "suggested_status"
+    }
+}
+
+extension OutreachReplyPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        threadId = try c.decode(Int.self, forKey: .threadId)
+        messageId = try c.decodeIfPresent(Int.self, forKey: .messageId)
+        contactName = try c.decode(String.self, forKey: .contactName)
+        company = try c.decode(String.self, forKey: .company)
+        label = try c.decode(ReplyLabel.self, forKey: .label)
+        snippet = try c.decodeIfPresent(String.self, forKey: .snippet) ?? ""
+        applicationId = try c.decodeIfPresent(Int.self, forKey: .applicationId)
+        suggestedStatus = try c.decodeIfPresent(BoardStatus.self, forKey: .suggestedStatus)
+    }
+}
+
+/// A cold-email thread or message changed state (the app re-reads the tables).
+struct OutreachStatePayload: Codable, Sendable, Hashable {
+    enum Entity: String, Codable, Sendable, CaseIterable, Hashable {
+        case message
+        case thread
+    }
+    var threadId: Int
+    var messageId: Int? = nil
+    var entity: Entity = .message
+    var fromState: String? = nil
+    var toState: String
+    var reason: String? = nil
+    var at: Date
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case threadId = "thread_id"
+        case messageId = "message_id"
+        case entity
+        case fromState = "from_state"
+        case toState = "to_state"
+        case reason
+        case at
+    }
+}
+
+extension OutreachStatePayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        threadId = try c.decode(Int.self, forKey: .threadId)
+        messageId = try c.decodeIfPresent(Int.self, forKey: .messageId)
+        entity = try c.decodeIfPresent(Entity.self, forKey: .entity) ?? .message
+        fromState = try c.decodeIfPresent(String.self, forKey: .fromState)
+        toState = try c.decode(String.self, forKey: .toState)
+        reason = try c.decodeIfPresent(String.self, forKey: .reason)
+        at = try c.decode(Date.self, forKey: .at)
+    }
+}
+
 /// ``ack.result`` for ``onboarding_parse_resume``.
 struct ParseResumeResult: Codable, Sendable, Hashable {
     var resumeVariantId: Int
@@ -1390,6 +1834,15 @@ struct Preferences: Codable, Sendable, Hashable {
     var parallelApplications: Int = 3
     var createAccounts: Bool = true
     var sourcesEnabled: [String: Bool] = ["greenhouse": true, "lever": true, "ashby": true, "careers": true, "linkedin": false, "glassdoor": false, "google": true]
+    var outreachAutoScout: Bool = true
+    var outreachAutoDraft: Bool = true
+    var outreachDailyCap: Int = 10
+    var outreachFollowupDays: Int = 5
+    var outreachMaxFollowups: Int = 1
+    var outreachSendWindow: [String] = ["09:30", "17:30"]
+    var outreachWeekdaysOnly: Bool = true
+    var outreachMinEmailConfidence: Int = 60
+    var peopleFinderVisitsPerDay: Int = 6
     var careerPageUrls: [String] = []
     var alwaysAskPatterns: [String] = []
 
@@ -1422,6 +1875,15 @@ struct Preferences: Codable, Sendable, Hashable {
         case parallelApplications = "parallel_applications"
         case createAccounts = "create_accounts"
         case sourcesEnabled = "sources_enabled"
+        case outreachAutoScout = "outreach_auto_scout"
+        case outreachAutoDraft = "outreach_auto_draft"
+        case outreachDailyCap = "outreach_daily_cap"
+        case outreachFollowupDays = "outreach_followup_days"
+        case outreachMaxFollowups = "outreach_max_followups"
+        case outreachSendWindow = "outreach_send_window"
+        case outreachWeekdaysOnly = "outreach_weekdays_only"
+        case outreachMinEmailConfidence = "outreach_min_email_confidence"
+        case peopleFinderVisitsPerDay = "people_finder_visits_per_day"
         case careerPageUrls = "career_page_urls"
         case alwaysAskPatterns = "always_ask_patterns"
     }
@@ -1458,6 +1920,15 @@ extension Preferences {
         parallelApplications = try c.decodeIfPresent(Int.self, forKey: .parallelApplications) ?? 3
         createAccounts = try c.decodeIfPresent(Bool.self, forKey: .createAccounts) ?? true
         sourcesEnabled = try c.decodeIfPresent([String: Bool].self, forKey: .sourcesEnabled) ?? ["greenhouse": true, "lever": true, "ashby": true, "careers": true, "linkedin": false, "glassdoor": false, "google": true]
+        outreachAutoScout = try c.decodeIfPresent(Bool.self, forKey: .outreachAutoScout) ?? true
+        outreachAutoDraft = try c.decodeIfPresent(Bool.self, forKey: .outreachAutoDraft) ?? true
+        outreachDailyCap = try c.decodeIfPresent(Int.self, forKey: .outreachDailyCap) ?? 10
+        outreachFollowupDays = try c.decodeIfPresent(Int.self, forKey: .outreachFollowupDays) ?? 5
+        outreachMaxFollowups = try c.decodeIfPresent(Int.self, forKey: .outreachMaxFollowups) ?? 1
+        outreachSendWindow = try c.decodeIfPresent([String].self, forKey: .outreachSendWindow) ?? ["09:30", "17:30"]
+        outreachWeekdaysOnly = try c.decodeIfPresent(Bool.self, forKey: .outreachWeekdaysOnly) ?? true
+        outreachMinEmailConfidence = try c.decodeIfPresent(Int.self, forKey: .outreachMinEmailConfidence) ?? 60
+        peopleFinderVisitsPerDay = try c.decodeIfPresent(Int.self, forKey: .peopleFinderVisitsPerDay) ?? 6
         careerPageUrls = try c.decodeIfPresent([String].self, forKey: .careerPageUrls) ?? []
         alwaysAskPatterns = try c.decodeIfPresent([String].self, forKey: .alwaysAskPatterns) ?? []
     }
@@ -1704,6 +2175,24 @@ extension ResetSourceCapPayload {
     }
 }
 
+struct ResolveOutreachUnknownPayload: Codable, Sendable, Hashable {
+    var messageId: Int
+    var sent: Bool
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case messageId = "message_id"
+        case sent
+    }
+}
+
+extension ResolveOutreachUnknownPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        messageId = try c.decode(Int.self, forKey: .messageId)
+        sent = try c.decode(Bool.self, forKey: .sent)
+    }
+}
+
 struct ResolveUnknownPayload: Codable, Sendable, Hashable {
     var applicationId: Int
     var submitted: Bool
@@ -1880,6 +2369,82 @@ extension RunStats {
     }
 }
 
+/// Find people to email at a company (HTTP sources now; Google results when the browser is free).
+struct ScoutContactsPayload: Codable, Sendable, Hashable {
+    var companyId: Int? = nil
+    var applicationId: Int? = nil
+    var purpose: ScoutPurpose = .application
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case companyId = "company_id"
+        case applicationId = "application_id"
+        case purpose
+    }
+}
+
+extension ScoutContactsPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        companyId = try c.decodeIfPresent(Int.self, forKey: .companyId)
+        applicationId = try c.decodeIfPresent(Int.self, forKey: .applicationId)
+        purpose = try c.decodeIfPresent(ScoutPurpose.self, forKey: .purpose) ?? .application
+    }
+}
+
+struct ScoutFinishedPayload: Codable, Sendable, Hashable {
+    var companyId: Int
+    var purpose: ScoutPurpose = .application
+    var applicationId: Int? = nil
+    var found: Int = 0
+    var withEmail: Int = 0
+    var bestConfidence: Int? = nil
+    var queuedGoogle: Bool = false
+    var threadId: Int? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case companyId = "company_id"
+        case purpose
+        case applicationId = "application_id"
+        case found
+        case withEmail = "with_email"
+        case bestConfidence = "best_confidence"
+        case queuedGoogle = "queued_google"
+        case threadId = "thread_id"
+    }
+}
+
+extension ScoutFinishedPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        companyId = try c.decode(Int.self, forKey: .companyId)
+        purpose = try c.decodeIfPresent(ScoutPurpose.self, forKey: .purpose) ?? .application
+        applicationId = try c.decodeIfPresent(Int.self, forKey: .applicationId)
+        found = try c.decodeIfPresent(Int.self, forKey: .found) ?? 0
+        withEmail = try c.decodeIfPresent(Int.self, forKey: .withEmail) ?? 0
+        bestConfidence = try c.decodeIfPresent(Int.self, forKey: .bestConfidence)
+        queuedGoogle = try c.decodeIfPresent(Bool.self, forKey: .queuedGoogle) ?? false
+        threadId = try c.decodeIfPresent(Int.self, forKey: .threadId)
+    }
+}
+
+struct SearchProspectsPayload: Codable, Sendable, Hashable {
+    var query: String
+    var location: String? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case query
+        case location
+    }
+}
+
+extension SearchProspectsPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        query = try c.decode(String.self, forKey: .query)
+        location = try c.decodeIfPresent(String.self, forKey: .location)
+    }
+}
+
 /// Swap the resume an application will use (Review ↻). An application awaiting review is
 /// sent back to ``queued`` so the form is re-filled with the new file.
 struct SetApplicationResumePayload: Codable, Sendable, Hashable {
@@ -1936,6 +2501,28 @@ extension SetMailAccountPayload {
     }
 }
 
+struct SetProviderKeyPayload: Codable, Sendable, Hashable {
+    enum Provider: String, Codable, Sendable, CaseIterable, Hashable {
+        case hunter
+        case github
+    }
+    var provider: Provider
+    var apiKey: String? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case provider
+        case apiKey = "api_key"
+    }
+}
+
+extension SetProviderKeyPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        provider = try c.decode(Provider.self, forKey: .provider)
+        apiKey = try c.decodeIfPresent(String.self, forKey: .apiKey)
+    }
+}
+
 struct SetStatusPayload: Codable, Sendable, Hashable {
     var applicationId: Int
     var status: BoardStatus
@@ -1951,6 +2538,27 @@ extension SetStatusPayload {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         applicationId = try c.decode(Int.self, forKey: .applicationId)
         status = try c.decode(BoardStatus.self, forKey: .status)
+    }
+}
+
+struct SetThreadOutcomePayload: Codable, Sendable, Hashable {
+    var threadId: Int
+    var outcome: ThreadOutcome? = nil
+    var close: Bool = false
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case threadId = "thread_id"
+        case outcome
+        case close
+    }
+}
+
+extension SetThreadOutcomePayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        threadId = try c.decode(Int.self, forKey: .threadId)
+        outcome = try c.decodeIfPresent(ThreadOutcome.self, forKey: .outcome)
+        close = try c.decodeIfPresent(Bool.self, forKey: .close) ?? false
     }
 }
 
@@ -2107,6 +2715,24 @@ extension SuggestPreferencesPayload {
     }
 }
 
+struct SuggestReferrersPayload: Codable, Sendable, Hashable {
+    var companyId: Int
+    var jobId: Int? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case companyId = "company_id"
+        case jobId = "job_id"
+    }
+}
+
+extension SuggestReferrersPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        companyId = try c.decode(Int.self, forKey: .companyId)
+        jobId = try c.decodeIfPresent(Int.self, forKey: .jobId)
+    }
+}
+
 /// Job-search preferences suggested from the resume; the app pre-fills, the user saves.
 struct SuggestedPreferences: Codable, Sendable, Hashable {
     var roles: [String] = []
@@ -2129,6 +2755,27 @@ extension SuggestedPreferences {
         seniority = try c.decodeIfPresent([Seniority].self, forKey: .seniority) ?? []
         locations = try c.decodeIfPresent([String].self, forKey: .locations) ?? []
         yearsExperience = try c.decodeIfPresent(Double.self, forKey: .yearsExperience)
+    }
+}
+
+struct SuppressPayload: Codable, Sendable, Hashable {
+    var email: String? = nil
+    var domain: String? = nil
+    var reason: SuppressionReason = .user
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case email
+        case domain
+        case reason
+    }
+}
+
+extension SuppressPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        email = try c.decodeIfPresent(String.self, forKey: .email)
+        domain = try c.decodeIfPresent(String.self, forKey: .domain)
+        reason = try c.decodeIfPresent(SuppressionReason.self, forKey: .reason) ?? .user
     }
 }
 
@@ -2188,6 +2835,24 @@ extension SystemCheckResult {
     }
 }
 
+struct UnsuppressPayload: Codable, Sendable, Hashable {
+    var email: String? = nil
+    var domain: String? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case email
+        case domain
+    }
+}
+
+extension UnsuppressPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        email = try c.decodeIfPresent(String.self, forKey: .email)
+        domain = try c.decodeIfPresent(String.self, forKey: .domain)
+    }
+}
+
 struct UpdateAnswerPayload: Codable, Sendable, Hashable {
     var answerId: Int
     var answer: String
@@ -2206,6 +2871,46 @@ extension UpdateAnswerPayload {
         answerId = try c.decode(Int.self, forKey: .answerId)
         answer = try c.decode(String.self, forKey: .answer)
         canonicalQuestion = try c.decodeIfPresent(String.self, forKey: .canonicalQuestion)
+    }
+}
+
+/// Only the keys present are applied; null clears an optional field.
+struct UpdateContactPayload: Codable, Sendable, Hashable {
+    var id: Int
+    var companyId: Int? = nil
+    var fullName: String? = nil
+    var email: String? = nil
+    var title: String? = nil
+    var linkedinUrl: String? = nil
+    var relationship: Relationship? = nil
+    var notes: String? = nil
+    var shareOk: Bool? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id
+        case companyId = "company_id"
+        case fullName = "full_name"
+        case email
+        case title
+        case linkedinUrl = "linkedin_url"
+        case relationship
+        case notes
+        case shareOk = "share_ok"
+    }
+}
+
+extension UpdateContactPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        companyId = try c.decodeIfPresent(Int.self, forKey: .companyId)
+        fullName = try c.decodeIfPresent(String.self, forKey: .fullName)
+        email = try c.decodeIfPresent(String.self, forKey: .email)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        linkedinUrl = try c.decodeIfPresent(String.self, forKey: .linkedinUrl)
+        relationship = try c.decodeIfPresent(Relationship.self, forKey: .relationship)
+        notes = try c.decodeIfPresent(String.self, forKey: .notes)
+        shareOk = try c.decodeIfPresent(Bool.self, forKey: .shareOk)
     }
 }
 
@@ -2269,6 +2974,51 @@ extension UpdateProfilePayload {
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         profile = try c.decode(ProfilePatch.self, forKey: .profile)
+    }
+}
+
+struct UpdateProspectPayload: Codable, Sendable, Hashable {
+    var id: Int
+    var status: ProspectStatus? = nil
+    var watch: Bool = false
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id
+        case status
+        case watch
+    }
+}
+
+extension UpdateProspectPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        status = try c.decodeIfPresent(ProspectStatus.self, forKey: .status)
+        watch = try c.decodeIfPresent(Bool.self, forKey: .watch) ?? false
+    }
+}
+
+struct UpdateReferralPayload: Codable, Sendable, Hashable {
+    var id: Int
+    var state: ReferralState? = nil
+    var connectNote: String? = nil
+    var referralDm: String? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id
+        case state
+        case connectNote = "connect_note"
+        case referralDm = "referral_dm"
+    }
+}
+
+extension UpdateReferralPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        state = try c.decodeIfPresent(ReferralState.self, forKey: .state)
+        connectNote = try c.decodeIfPresent(String.self, forKey: .connectNote)
+        referralDm = try c.decodeIfPresent(String.self, forKey: .referralDm)
     }
 }
 
@@ -2519,6 +3269,30 @@ enum Command: Sendable, Hashable {
     case deleteSiteAccount(DeleteSiteAccountPayload)
     case onboardingSetStep(OnboardingSetStepPayload)
     case onboardingComplete(OnboardingCompletePayload)
+    case scoutContacts(ScoutContactsPayload)
+    case addContact(AddContactPayload)
+    case updateContact(UpdateContactPayload)
+    case deleteContact(DeleteContactPayload)
+    case importContacts(ImportContactsPayload)
+    case draftOutreach(DraftOutreachPayload)
+    case editOutreachDraft(EditOutreachDraftPayload)
+    case approveOutreach(ApproveOutreachPayload)
+    case cancelOutreach(CancelOutreachPayload)
+    case discardOutreach(DiscardOutreachPayload)
+    case resolveOutreachUnknown(ResolveOutreachUnknownPayload)
+    case markReplyRead(MarkReplyReadPayload)
+    case setThreadOutcome(SetThreadOutcomePayload)
+    case suppress(SuppressPayload)
+    case unsuppress(UnsuppressPayload)
+    case enableSending(EnableSendingPayload)
+    case searchProspects(SearchProspectsPayload)
+    case addProspect(AddProspectPayload)
+    case updateProspect(UpdateProspectPayload)
+    case suggestReferrers(SuggestReferrersPayload)
+    case addReferral(AddReferralPayload)
+    case draftReferral(DraftReferralPayload)
+    case updateReferral(UpdateReferralPayload)
+    case setProviderKey(SetProviderKeyPayload)
 
     /// Wire `type` string.
     var type: String {
@@ -2572,6 +3346,30 @@ enum Command: Sendable, Hashable {
         case .deleteSiteAccount: "delete_site_account"
         case .onboardingSetStep: "onboarding_set_step"
         case .onboardingComplete: "onboarding_complete"
+        case .scoutContacts: "scout_contacts"
+        case .addContact: "add_contact"
+        case .updateContact: "update_contact"
+        case .deleteContact: "delete_contact"
+        case .importContacts: "import_contacts"
+        case .draftOutreach: "draft_outreach"
+        case .editOutreachDraft: "edit_outreach_draft"
+        case .approveOutreach: "approve_outreach"
+        case .cancelOutreach: "cancel_outreach"
+        case .discardOutreach: "discard_outreach"
+        case .resolveOutreachUnknown: "resolve_outreach_unknown"
+        case .markReplyRead: "mark_reply_read"
+        case .setThreadOutcome: "set_thread_outcome"
+        case .suppress: "suppress"
+        case .unsuppress: "unsuppress"
+        case .enableSending: "enable_sending"
+        case .searchProspects: "search_prospects"
+        case .addProspect: "add_prospect"
+        case .updateProspect: "update_prospect"
+        case .suggestReferrers: "suggest_referrers"
+        case .addReferral: "add_referral"
+        case .draftReferral: "draft_referral"
+        case .updateReferral: "update_referral"
+        case .setProviderKey: "set_provider_key"
         }
     }
 
@@ -2625,6 +3423,30 @@ enum Command: Sendable, Hashable {
         "delete_site_account",
         "onboarding_set_step",
         "onboarding_complete",
+        "scout_contacts",
+        "add_contact",
+        "update_contact",
+        "delete_contact",
+        "import_contacts",
+        "draft_outreach",
+        "edit_outreach_draft",
+        "approve_outreach",
+        "cancel_outreach",
+        "discard_outreach",
+        "resolve_outreach_unknown",
+        "mark_reply_read",
+        "set_thread_outcome",
+        "suppress",
+        "unsuppress",
+        "enable_sending",
+        "search_prospects",
+        "add_prospect",
+        "update_prospect",
+        "suggest_referrers",
+        "add_referral",
+        "draft_referral",
+        "update_referral",
+        "set_provider_key",
     ]
 }
 
@@ -2646,6 +3468,9 @@ enum DaemonEvent: Sendable, Hashable {
     case capReached(CapReachedPayload)
     case sourceStatus(SourceStatusPayload)
     case nudgeDue(NudgeDuePayload)
+    case outreachState(OutreachStatePayload)
+    case outreachReply(OutreachReplyPayload)
+    case scoutFinished(ScoutFinishedPayload)
     case log(LogPayload)
     case unknown(type: String, payload: JSONValue)
 
@@ -2668,6 +3493,9 @@ enum DaemonEvent: Sendable, Hashable {
         case .capReached: "cap_reached"
         case .sourceStatus: "source_status"
         case .nudgeDue: "nudge_due"
+        case .outreachState: "outreach_state"
+        case .outreachReply: "outreach_reply"
+        case .scoutFinished: "scout_finished"
         case .log: "log"
         case .unknown(let type, _): type
         }
@@ -2690,6 +3518,9 @@ enum DaemonEvent: Sendable, Hashable {
         "cap_reached",
         "source_status",
         "nudge_due",
+        "outreach_state",
+        "outreach_reply",
+        "scout_finished",
         "log",
     ]
 
@@ -2769,6 +3600,30 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case "delete_site_account": command = .deleteSiteAccount(try c.decode(DeleteSiteAccountPayload.self, forKey: .payload))
         case "onboarding_set_step": command = .onboardingSetStep(try c.decode(OnboardingSetStepPayload.self, forKey: .payload))
         case "onboarding_complete": command = .onboardingComplete(try c.decode(OnboardingCompletePayload.self, forKey: .payload))
+        case "scout_contacts": command = .scoutContacts(try c.decode(ScoutContactsPayload.self, forKey: .payload))
+        case "add_contact": command = .addContact(try c.decode(AddContactPayload.self, forKey: .payload))
+        case "update_contact": command = .updateContact(try c.decode(UpdateContactPayload.self, forKey: .payload))
+        case "delete_contact": command = .deleteContact(try c.decode(DeleteContactPayload.self, forKey: .payload))
+        case "import_contacts": command = .importContacts(try c.decode(ImportContactsPayload.self, forKey: .payload))
+        case "draft_outreach": command = .draftOutreach(try c.decode(DraftOutreachPayload.self, forKey: .payload))
+        case "edit_outreach_draft": command = .editOutreachDraft(try c.decode(EditOutreachDraftPayload.self, forKey: .payload))
+        case "approve_outreach": command = .approveOutreach(try c.decode(ApproveOutreachPayload.self, forKey: .payload))
+        case "cancel_outreach": command = .cancelOutreach(try c.decode(CancelOutreachPayload.self, forKey: .payload))
+        case "discard_outreach": command = .discardOutreach(try c.decode(DiscardOutreachPayload.self, forKey: .payload))
+        case "resolve_outreach_unknown": command = .resolveOutreachUnknown(try c.decode(ResolveOutreachUnknownPayload.self, forKey: .payload))
+        case "mark_reply_read": command = .markReplyRead(try c.decode(MarkReplyReadPayload.self, forKey: .payload))
+        case "set_thread_outcome": command = .setThreadOutcome(try c.decode(SetThreadOutcomePayload.self, forKey: .payload))
+        case "suppress": command = .suppress(try c.decode(SuppressPayload.self, forKey: .payload))
+        case "unsuppress": command = .unsuppress(try c.decode(UnsuppressPayload.self, forKey: .payload))
+        case "enable_sending": command = .enableSending(try c.decode(EnableSendingPayload.self, forKey: .payload))
+        case "search_prospects": command = .searchProspects(try c.decode(SearchProspectsPayload.self, forKey: .payload))
+        case "add_prospect": command = .addProspect(try c.decode(AddProspectPayload.self, forKey: .payload))
+        case "update_prospect": command = .updateProspect(try c.decode(UpdateProspectPayload.self, forKey: .payload))
+        case "suggest_referrers": command = .suggestReferrers(try c.decode(SuggestReferrersPayload.self, forKey: .payload))
+        case "add_referral": command = .addReferral(try c.decode(AddReferralPayload.self, forKey: .payload))
+        case "draft_referral": command = .draftReferral(try c.decode(DraftReferralPayload.self, forKey: .payload))
+        case "update_referral": command = .updateReferral(try c.decode(UpdateReferralPayload.self, forKey: .payload))
+        case "set_provider_key": command = .setProviderKey(try c.decode(SetProviderKeyPayload.self, forKey: .payload))
         default:
             throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "unknown command type \(type)")
         }
@@ -2829,6 +3684,30 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case .deleteSiteAccount(let p): try c.encode(p, forKey: .payload)
         case .onboardingSetStep(let p): try c.encode(p, forKey: .payload)
         case .onboardingComplete(let p): try c.encode(p, forKey: .payload)
+        case .scoutContacts(let p): try c.encode(p, forKey: .payload)
+        case .addContact(let p): try c.encode(p, forKey: .payload)
+        case .updateContact(let p): try c.encode(p, forKey: .payload)
+        case .deleteContact(let p): try c.encode(p, forKey: .payload)
+        case .importContacts(let p): try c.encode(p, forKey: .payload)
+        case .draftOutreach(let p): try c.encode(p, forKey: .payload)
+        case .editOutreachDraft(let p): try c.encode(p, forKey: .payload)
+        case .approveOutreach(let p): try c.encode(p, forKey: .payload)
+        case .cancelOutreach(let p): try c.encode(p, forKey: .payload)
+        case .discardOutreach(let p): try c.encode(p, forKey: .payload)
+        case .resolveOutreachUnknown(let p): try c.encode(p, forKey: .payload)
+        case .markReplyRead(let p): try c.encode(p, forKey: .payload)
+        case .setThreadOutcome(let p): try c.encode(p, forKey: .payload)
+        case .suppress(let p): try c.encode(p, forKey: .payload)
+        case .unsuppress(let p): try c.encode(p, forKey: .payload)
+        case .enableSending(let p): try c.encode(p, forKey: .payload)
+        case .searchProspects(let p): try c.encode(p, forKey: .payload)
+        case .addProspect(let p): try c.encode(p, forKey: .payload)
+        case .updateProspect(let p): try c.encode(p, forKey: .payload)
+        case .suggestReferrers(let p): try c.encode(p, forKey: .payload)
+        case .addReferral(let p): try c.encode(p, forKey: .payload)
+        case .draftReferral(let p): try c.encode(p, forKey: .payload)
+        case .updateReferral(let p): try c.encode(p, forKey: .payload)
+        case .setProviderKey(let p): try c.encode(p, forKey: .payload)
         }
     }
 }
@@ -2875,6 +3754,9 @@ struct EventEnvelope: Codable, Sendable, Hashable {
         case "cap_reached": event = .capReached(try c.decode(CapReachedPayload.self, forKey: .payload))
         case "source_status": event = .sourceStatus(try c.decode(SourceStatusPayload.self, forKey: .payload))
         case "nudge_due": event = .nudgeDue(try c.decode(NudgeDuePayload.self, forKey: .payload))
+        case "outreach_state": event = .outreachState(try c.decode(OutreachStatePayload.self, forKey: .payload))
+        case "outreach_reply": event = .outreachReply(try c.decode(OutreachReplyPayload.self, forKey: .payload))
+        case "scout_finished": event = .scoutFinished(try c.decode(ScoutFinishedPayload.self, forKey: .payload))
         case "log": event = .log(try c.decode(LogPayload.self, forKey: .payload))
         default:
             event = .unknown(type: type, payload: try c.decodeIfPresent(JSONValue.self, forKey: .payload) ?? .object([:]))
@@ -2904,6 +3786,9 @@ struct EventEnvelope: Codable, Sendable, Hashable {
         case .capReached(let p): try c.encode(p, forKey: .payload)
         case .sourceStatus(let p): try c.encode(p, forKey: .payload)
         case .nudgeDue(let p): try c.encode(p, forKey: .payload)
+        case .outreachState(let p): try c.encode(p, forKey: .payload)
+        case .outreachReply(let p): try c.encode(p, forKey: .payload)
+        case .scoutFinished(let p): try c.encode(p, forKey: .payload)
         case .log(let p): try c.encode(p, forKey: .payload)
         case .unknown(_, let payload): try c.encode(payload, forKey: .payload)
         }

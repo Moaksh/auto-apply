@@ -131,6 +131,37 @@ An `error` without `reply_to` is an unsolicited daemon problem (login expired, C
 | `onboarding_set_step` | `step` (0–7) | `null` | persisted so quitting resumes the same step |
 | `onboarding_complete` | `run_prep` (false) | `{run_id?}` | marks onboarding done; optionally starts a Prep pass |
 
+#### 5.1 Cold outreach commands (schema v10; docs/COLD_EMAIL_PLAN.md)
+
+Nothing is ever sent without `approve_outreach`. Sending stays off until `enable_sending` succeeds (a test email to the user's own address). `pause_all` stops the sender before the next email. Failures use the usual error codes: `unavailable` (sending off / no mailbox / no model / bad key), `conflict` (do-not-contact, ungrounded draft, guardrail; `details` names the message ids per problem), `illegal_transition` (wrong message / referral state), `not_found`.
+
+| type | payload | ack.result | notes |
+|---|---|---|---|
+| `scout_contacts` | `company_id?`, `application_id?`, `purpose` (`application`\|`prospect`\|`referral`, default `application`) | `{company_id, queued_google}` | finds people in the background (posting, company pages, GitHub, patterns, MX now; Google results when the browser is free); result via `scout_finished` |
+| `add_contact` | `company_id?`, `company_name?`, `full_name`, `email?`, `title?`, `linkedin_url?`, `relationship?` (`friend`\|`ex_colleague`\|`alumni`\|`met`\|`other`), `notes?`, `share_ok` (false) | `{contact_id, merged}` | a typed email is status `user`, confidence 100 |
+| `update_contact` | `id` + any of `company_id`, `full_name`, `email`, `title`, `linkedin_url`, `relationship`, `notes`, `share_ok` (only keys present; null clears) | `null` | |
+| `delete_contact` | `id`, `suppress` (true) | `null` | with `suppress` the address goes on the do-not-contact list; its pending drafts are cancelled |
+| `import_contacts` | `file_path` (CSV `name,email,company,title,linkedin_url,notes`) | `{added, merged, skipped}` | deduplicated by normalized email |
+| `draft_outreach` | `contact_id`, `kind` (`application`\|`prospect`\|`referral_email`), `application_id?` (required for `application`), `instructions?` | `{thread_id, message_id, grounded, unsupported_claims}` | grounded + fact-checked; re-drafting / switching contact replaces the open draft |
+| `edit_outreach_draft` | `message_id`, `subject?`, `body`, `confirm_claims` (false) | `{grounded, unsupported_claims}` | re-checked; `confirm_claims` ("These are true") allows approval despite unsupported claims |
+| `approve_outreach` | `message_ids[]`, `include_followups` (false), `send_anyway[]` (message ids OK'd below the confidence bar) | `{batch_uid, scheduled: [{message_id, send_at}], days: [{date, count}]}` | the only path to sending; never fails because of caps (spills to later days) |
+| `cancel_outreach` | `message_ids[]` | `{cancelled}` | approved / scheduled → draft |
+| `discard_outreach` | `thread_id` | `null` | only before anything was sent |
+| `resolve_outreach_unknown` | `message_id`, `sent` | `null` | `unknown` → `sent` / `failed` (never resent automatically) |
+| `mark_reply_read` | `thread_id` | `null` | clears `unread_reply` |
+| `set_thread_outcome` | `thread_id`, `outcome?` (`positive`\|`referred`\|`not_interested`\|`question`\|`other`), `close` (false) | `null` | closing cancels pending follow-ups; an unanswered prospect thread starts a 60-day cooldown |
+| `suppress` | `email?` \| `domain?`, `reason` (`opt_out`\|`hard_bounce`\|`user`\|`shared_removal`\|`complaint`, default `user`) | `null` | cancels pending emails to it |
+| `unsuppress` | `email?` \| `domain?` | `null` | `conflict` for an opt-out (never removable) |
+| `enable_sending` | `enabled` | `{send_enabled, test_sent_to}` | `true` sends a test email to yourself first (Gmail / Workspace only) |
+| `search_prospects` | `query`, `location?` | `{search_id}` | company search on Google when the browser is free; results land in `prospects` |
+| `add_prospect` | `company_name?`, `url?` | `{prospect_id, company_id}` | a typed company: enriched, scored and scouted in the background |
+| `update_prospect` | `id`, `status?` (`suggested`\|`shortlisted`\|`contacted`\|`dismissed`), `watch` (false) | `null` | `shortlisted` starts a scout; `watch` adds it to the job watchlist |
+| `suggest_referrers` | `company_id`, `job_id?` | `{queued_google}` | alumni / ex-colleagues / same function via Google results only (LinkedIn is never opened) |
+| `add_referral` | `company_id?`, `job_id?`, `contact_id?`, `person_name?`, `title?`, `linkedin_url?`, `basis` (`alumni`\|`ex_colleague`\|`same_function`\|`user`\|`other`, default `user`), `basis_detail?` | `{referral_id, created}` | "could refer me" |
+| `draft_referral` | `id`, `instructions?` | `{connect_note, referral_dm, grounded, unsupported_claims}` | note ≤ 300 characters, message ≤ 120 words; stored on the referral |
+| `update_referral` | `id`, `state?`, `connect_note?`, `referral_dm?` | `null` | states per §7.2; `referred` adds a note to the application |
+| `set_provider_key` | `provider` (`hunter`\|`github`), `api_key?` (null removes) | `{provider, ok}` | checked with the provider, then stored in the Keychain only |
+
 ## 6. Events (daemon → app)
 
 | type | payload | when |
@@ -148,9 +179,12 @@ An `error` without `reply_to` is an unsolicited daemon problem (login expired, C
 | `question_opened` | `cluster`: `QuestionCluster` | new inbox cluster **or** an existing cluster grew (same `cluster_id`, replace it) |
 | `question_resolved` | `cluster_id`, `status` (`answered`\|`skipped`), `answer_id?`, `resumed_application_ids` | cluster closed |
 | `agent_step` | `application_id`, `job_id`, `run_id?`, `index` (0-based), `total?`, `action`, `detail?`, `confidence?` (0–1), `screenshot_thumb?` (base64 JPEG ≤ 720 px wide), `at` | each agent step; a frame every ~2 s while filling |
-| `cap_reached` | `cap` (`daily`\|`company_cooldown`\|`linkedin_budget`\|`glassdoor_budget`), `used`, `limit`, `resets_at?`, `company_id?` | a guardrail cap blocked work |
+| `cap_reached` | `cap` (`daily`\|`company_cooldown`\|`linkedin_budget`\|`glassdoor_budget`\|`google_budget`\|`outreach_daily`), `used`, `limit`, `resets_at?`, `company_id?` | a guardrail cap blocked work (`outreach_daily`: emails moved to the next day) |
 | `source_status` | `source`: `SourceStatus` `{source, enabled, connected, checked_at?, detail?}` | login detection / session health |
 | `nudge_due` | `application_id`, `job_id`, `day`, `company`, `title` | day-7 / day-14 "Heard back?" |
+| `outreach_state` | `thread_id`, `message_id?`, `entity` (`message`\|`thread`), `from_state?`, `to_state`, `reason?`, `at` | a cold-email message or thread changed state (states per §7.1); re-read the tables |
+| `outreach_reply` | `thread_id`, `message_id?`, `contact_name`, `company`, `label` (`positive`\|`referred`\|`not_interested`\|`opt_out`\|`question`\|`other`\|`ooo`\|`bounce`), `snippet`, `application_id?`, `suggested_status?` (`interview`\|`rejected`) | someone replied (Needs You ▸ Replies); a board move is only suggested |
+| `scout_finished` | `company_id`, `purpose`, `application_id?`, `found`, `with_email`, `best_confidence?`, `queued_google`, `thread_id?` | a scout's HTTP phase ended (`thread_id`: the automatic draft) |
 | `log` | `level` (`debug`\|`info`\|`warning`\|`error`), `message`, `logger?`, `job_id?`, `application_id?`, `at` | human-readable daemon log line |
 
 ### 6.1 Snapshot
@@ -169,9 +203,10 @@ An `error` without `reply_to` is an unsolicited daemon problem (login expired, C
   "last_run": null,
   "counts": { "queued": 12, "needs_you_clusters": 1, "needs_you_jobs": 2, "awaiting_review": 0, "easy_apply_open": 0,
               "unknown_verify": 0, "failed": 0, "submitted_today": 9, "discovered_today": 41, "submitted_total": 98,
-              "suggestions_pending": 2 },
+              "suggestions_pending": 2, "outreach_drafts": 3, "outreach_replies_unread": 1, "outreach_unknown": 0 },
   "caps": { "daily_used": 9, "daily_limit": 15, "companies_cooling_down": 2, "linkedin_sessions_used": 1,
-            "linkedin_sessions_limit": 3, "glassdoor_sessions_used": 0, "glassdoor_sessions_limit": 3 },
+            "linkedin_sessions_limit": 3, "glassdoor_sessions_used": 0, "glassdoor_sessions_limit": 3,
+            "outreach_sent_today": 2, "outreach_daily_limit": 5, "people_finder_used": 1, "people_finder_limit": 6 },
   "open_clusters": [ /* QuestionCluster, sorted by job_count desc */ ],
   "sources": [ /* SourceStatus */ ],
   "onboarding": { "completed": true, "step": 7 },
@@ -199,6 +234,18 @@ company finder's Google searches for public ATS boards) live in the `company_sug
 (schema v6), read by the app directly. `status`: `pending` (shown with Add / Dismiss), `auto` (a
 verified ATS board the agent watched by itself; Dismiss unwatches it), `accepted`, `dismissed`.
 `counts.suggestions_pending` in the snapshot is the badge count.
+
+### 6.2.2 Cold outreach tables (schema v10, read by the app through GRDB)
+
+`contacts`, `contact_evidence`, `domain_patterns`, `outreach_threads`, `outreach_messages`,
+`suppression`, `referrals`, `prospects` (columns in `schema.sql`). Notes for readers:
+
+- `outreach_messages.body` is the user-editable text; `footer` is stored apart and always appended
+  when sending (what was sent = `body` + blank line + `footer`). `direction = 'in'` rows are replies,
+  auto-replies (`classification = 'ooo'`) and bounces (`'bounce'`).
+- Email confidence tiers: Verified ≥ 90, Likely 70–89, Guess 40–69, Unknown < 40.
+- `meta.mail_account.send_enabled` (bool) says whether sending is on.
+- Open in Gmail: `https://mail.google.com/mail/u/0/#search/rfc822msgid%3A<message_id_header without <>>`.
 
 ### 6.3 Enumerations (identical to `schema.sql` CHECK constraints)
 
@@ -279,3 +326,33 @@ Special path (not an edge): `mark_easy_apply_done` records a **manual** applicat
 **Board statuses** (manual, only when `state = submitted`): `applied` (set automatically on
 submit), `assessment`, `interview`, `offer`, `rejected`, `ghosted` (auto after
 `ghost_after_days` = 21 with no change). The user may move between any of them (`set_status`).
+An application whose outreach thread got a reply is never auto-ghosted.
+
+### 7.1 Cold-email message and thread states
+
+Enforced by `db.transition_outreach` (`models.MESSAGE_TRANSITIONS`); each change writes an `events`
+row (kind `outreach`) and is broadcast as `outreach_state`.
+
+| message state | next states | meaning |
+|---|---|---|
+| draft | approved, cancelled | written (fact-checked); waiting for the user |
+| approved | scheduled, draft, cancelled | `approve_outreach` (user only) |
+| scheduled | sending, draft, cancelled | has `send_at` inside the send window; `cancel_outreach` → draft |
+| sending | sent, failed, unknown | committed (`synchronous=FULL`) **before** the SMTP conversation, after a final check of pause, window, caps, do-not-contact and the thread |
+| unknown | sent, failed | crash / timeout during DATA. **Never resent automatically**: the Sent Mail check or `resolve_outreach_unknown` |
+| failed | draft, cancelled | refused before DATA: definitely not sent |
+| sent, cancelled, received | — | terminal (`received` = inbound) |
+
+Thread states: `draft` (nothing sent) → `active` (sent, waiting) → `replied` \| `bounced` \| `opted_out` \|
+`closed` (by the user); `cancelled` = discarded before sending. A reply, bounce, opt-out, the
+application moving to `rejected` / `offer`, or the address going on the do-not-contact list cancels
+pending follow-ups. At most `outreach_max_followups` (default 1) follow-up per thread, drafted after
+`outreach_followup_days` business days; it is scheduled without asking only if the first batch was
+approved with `include_followups`.
+
+### 7.2 Referral states
+
+`suggested → to_connect → requested → connected → asked → referred | declined | no_response`, plus
+`dismissed` (`models.REFERRAL_TRANSITIONS`). The user performs every LinkedIn step in their own
+browser; AutoApply only moves `requested → connected` when LinkedIn's "accepted your invitation"
+email arrives, and `requested → no_response` after 14 days.

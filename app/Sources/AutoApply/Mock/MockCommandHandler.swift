@@ -455,6 +455,45 @@ enum MockCommandHandler {
                 return Handled(reply: ack(["run_id": .string("mockrun-prep")])) { world in await MockScripts.miniRun(world, kind: .prep) }
             }
             return Handled(reply: ack(["run_id": .null]))
+
+        // Cold outreach (protocol.md §5.1): minimal canned replies; the mock world keeps no outreach state.
+        case .scoutContacts(let p):
+            return Handled(reply: ack(["company_id": .int(p.companyId ?? 1), "queued_google": .bool(true)]))
+        case .addContact:
+            return Handled(reply: ack(["contact_id": .int(1), "merged": .bool(false)]))
+        case .updateContact, .deleteContact, .discardOutreach, .resolveOutreachUnknown, .markReplyRead, .setThreadOutcome,
+             .suppress, .unsuppress, .updateProspect, .updateReferral:
+            return Handled(reply: ack())
+        case .importContacts:
+            return Handled(reply: ack(["added": .int(0), "merged": .int(0), "skipped": .int(0)]))
+        case .draftOutreach:
+            return Handled(reply: ack(["thread_id": .int(1), "message_id": .int(1), "grounded": .bool(true),
+                                       "unsupported_claims": .array([])]))
+        case .editOutreachDraft:
+            return Handled(reply: ack(["grounded": .bool(true), "unsupported_claims": .array([])]))
+        case .approveOutreach(let p):
+            let at = ISO8601DateFormatter().string(from: Date().addingTimeInterval(600))
+            return Handled(reply: ack(["batch_uid": .string("mockbatch"),
+                                       "scheduled": .array(p.messageIds.map { .object(["message_id": .int($0), "send_at": .string(at)]) }),
+                                       "days": .array([])]))
+        case .cancelOutreach(let p):
+            return Handled(reply: ack(["cancelled": .int(p.messageIds.count)]))
+        case .enableSending(let p):
+            return Handled(reply: ack(["send_enabled": .bool(p.enabled), "test_sent_to": p.enabled ? .string("jane@gmail.com") : .null]))
+        case .searchProspects:
+            return Handled(reply: ack(["search_id": .string("mocksearch")]))
+        case .addProspect:
+            return Handled(reply: ack(["prospect_id": .int(1), "company_id": .int(1)]))
+        case .suggestReferrers:
+            return Handled(reply: ack(["queued_google": .bool(true)]))
+        case .addReferral:
+            return Handled(reply: ack(["referral_id": .int(1), "created": .bool(true)]))
+        case .draftReferral:
+            return Handled(reply: ack(["connect_note": .string("Hi! We both studied at IIT Madras; I'd love to connect."),
+                                       "referral_dm": .string("Hi, would you be open to referring me for the Backend Engineer role?"),
+                                       "grounded": .bool(true), "unsupported_claims": .array([])]))
+        case .setProviderKey(let p):
+            return Handled(reply: ack(["provider": .string(p.provider.rawValue), "ok": .bool(p.apiKey != nil)]))
         }
     }
 

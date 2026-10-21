@@ -88,6 +88,26 @@ class Preferences(BaseModel):
                     "using the connected mailbox for verification emails. Passwords live in the macOS Keychain.",
     )
     sources_enabled: dict[str, bool] = Field(default_factory=_default_sources)
+    # ---- cold outreach (v10) ------------------------------------------------------------
+    outreach_auto_scout: bool = Field(
+        default=True, description="Look for people to email at a company after each submitted application (30-day cache per company).",
+    )
+    outreach_auto_draft: bool = Field(
+        default=True, description="Draft an email for the best contact after a scout. Drafts are never sent without approval.",
+    )
+    outreach_daily_cap: int = Field(default=10, ge=0, le=40, description="New email threads per day (follow-ups count toward 2x this).")
+    outreach_followup_days: int = Field(default=5, ge=1, le=30, description="Business days without a reply before the one follow-up.")
+    outreach_max_followups: int = Field(default=1, ge=0, le=2)
+    outreach_send_window: list[str] = Field(
+        default_factory=lambda: ["09:30", "17:30"], description="Local [start, end] HH:MM; emails are only sent inside it.",
+    )
+    outreach_weekdays_only: bool = True
+    outreach_min_email_confidence: int = Field(
+        default=60, ge=0, le=100, description="Emails below this confidence need 'Send anyway' per contact.",
+    )
+    people_finder_visits_per_day: int = Field(
+        default=6, ge=0, le=30, description="Google result pages read per day to find people (never LinkedIn itself).",
+    )
     career_page_urls: list[str] = Field(default_factory=list)
     always_ask_patterns: list[str] = Field(
         default_factory=list, description="Regexes; matching form questions always go to the inbox."
@@ -100,6 +120,15 @@ class Preferences(BaseModel):
             if not _HHMM.match(t):
                 raise ValueError(f"schedule entries must be HH:MM (24h), got {t!r}")
         return sorted(set(v))
+
+    @field_validator("outreach_send_window")
+    @classmethod
+    def _validate_window(cls, v: list[str]) -> list[str]:
+        if len(v) != 2 or not all(_HHMM.match(t) for t in v):
+            raise ValueError("outreach_send_window must be [start, end] as HH:MM (24h)")
+        if v[0] >= v[1]:
+            raise ValueError("outreach_send_window must start before it ends")
+        return v
 
     @field_validator("nudge_days")
     @classmethod

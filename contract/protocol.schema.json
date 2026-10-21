@@ -53,7 +53,31 @@
     "reveal_site_account_password",
     "delete_site_account",
     "onboarding_set_step",
-    "onboarding_complete"
+    "onboarding_complete",
+    "scout_contacts",
+    "add_contact",
+    "update_contact",
+    "delete_contact",
+    "import_contacts",
+    "draft_outreach",
+    "edit_outreach_draft",
+    "approve_outreach",
+    "cancel_outreach",
+    "discard_outreach",
+    "resolve_outreach_unknown",
+    "mark_reply_read",
+    "set_thread_outcome",
+    "suppress",
+    "unsuppress",
+    "enable_sending",
+    "search_prospects",
+    "add_prospect",
+    "update_prospect",
+    "suggest_referrers",
+    "add_referral",
+    "draft_referral",
+    "update_referral",
+    "set_provider_key"
   ],
   "x-event-types": [
     "ack",
@@ -72,6 +96,9 @@
     "cap_reached",
     "source_status",
     "nudge_due",
+    "outreach_state",
+    "outreach_reply",
+    "scout_finished",
     "log"
   ],
   "x-state-machine": {
@@ -249,6 +276,112 @@
       "title": "Actor",
       "type": "string"
     },
+    "AddContactPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "company_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Company Id"
+        },
+        "company_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Used (find or create) when company_id is not given.",
+          "title": "Company Name"
+        },
+        "full_name": {
+          "minLength": 1,
+          "title": "Full Name",
+          "type": "string"
+        },
+        "email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Email"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "linkedin_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Stored as a reference only; never opened by AutoApply.",
+          "title": "Linkedin Url"
+        },
+        "relationship": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Relationship"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "share_ok": {
+          "default": false,
+          "description": "Allowed into the shared library later (off for manual contacts).",
+          "title": "Share Ok",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "full_name"
+      ],
+      "title": "AddContactPayload",
+      "type": "object"
+    },
     "AddJobUrlPayload": {
       "additionalProperties": false,
       "description": "Add a job from any apply link (manual source) and queue it as a user choice.",
@@ -295,6 +428,135 @@
         "url"
       ],
       "title": "AddJobUrlPayload",
+      "type": "object"
+    },
+    "AddProspectPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "company_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Company Name"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Company website (or careers page).",
+          "title": "Url"
+        }
+      },
+      "title": "AddProspectPayload",
+      "type": "object"
+    },
+    "AddReferralPayload": {
+      "additionalProperties": false,
+      "description": "'Could refer me': a contact (or a typed person) as a would-be referrer.",
+      "properties": {
+        "company_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Defaults to the contact's company.",
+          "title": "Company Id"
+        },
+        "job_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Job Id"
+        },
+        "contact_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contact Id"
+        },
+        "person_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Person Name"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "linkedin_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Linkedin Url"
+        },
+        "basis": {
+          "$ref": "#/$defs/ReferralBasis",
+          "default": "user"
+        },
+        "basis_detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Basis Detail"
+        }
+      },
+      "title": "AddReferralPayload",
       "type": "object"
     },
     "AddResumeVariantPayload": {
@@ -607,6 +869,39 @@
       "title": "ApplyAnywayPayload",
       "type": "object"
     },
+    "ApproveOutreachPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "message_ids": {
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Message Ids",
+          "type": "array"
+        },
+        "include_followups": {
+          "default": false,
+          "description": "Also send the one follow-up without asking again.",
+          "title": "Include Followups",
+          "type": "boolean"
+        },
+        "send_anyway": {
+          "description": "Message ids the user OK'd although the address is below the confidence bar.",
+          "items": {
+            "type": "integer"
+          },
+          "title": "Send Anyway",
+          "type": "array",
+          "default": []
+        }
+      },
+      "required": [
+        "message_ids"
+      ],
+      "title": "ApproveOutreachPayload",
+      "type": "object"
+    },
     "ApprovePayload": {
       "additionalProperties": false,
       "properties": {
@@ -659,13 +954,32 @@
       "title": "BoardStatus",
       "type": "string"
     },
+    "CancelOutreachPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "message_ids": {
+          "items": {
+            "type": "integer"
+          },
+          "minItems": 1,
+          "title": "Message Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "message_ids"
+      ],
+      "title": "CancelOutreachPayload",
+      "type": "object"
+    },
     "CapKind": {
       "enum": [
         "daily",
         "company_cooldown",
         "linkedin_budget",
         "glassdoor_budget",
-        "google_budget"
+        "google_budget",
+        "outreach_daily"
       ],
       "title": "CapKind",
       "type": "string"
@@ -754,6 +1068,28 @@
         "glassdoor_sessions_limit": {
           "default": 0,
           "title": "Glassdoor Sessions Limit",
+          "type": "integer"
+        },
+        "outreach_sent_today": {
+          "default": 0,
+          "description": "New outreach threads started today.",
+          "title": "Outreach Sent Today",
+          "type": "integer"
+        },
+        "outreach_daily_limit": {
+          "default": 0,
+          "description": "Today's limit for new threads (the cap, lower during the first-week ramp).",
+          "title": "Outreach Daily Limit",
+          "type": "integer"
+        },
+        "people_finder_used": {
+          "default": 0,
+          "title": "People Finder Used",
+          "type": "integer"
+        },
+        "people_finder_limit": {
+          "default": 0,
+          "title": "People Finder Limit",
           "type": "integer"
         }
       },
@@ -849,6 +1185,24 @@
           "description": "Company suggestions waiting for Add / Dismiss (Settings > Sources badge).",
           "title": "Suggestions Pending",
           "type": "integer"
+        },
+        "outreach_drafts": {
+          "default": 0,
+          "description": "Cold email drafts waiting for review (Cold Email badge).",
+          "title": "Outreach Drafts",
+          "type": "integer"
+        },
+        "outreach_replies_unread": {
+          "default": 0,
+          "description": "Outreach threads with a reply the user has not opened (Needs You > Replies).",
+          "title": "Outreach Replies Unread",
+          "type": "integer"
+        },
+        "outreach_unknown": {
+          "default": 0,
+          "description": "Emails that may or may not have gone out (Needs You > Possibly sent).",
+          "title": "Outreach Unknown",
+          "type": "integer"
         }
       },
       "title": "Counts",
@@ -877,6 +1231,26 @@
         "answer_id"
       ],
       "title": "DeleteAnswerPayload",
+      "type": "object"
+    },
+    "DeleteContactPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "suppress": {
+          "default": true,
+          "description": "Also put the address on the do-not-contact list.",
+          "title": "Suppress",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "DeleteContactPayload",
       "type": "object"
     },
     "DeleteSiteAccountPayload": {
@@ -908,6 +1282,20 @@
       "title": "DeleteStoryPayload",
       "type": "object"
     },
+    "DiscardOutreachPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "title": "DiscardOutreachPayload",
+      "type": "object"
+    },
     "DismissCompanySuggestionPayload": {
       "additionalProperties": false,
       "properties": {
@@ -936,6 +1324,76 @@
       "title": "DismissEasyApplyPayload",
       "type": "object"
     },
+    "DraftOutreachPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "contact_id": {
+          "title": "Contact Id",
+          "type": "integer"
+        },
+        "kind": {
+          "$ref": "#/$defs/OutreachKind",
+          "default": "application"
+        },
+        "application_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Required for kind 'application'.",
+          "title": "Application Id"
+        },
+        "instructions": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Extra guidance for the drafter (tone, what to stress).",
+          "title": "Instructions"
+        }
+      },
+      "required": [
+        "contact_id"
+      ],
+      "title": "DraftOutreachPayload",
+      "type": "object"
+    },
+    "DraftReferralPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "instructions": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Instructions"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "DraftReferralPayload",
+      "type": "object"
+    },
     "EditApplicationAnswerPayload": {
       "additionalProperties": false,
       "properties": {
@@ -953,6 +1411,45 @@
         "answer"
       ],
       "title": "EditApplicationAnswerPayload",
+      "type": "object"
+    },
+    "EditOutreachDraftPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "message_id": {
+          "title": "Message Id",
+          "type": "integer"
+        },
+        "subject": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Subject"
+        },
+        "body": {
+          "description": "The user's text (the footer is added separately and cannot be removed).",
+          "minLength": 1,
+          "title": "Body",
+          "type": "string"
+        },
+        "confirm_claims": {
+          "default": false,
+          "description": "'These are true': approve despite unsupported claims.",
+          "title": "Confirm Claims",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "message_id",
+        "body"
+      ],
+      "title": "EditOutreachDraftPayload",
       "type": "object"
     },
     "EducationItem": {
@@ -1015,6 +1512,21 @@
         "school"
       ],
       "title": "EducationItem",
+      "type": "object"
+    },
+    "EnableSendingPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "true sends a test email to your own address first; sending stays off if it fails.",
+          "title": "Enabled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "enabled"
+      ],
+      "title": "EnableSendingPayload",
       "type": "object"
     },
     "ErrorCode": {
@@ -1215,6 +1727,21 @@
         }
       },
       "title": "HelloPayload",
+      "type": "object"
+    },
+    "ImportContactsPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "file_path": {
+          "description": "CSV with columns name,email,company,title,linkedin_url,notes (header row).",
+          "title": "File Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_path"
+      ],
+      "title": "ImportContactsPayload",
       "type": "object"
     },
     "JobDiscoveredPayload": {
@@ -1588,6 +2115,20 @@
         "job_id"
       ],
       "title": "MarkEasyApplyOpenedPayload",
+      "type": "object"
+    },
+    "MarkReplyReadPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "title": "MarkReplyReadPayload",
       "type": "object"
     },
     "Mode": {
@@ -2096,6 +2637,158 @@
       "title": "OpenAgentChromePayload",
       "type": "object"
     },
+    "OutreachKind": {
+      "description": "``outreach_threads.kind``: why the thread exists.",
+      "enum": [
+        "application",
+        "prospect",
+        "referral_email"
+      ],
+      "title": "OutreachKind",
+      "type": "string"
+    },
+    "OutreachReplyPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "integer"
+        },
+        "message_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Message Id"
+        },
+        "contact_name": {
+          "title": "Contact Name",
+          "type": "string"
+        },
+        "company": {
+          "title": "Company",
+          "type": "string"
+        },
+        "label": {
+          "$ref": "#/$defs/ReplyLabel"
+        },
+        "snippet": {
+          "default": "",
+          "title": "Snippet",
+          "type": "string"
+        },
+        "application_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Application Id"
+        },
+        "suggested_status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BoardStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A board move the reply suggests (never applied by itself)."
+        }
+      },
+      "required": [
+        "thread_id",
+        "contact_name",
+        "company",
+        "label"
+      ],
+      "title": "OutreachReplyPayload",
+      "type": "object"
+    },
+    "OutreachStatePayload": {
+      "additionalProperties": false,
+      "description": "A cold-email thread or message changed state (the app re-reads the tables).",
+      "properties": {
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "integer"
+        },
+        "message_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Set when a message changed; else the thread did.",
+          "title": "Message Id"
+        },
+        "entity": {
+          "default": "message",
+          "enum": [
+            "message",
+            "thread"
+          ],
+          "title": "Entity",
+          "type": "string"
+        },
+        "from_state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "MessageState or ThreadState value (see entity).",
+          "title": "From State"
+        },
+        "to_state": {
+          "title": "To State",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "at": {
+          "format": "date-time",
+          "title": "At",
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "to_state",
+        "at"
+      ],
+      "title": "OutreachStatePayload",
+      "type": "object"
+    },
     "ParseResumeResult": {
       "additionalProperties": false,
       "description": "``ack.result`` for ``onboarding_parse_resume``.",
@@ -2404,6 +3097,74 @@
             "glassdoor": false,
             "google": true
           }
+        },
+        "outreach_auto_scout": {
+          "default": true,
+          "description": "Look for people to email at a company after each submitted application (30-day cache per company).",
+          "title": "Outreach Auto Scout",
+          "type": "boolean"
+        },
+        "outreach_auto_draft": {
+          "default": true,
+          "description": "Draft an email for the best contact after a scout. Drafts are never sent without approval.",
+          "title": "Outreach Auto Draft",
+          "type": "boolean"
+        },
+        "outreach_daily_cap": {
+          "default": 10,
+          "description": "New email threads per day (follow-ups count toward 2x this).",
+          "maximum": 40,
+          "minimum": 0,
+          "title": "Outreach Daily Cap",
+          "type": "integer"
+        },
+        "outreach_followup_days": {
+          "default": 5,
+          "description": "Business days without a reply before the one follow-up.",
+          "maximum": 30,
+          "minimum": 1,
+          "title": "Outreach Followup Days",
+          "type": "integer"
+        },
+        "outreach_max_followups": {
+          "default": 1,
+          "maximum": 2,
+          "minimum": 0,
+          "title": "Outreach Max Followups",
+          "type": "integer"
+        },
+        "outreach_send_window": {
+          "description": "Local [start, end] HH:MM; emails are only sent inside it.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Outreach Send Window",
+          "type": "array",
+          "default": [
+            "09:30",
+            "17:30"
+          ]
+        },
+        "outreach_weekdays_only": {
+          "default": true,
+          "title": "Outreach Weekdays Only",
+          "type": "boolean"
+        },
+        "outreach_min_email_confidence": {
+          "default": 60,
+          "description": "Emails below this confidence need 'Send anyway' per contact.",
+          "maximum": 100,
+          "minimum": 0,
+          "title": "Outreach Min Email Confidence",
+          "type": "integer"
+        },
+        "people_finder_visits_per_day": {
+          "default": 6,
+          "description": "Google result pages read per day to find people (never LinkedIn itself).",
+          "maximum": 30,
+          "minimum": 0,
+          "title": "People Finder Visits Per Day",
+          "type": "integer"
         },
         "career_page_urls": {
           "items": {
@@ -2812,6 +3573,124 @@
           ],
           "default": null,
           "title": "Sources Enabled"
+        },
+        "outreach_auto_scout": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Look for people to email at a company after each submitted application (30-day cache per company).",
+          "title": "Outreach Auto Scout"
+        },
+        "outreach_auto_draft": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Draft an email for the best contact after a scout. Drafts are never sent without approval.",
+          "title": "Outreach Auto Draft"
+        },
+        "outreach_daily_cap": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "New email threads per day (follow-ups count toward 2x this).",
+          "title": "Outreach Daily Cap"
+        },
+        "outreach_followup_days": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Business days without a reply before the one follow-up.",
+          "title": "Outreach Followup Days"
+        },
+        "outreach_max_followups": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outreach Max Followups"
+        },
+        "outreach_send_window": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Local [start, end] HH:MM; emails are only sent inside it.",
+          "title": "Outreach Send Window"
+        },
+        "outreach_weekdays_only": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Outreach Weekdays Only"
+        },
+        "outreach_min_email_confidence": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Emails below this confidence need 'Send anyway' per contact.",
+          "title": "Outreach Min Email Confidence"
+        },
+        "people_finder_visits_per_day": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Google result pages read per day to find people (never LinkedIn itself).",
+          "title": "People Finder Visits Per Day"
         },
         "career_page_urls": {
           "anyOf": [
@@ -3235,6 +4114,16 @@
       "title": "Progress",
       "type": "object"
     },
+    "ProspectStatus": {
+      "enum": [
+        "suggested",
+        "shortlisted",
+        "contacted",
+        "dismissed"
+      ],
+      "title": "ProspectStatus",
+      "type": "string"
+    },
     "QuestionCluster": {
       "additionalProperties": false,
       "description": "A Needs-You inbox cluster: semantically equivalent questions answered once.",
@@ -3474,6 +4363,33 @@
       "title": "QueueApplicationPayload",
       "type": "object"
     },
+    "ReferralBasis": {
+      "enum": [
+        "alumni",
+        "ex_colleague",
+        "same_function",
+        "user",
+        "other"
+      ],
+      "title": "ReferralBasis",
+      "type": "string"
+    },
+    "ReferralState": {
+      "description": "Referral copilot (the user does every LinkedIn step; transitions: ``models.REFERRAL_TRANSITIONS``).",
+      "enum": [
+        "suggested",
+        "to_connect",
+        "requested",
+        "connected",
+        "asked",
+        "referred",
+        "declined",
+        "no_response",
+        "dismissed"
+      ],
+      "title": "ReferralState",
+      "type": "string"
+    },
     "RejectPayload": {
       "additionalProperties": false,
       "properties": {
@@ -3493,6 +4409,17 @@
       "title": "RejectPayload",
       "type": "object"
     },
+    "Relationship": {
+      "enum": [
+        "friend",
+        "ex_colleague",
+        "alumni",
+        "met",
+        "other"
+      ],
+      "title": "Relationship",
+      "type": "string"
+    },
     "RemotePolicy": {
       "enum": [
         "remote",
@@ -3500,6 +4427,21 @@
         "onsite"
       ],
       "title": "RemotePolicy",
+      "type": "string"
+    },
+    "ReplyLabel": {
+      "description": "Classification of an inbound message (``outreach_messages.classification``).",
+      "enum": [
+        "positive",
+        "referred",
+        "not_interested",
+        "opt_out",
+        "question",
+        "other",
+        "ooo",
+        "bounce"
+      ],
+      "title": "ReplyLabel",
       "type": "string"
     },
     "ResetSourceCapPayload": {
@@ -3518,6 +4460,26 @@
         "source"
       ],
       "title": "ResetSourceCapPayload",
+      "type": "object"
+    },
+    "ResolveOutreachUnknownPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "message_id": {
+          "title": "Message Id",
+          "type": "integer"
+        },
+        "sent": {
+          "description": "The user checked Sent Mail: true = it went out.",
+          "title": "Sent",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "message_id",
+        "sent"
+      ],
+      "title": "ResolveOutreachUnknownPayload",
       "type": "object"
     },
     "ResolveUnknownPayload": {
@@ -3765,6 +4727,152 @@
       "title": "RunTrigger",
       "type": "string"
     },
+    "ScoutContactsPayload": {
+      "additionalProperties": false,
+      "description": "Find people to email at a company (HTTP sources now; Google results when the browser is free).",
+      "properties": {
+        "company_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Company to scout (or give application_id).",
+          "title": "Company Id"
+        },
+        "application_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Scout the company of this application.",
+          "title": "Application Id"
+        },
+        "purpose": {
+          "$ref": "#/$defs/ScoutPurpose",
+          "default": "application"
+        }
+      },
+      "title": "ScoutContactsPayload",
+      "type": "object"
+    },
+    "ScoutFinishedPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "company_id": {
+          "title": "Company Id",
+          "type": "integer"
+        },
+        "purpose": {
+          "$ref": "#/$defs/ScoutPurpose",
+          "default": "application"
+        },
+        "application_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Application Id"
+        },
+        "found": {
+          "default": 0,
+          "title": "Found",
+          "type": "integer"
+        },
+        "with_email": {
+          "default": 0,
+          "title": "With Email",
+          "type": "integer"
+        },
+        "best_confidence": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Best Confidence"
+        },
+        "queued_google": {
+          "default": false,
+          "description": "Google results are still to be read when the browser is free.",
+          "title": "Queued Google",
+          "type": "boolean"
+        },
+        "thread_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Draft written automatically for the best contact, if any.",
+          "title": "Thread Id"
+        }
+      },
+      "required": [
+        "company_id"
+      ],
+      "title": "ScoutFinishedPayload",
+      "type": "object"
+    },
+    "ScoutPurpose": {
+      "enum": [
+        "application",
+        "prospect",
+        "referral"
+      ],
+      "title": "ScoutPurpose",
+      "type": "string"
+    },
+    "SearchProspectsPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "query": {
+          "description": "e.g. 'Series B fintech in Bangalore'.",
+          "minLength": 1,
+          "title": "Query",
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Location"
+        }
+      },
+      "required": [
+        "query"
+      ],
+      "title": "SearchProspectsPayload",
+      "type": "object"
+    },
     "Seniority": {
       "enum": [
         "junior",
@@ -3843,6 +4951,37 @@
       "title": "SetMailAccountPayload",
       "type": "object"
     },
+    "SetProviderKeyPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "provider": {
+          "enum": [
+            "hunter",
+            "github"
+          ],
+          "title": "Provider",
+          "type": "string"
+        },
+        "api_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "null removes the key. Stored in the macOS Keychain only.",
+          "title": "Api Key"
+        }
+      },
+      "required": [
+        "provider"
+      ],
+      "title": "SetProviderKeyPayload",
+      "type": "object"
+    },
     "SetStatusPayload": {
       "additionalProperties": false,
       "properties": {
@@ -3859,6 +4998,36 @@
         "status"
       ],
       "title": "SetStatusPayload",
+      "type": "object"
+    },
+    "SetThreadOutcomePayload": {
+      "additionalProperties": false,
+      "properties": {
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "integer"
+        },
+        "outcome": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ThreadOutcome"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "close": {
+          "default": false,
+          "title": "Close",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "thread_id"
+      ],
+      "title": "SetThreadOutcomePayload",
       "type": "object"
     },
     "SkipQuestionPayload": {
@@ -3955,7 +5124,10 @@
             "submitted_today": 0,
             "discovered_today": 0,
             "submitted_total": 0,
-            "suggestions_pending": 0
+            "suggestions_pending": 0,
+            "outreach_drafts": 0,
+            "outreach_replies_unread": 0,
+            "outreach_unknown": 0
           }
         },
         "caps": {
@@ -3967,7 +5139,11 @@
             "linkedin_sessions_used": 0,
             "linkedin_sessions_limit": 0,
             "glassdoor_sessions_used": 0,
-            "glassdoor_sessions_limit": 0
+            "glassdoor_sessions_limit": 0,
+            "outreach_sent_today": 0,
+            "outreach_daily_limit": 0,
+            "people_finder_used": 0,
+            "people_finder_limit": 0
           }
         },
         "open_clusters": {
@@ -4165,6 +5341,32 @@
       "title": "SuggestPreferencesPayload",
       "type": "object"
     },
+    "SuggestReferrersPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "company_id": {
+          "title": "Company Id",
+          "type": "integer"
+        },
+        "job_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Job Id"
+        }
+      },
+      "required": [
+        "company_id"
+      ],
+      "title": "SuggestReferrersPayload",
+      "type": "object"
+    },
     "SuggestedPreferences": {
       "additionalProperties": false,
       "description": "Job-search preferences suggested from the resume; the app pre-fills, the user saves.",
@@ -4209,6 +5411,52 @@
       },
       "title": "SuggestedPreferences",
       "type": "object"
+    },
+    "SuppressPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Email"
+        },
+        "domain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain"
+        },
+        "reason": {
+          "$ref": "#/$defs/SuppressionReason",
+          "default": "user"
+        }
+      },
+      "title": "SuppressPayload",
+      "type": "object"
+    },
+    "SuppressionReason": {
+      "enum": [
+        "opt_out",
+        "hard_bounce",
+        "user",
+        "shared_removal",
+        "complaint"
+      ],
+      "title": "SuppressionReason",
+      "type": "string"
     },
     "SystemCheckItem": {
       "additionalProperties": false,
@@ -4300,6 +5548,48 @@
       "title": "SystemCheckResult",
       "type": "object"
     },
+    "ThreadOutcome": {
+      "enum": [
+        "positive",
+        "referred",
+        "not_interested",
+        "question",
+        "other"
+      ],
+      "title": "ThreadOutcome",
+      "type": "string"
+    },
+    "UnsuppressPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Email"
+        },
+        "domain": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Domain"
+        }
+      },
+      "title": "UnsuppressPayload",
+      "type": "object"
+    },
     "UpdateAnswerPayload": {
       "additionalProperties": false,
       "properties": {
@@ -4329,6 +5619,117 @@
         "answer"
       ],
       "title": "UpdateAnswerPayload",
+      "type": "object"
+    },
+    "UpdateContactPayload": {
+      "additionalProperties": false,
+      "description": "Only the keys present are applied; null clears an optional field.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "company_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Company Id"
+        },
+        "full_name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Full Name"
+        },
+        "email": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "A typed email becomes status 'user' (confidence 100).",
+          "title": "Email"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "linkedin_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Linkedin Url"
+        },
+        "relationship": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Relationship"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "notes": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notes"
+        },
+        "share_ok": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Share Ok"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "UpdateContactPayload",
       "type": "object"
     },
     "UpdateJobNotesPayload": {
@@ -4395,6 +5796,87 @@
         "profile"
       ],
       "title": "UpdateProfilePayload",
+      "type": "object"
+    },
+    "UpdateProspectPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ProspectStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "'shortlisted' starts a scout; 'dismissed' never suggests it again."
+        },
+        "watch": {
+          "default": false,
+          "description": "Also add the company to the job watchlist.",
+          "title": "Watch",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "UpdateProspectPayload",
+      "type": "object"
+    },
+    "UpdateReferralPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReferralState"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "connect_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Connect Note"
+        },
+        "referral_dm": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Referral Dm"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "UpdateReferralPayload",
       "type": "object"
     },
     "UpdateResumeVariantPayload": {
@@ -5854,6 +7336,630 @@
       ],
       "additionalProperties": false
     },
+    "CommandScoutContacts": {
+      "type": "object",
+      "title": "Command: scout_contacts",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "scout_contacts"
+        },
+        "payload": {
+          "$ref": "#/$defs/ScoutContactsPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandAddContact": {
+      "type": "object",
+      "title": "Command: add_contact",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "add_contact"
+        },
+        "payload": {
+          "$ref": "#/$defs/AddContactPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandUpdateContact": {
+      "type": "object",
+      "title": "Command: update_contact",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "update_contact"
+        },
+        "payload": {
+          "$ref": "#/$defs/UpdateContactPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandDeleteContact": {
+      "type": "object",
+      "title": "Command: delete_contact",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "delete_contact"
+        },
+        "payload": {
+          "$ref": "#/$defs/DeleteContactPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandImportContacts": {
+      "type": "object",
+      "title": "Command: import_contacts",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "import_contacts"
+        },
+        "payload": {
+          "$ref": "#/$defs/ImportContactsPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandDraftOutreach": {
+      "type": "object",
+      "title": "Command: draft_outreach",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "draft_outreach"
+        },
+        "payload": {
+          "$ref": "#/$defs/DraftOutreachPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandEditOutreachDraft": {
+      "type": "object",
+      "title": "Command: edit_outreach_draft",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "edit_outreach_draft"
+        },
+        "payload": {
+          "$ref": "#/$defs/EditOutreachDraftPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandApproveOutreach": {
+      "type": "object",
+      "title": "Command: approve_outreach",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "approve_outreach"
+        },
+        "payload": {
+          "$ref": "#/$defs/ApproveOutreachPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandCancelOutreach": {
+      "type": "object",
+      "title": "Command: cancel_outreach",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "cancel_outreach"
+        },
+        "payload": {
+          "$ref": "#/$defs/CancelOutreachPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandDiscardOutreach": {
+      "type": "object",
+      "title": "Command: discard_outreach",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "discard_outreach"
+        },
+        "payload": {
+          "$ref": "#/$defs/DiscardOutreachPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandResolveOutreachUnknown": {
+      "type": "object",
+      "title": "Command: resolve_outreach_unknown",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "resolve_outreach_unknown"
+        },
+        "payload": {
+          "$ref": "#/$defs/ResolveOutreachUnknownPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandMarkReplyRead": {
+      "type": "object",
+      "title": "Command: mark_reply_read",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "mark_reply_read"
+        },
+        "payload": {
+          "$ref": "#/$defs/MarkReplyReadPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandSetThreadOutcome": {
+      "type": "object",
+      "title": "Command: set_thread_outcome",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "set_thread_outcome"
+        },
+        "payload": {
+          "$ref": "#/$defs/SetThreadOutcomePayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandSuppress": {
+      "type": "object",
+      "title": "Command: suppress",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "suppress"
+        },
+        "payload": {
+          "$ref": "#/$defs/SuppressPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandUnsuppress": {
+      "type": "object",
+      "title": "Command: unsuppress",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "unsuppress"
+        },
+        "payload": {
+          "$ref": "#/$defs/UnsuppressPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandEnableSending": {
+      "type": "object",
+      "title": "Command: enable_sending",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "enable_sending"
+        },
+        "payload": {
+          "$ref": "#/$defs/EnableSendingPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandSearchProspects": {
+      "type": "object",
+      "title": "Command: search_prospects",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "search_prospects"
+        },
+        "payload": {
+          "$ref": "#/$defs/SearchProspectsPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandAddProspect": {
+      "type": "object",
+      "title": "Command: add_prospect",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "add_prospect"
+        },
+        "payload": {
+          "$ref": "#/$defs/AddProspectPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandUpdateProspect": {
+      "type": "object",
+      "title": "Command: update_prospect",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "update_prospect"
+        },
+        "payload": {
+          "$ref": "#/$defs/UpdateProspectPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandSuggestReferrers": {
+      "type": "object",
+      "title": "Command: suggest_referrers",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "suggest_referrers"
+        },
+        "payload": {
+          "$ref": "#/$defs/SuggestReferrersPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandAddReferral": {
+      "type": "object",
+      "title": "Command: add_referral",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "add_referral"
+        },
+        "payload": {
+          "$ref": "#/$defs/AddReferralPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandDraftReferral": {
+      "type": "object",
+      "title": "Command: draft_referral",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "draft_referral"
+        },
+        "payload": {
+          "$ref": "#/$defs/DraftReferralPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandUpdateReferral": {
+      "type": "object",
+      "title": "Command: update_referral",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "update_referral"
+        },
+        "payload": {
+          "$ref": "#/$defs/UpdateReferralPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandSetProviderKey": {
+      "type": "object",
+      "title": "Command: set_provider_key",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "set_provider_key"
+        },
+        "payload": {
+          "$ref": "#/$defs/SetProviderKeyPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
     "EventAck": {
       "type": "object",
       "title": "Event: ack",
@@ -6335,6 +8441,96 @@
       ],
       "additionalProperties": false
     },
+    "EventOutreachState": {
+      "type": "object",
+      "title": "Event: outreach_state",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "outreach_state"
+        },
+        "payload": {
+          "$ref": "#/$defs/OutreachStatePayload"
+        },
+        "reply_to": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "EventOutreachReply": {
+      "type": "object",
+      "title": "Event: outreach_reply",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "outreach_reply"
+        },
+        "payload": {
+          "$ref": "#/$defs/OutreachReplyPayload"
+        },
+        "reply_to": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "EventScoutFinished": {
+      "type": "object",
+      "title": "Event: scout_finished",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "scout_finished"
+        },
+        "payload": {
+          "$ref": "#/$defs/ScoutFinishedPayload"
+        },
+        "reply_to": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
     "EventLog": {
       "type": "object",
       "title": "Event: log",
@@ -6513,6 +8709,78 @@
         },
         {
           "$ref": "#/$defs/CommandOnboardingComplete"
+        },
+        {
+          "$ref": "#/$defs/CommandScoutContacts"
+        },
+        {
+          "$ref": "#/$defs/CommandAddContact"
+        },
+        {
+          "$ref": "#/$defs/CommandUpdateContact"
+        },
+        {
+          "$ref": "#/$defs/CommandDeleteContact"
+        },
+        {
+          "$ref": "#/$defs/CommandImportContacts"
+        },
+        {
+          "$ref": "#/$defs/CommandDraftOutreach"
+        },
+        {
+          "$ref": "#/$defs/CommandEditOutreachDraft"
+        },
+        {
+          "$ref": "#/$defs/CommandApproveOutreach"
+        },
+        {
+          "$ref": "#/$defs/CommandCancelOutreach"
+        },
+        {
+          "$ref": "#/$defs/CommandDiscardOutreach"
+        },
+        {
+          "$ref": "#/$defs/CommandResolveOutreachUnknown"
+        },
+        {
+          "$ref": "#/$defs/CommandMarkReplyRead"
+        },
+        {
+          "$ref": "#/$defs/CommandSetThreadOutcome"
+        },
+        {
+          "$ref": "#/$defs/CommandSuppress"
+        },
+        {
+          "$ref": "#/$defs/CommandUnsuppress"
+        },
+        {
+          "$ref": "#/$defs/CommandEnableSending"
+        },
+        {
+          "$ref": "#/$defs/CommandSearchProspects"
+        },
+        {
+          "$ref": "#/$defs/CommandAddProspect"
+        },
+        {
+          "$ref": "#/$defs/CommandUpdateProspect"
+        },
+        {
+          "$ref": "#/$defs/CommandSuggestReferrers"
+        },
+        {
+          "$ref": "#/$defs/CommandAddReferral"
+        },
+        {
+          "$ref": "#/$defs/CommandDraftReferral"
+        },
+        {
+          "$ref": "#/$defs/CommandUpdateReferral"
+        },
+        {
+          "$ref": "#/$defs/CommandSetProviderKey"
         }
       ]
     },
@@ -6565,6 +8833,15 @@
         },
         {
           "$ref": "#/$defs/EventNudgeDue"
+        },
+        {
+          "$ref": "#/$defs/EventOutreachState"
+        },
+        {
+          "$ref": "#/$defs/EventOutreachReply"
+        },
+        {
+          "$ref": "#/$defs/EventScoutFinished"
         },
         {
           "$ref": "#/$defs/EventLog"

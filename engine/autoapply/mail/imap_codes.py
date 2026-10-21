@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import email
-import imaplib
 import logging
 import re
 import subprocess
@@ -22,30 +21,24 @@ from email.message import Message
 from email.utils import parsedate_to_datetime
 from typing import Any
 
+# Shared with the outreach mail watcher; re-exported here for existing callers.
+from autoapply.mail.common import (  # noqa: F401
+    IMAP_HOSTS,
+    MailError,
+    _login,
+    _logout,
+    _text,
+    imap_host,
+    normalize_password,
+)
+
 log = logging.getLogger("autoapply.mail")
 
 KEYCHAIN_SERVICE = "AutoApply Mail"
 META_KEY = "mail_account"
-IMAP_HOSTS = {"gmail.com": "imap.gmail.com", "googlemail.com": "imap.gmail.com", "outlook.com": "outlook.office365.com",
-              "hotmail.com": "outlook.office365.com", "live.com": "outlook.office365.com", "yahoo.com": "imap.mail.yahoo.com",
-              "icloud.com": "imap.mail.me.com", "me.com": "imap.mail.me.com"}
-
-
-class MailError(Exception):
-    pass
 
 
 # ---- credentials -----------------------------------------------------------------------
-
-
-def normalize_password(password: str) -> str:
-    """App passwords are letters only; pasted copies often carry spaces, NBSPs or a newline."""
-    return re.sub(r"\s+", "", password or "", flags=re.UNICODE).replace("\u00a0", "")
-
-
-def imap_host(address: str) -> str:
-    domain = address.rsplit("@", 1)[-1].lower()
-    return IMAP_HOSTS.get(domain, "imap.gmail.com")  # Google Workspace domains use Gmail's IMAP
 
 
 def keychain_set(address: str, password: str) -> None:
@@ -86,48 +79,12 @@ def account(conn: Any) -> dict[str, Any] | None:
 # ---- IMAP ------------------------------------------------------------------------------
 
 
-def _login(address: str, password: str) -> imaplib.IMAP4_SSL:
-    try:
-        m = imaplib.IMAP4_SSL(imap_host(address), 993, timeout=20)
-        m.login(address, normalize_password(password))  # Google shows app passwords in groups of 4
-        return m
-    except imaplib.IMAP4.error as e:
-        raise MailError("login refused: check the address and the app password (2-Step Verification must be on)") from e
-    except OSError as e:
-        raise MailError(f"could not reach the mail server: {e}") from e
-
-
 def test_login(address: str, password: str) -> None:
     m = _login(address, password)
     try:
         m.select("INBOX", readonly=True)
     finally:
         _logout(m)
-
-
-def _logout(m: imaplib.IMAP4_SSL) -> None:
-    try:
-        m.logout()
-    except Exception:  # noqa: BLE001
-        pass
-
-
-def _text(msg: Message) -> str:
-    parts: list[str] = []
-    for part in msg.walk() if msg.is_multipart() else [msg]:
-        ctype = part.get_content_type()
-        if ctype not in ("text/plain", "text/html") or part.get("Content-Disposition", "").startswith("attachment"):
-            continue
-        try:
-            payload = part.get_payload(decode=True) or b""
-            body = payload.decode(part.get_content_charset() or "utf-8", errors="replace")
-        except Exception:  # noqa: BLE001
-            continue
-        if ctype == "text/html":
-            body = re.sub(r"<style.*?</style>|<script.*?</script>", " ", body, flags=re.S | re.I)
-            body = re.sub(r"<[^>]+>", " ", body)
-        parts.append(body)
-    return re.sub(r"[ \t\r\f\v]+", " ", "\n".join(parts))
 
 
 def extract_code(text: str, length: int | None) -> str | None:

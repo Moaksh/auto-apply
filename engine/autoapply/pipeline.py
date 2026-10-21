@@ -236,7 +236,7 @@ MAX_WATCHED_COMPANIES = 150
 BORDERLINE_BAND = 15
 
 RUN_STEPS: dict[RunKind, tuple[str, ...]] = {
-    RunKind.FULL: ("discover", "score", "prep", "apply"),
+    RunKind.FULL: ("discover", "score", "prep", "apply", "outreach"),
     RunKind.DISCOVER: ("discover", "score"),
     RunKind.PREP: ("prep",),
     RunKind.APPLY: ("apply",),
@@ -309,6 +309,7 @@ class Pipeline:
         #: Seconds to wait for the user in a visible window after a headless CAPTCHA (0 disables).
         self.captcha_wait_s = captcha_wait_s
         self.notifier: Any = None  # set by the daemon (autoapply.notify.Notifier)
+        self.outreach: Any = None  # set by the daemon (autoapply.outreach.service.OutreachService)
         self._now = now or utcnow
         self.run_row: Run | None = None
         self.stats = RunStats()
@@ -540,6 +541,25 @@ class Pipeline:
 
     async def _step_apply(self) -> None:
         await self.apply_queued()
+
+    async def _step_outreach(self) -> None:
+        """Last step of a full run: the cold-outreach work that needs Google (people, referrers,
+        company search), in the browser the run already holds. HTTP-only scouting never waits for this."""
+        if self.outreach is None or not self.outreach.has_google_work():
+            return
+        try:
+            done = await self.outreach.run_google_work()
+        except Exception:  # noqa: BLE001 - outreach must never fail a run
+            log.exception("outreach step failed")
+            return
+        if any(done.values()):
+            await self._log(LogLevel.INFO, f"Outreach: read Google for {done['scouts']} company(ies), "
+                                           f"{done['referrers']} referrer search(es), {done['searches']} company search(es)")
+
+    def submitted_hook(self, application_id: int) -> None:
+        """An application just became ``submitted`` (agent, approval, or the user): outreach may scout."""
+        if self.outreach is not None:
+            self.outreach.on_submitted(application_id)
 
     # ---- discover ----------------------------------------------------------------------
 
@@ -1305,6 +1325,7 @@ class Pipeline:
             )
             await self.emit_transition(t)
             await self._log(LogLevel.INFO, f"Submitted {company.name} · {job.title}", job_id=job.id, application_id=app.id)
+            self.submitted_hook(app.id)
             return AppState.SUBMITTED
         if res.confirmation_screenshot_path:
             db.update_application(self.conn, app.id, confirmation_screenshot_path=res.confirmation_screenshot_path)
@@ -1412,7 +1433,8 @@ class Pipeline:
     # ---- housekeeping ------------------------------------------------------------------
 
     async def maintenance(self, now: datetime | None = None) -> None:
-        """Auto-ghost stale ``applied`` applications and emit day-N "Heard back?" nudges."""
+        """Auto-ghost stale ``applied`` applications, emit day-N "Heard back?" nudges, and the
+        hourly cold-outreach upkeep (follow-ups, reminders, retention)."""
         now = now or self._now()
         prefs = db.get_preferences(self.conn)
         for payload in db.ghost_stale_applications(self.conn, prefs.ghost_after_days, now):
@@ -1424,6 +1446,8 @@ class Pipeline:
             await self.emit(
                 "nudge_due", NudgeDuePayload(application_id=app.id, job_id=job.id, day=day, company=company.name, title=job.title)
             )
+        if self.outreach is not None:
+            await self.outreach.maintenance(now)
 
 
 __all__ = [

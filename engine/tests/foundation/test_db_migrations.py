@@ -149,3 +149,77 @@ def test_suggested_note_reaches_cluster(conn):
     cluster = db.get_cluster(conn, q.cluster_id)
     assert cluster.suggested_answer == "I ship async."
     assert cluster.suggested_note == "Add whether your roles were remote."
+
+
+# ---- v10 (cold outreach) ------------------------------------------------------------------------
+
+V10_TABLES = ("contacts", "contact_evidence", "domain_patterns", "outreach_threads", "outreach_messages", "suppression",
+              "referrals", "prospects")
+
+
+def _v9_schema_sql() -> str:
+    """schema.sql as it was at v9: without the outreach block, the v10 preference columns and row."""
+    sql = schema_sql_path().read_text()
+    start = sql.rindex("-- =", 0, sql.index("-- Cold outreach (v10)"))
+    end = sql.rindex("-- -", 0, sql.index("-- updated_at maintenance"))
+    sql = sql[:start] + sql[end:]
+    return "\n".join(line for line in sql.splitlines() if "-- v10" not in line and "VALUES (10)" not in line)
+
+
+def _shape(conn: sqlite3.Connection, table: str) -> tuple:
+    # By name: ALTER TABLE appends columns, so their position differs from schema.sql (harmless).
+    cols = sorted(tuple(r)[1:] for r in conn.execute(f"PRAGMA table_info({table})"))
+    idx = sorted((r[1], r[2], r[4]) for r in conn.execute(f"PRAGMA index_list({table})") if not r[1].startswith("sqlite_autoindex"))
+    idx_cols = sorted((name, tuple(r[2] for r in conn.execute(f"PRAGMA index_info({name})"))) for name, *_ in idx)
+    return cols, idx, idx_cols
+
+
+def test_v9_database_upgrades_to_v10_keeping_data(tmp_path):
+    c = db.connect(tmp_path / "v9.db")
+    c.executescript("BEGIN;\n" + _v9_schema_sql() + "\nCOMMIT;")
+    assert db.current_schema_version(c) == 9
+    assert not set(V10_TABLES) & tables(c)
+    c.execute("UPDATE preferences SET daily_cap = 7, create_accounts = 0")
+    c.execute("INSERT INTO companies(name, normalized_name, domain) VALUES ('Acme', 'acme', 'acme.com')")
+    assert db.migrate(c) == db.SCHEMA_VERSION
+    assert set(V10_TABLES) <= tables(c)
+    prefs = db.get_preferences(c)
+    assert (prefs.daily_cap, prefs.create_accounts) == (7, False)
+    assert (prefs.outreach_auto_scout, prefs.outreach_auto_draft, prefs.outreach_daily_cap, prefs.outreach_followup_days,
+            prefs.outreach_max_followups, prefs.outreach_send_window, prefs.outreach_weekdays_only,
+            prefs.outreach_min_email_confidence, prefs.people_finder_visits_per_day) == (
+        True, True, 10, 5, 1, ["09:30", "17:30"], True, 60, 6)
+    assert c.execute("SELECT domain FROM companies WHERE name = 'Acme'").fetchone()[0] == "acme.com"
+    assert db.migrate(c) == db.SCHEMA_VERSION  # idempotent
+    c.close()
+
+
+def test_v10_migration_matches_schema_sql(tmp_path, conn):
+    """A database migrated from v9 has exactly the tables, columns and indexes schema.sql creates."""
+    c = db.connect(tmp_path / "v9.db")
+    c.executescript("BEGIN;\n" + _v9_schema_sql() + "\nCOMMIT;")
+    db.migrate(c)
+    for table in (*V10_TABLES, "preferences"):
+        assert _shape(c, table) == _shape(conn, table), table
+    c.close()
+
+
+@pytest.mark.parametrize(
+    ("table", "column", "enum_name"),
+    [("contacts", "role_category", "RoleCategory"), ("contacts", "email_status", "EmailStatus"),
+     ("contacts", "origin", "ContactOrigin"), ("contact_evidence", "kind", "EvidenceKind"),
+     ("outreach_threads", "kind", "OutreachKind"), ("outreach_threads", "state", "ThreadState"),
+     ("outreach_threads", "outcome", "ThreadOutcome"), ("outreach_messages", "state", "MessageState"),
+     ("suppression", "reason", "SuppressionReason"), ("referrals", "basis", "ReferralBasis"),
+     ("referrals", "state", "ReferralState"), ("prospects", "status", "ProspectStatus"),
+     ("domain_patterns", "mx_provider", "MxProvider")],
+)
+def test_v10_check_lists_match_enums(table, column, enum_name):
+    from autoapply import enums
+
+    sql = schema_sql_path().read_text()
+    block = re.search(rf"CREATE TABLE IF NOT EXISTS {table} \((.*?)\n\);", sql, re.S)
+    assert block, table
+    m = re.search(rf"CHECK \(\s*(?:{column} IS NULL OR )?{column} IN \(([^)]*)\)", block.group(1))
+    assert m, f"{table}.{column}"
+    assert set(re.findall(r"'([^']+)'", m.group(1))) == {e.value for e in getattr(enums, enum_name)}

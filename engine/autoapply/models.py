@@ -43,8 +43,25 @@ from autoapply.enums import (
     Ats,
     BoardStatus,
     CapKind,
+    ContactOrigin,
     DaemonActivity,
+    DraftKind,
+    EmailStatus,
     ErrorCode,
+    EvidenceKind,
+    MessageState,
+    MxProvider,
+    OutreachKind,
+    ProspectStatus,
+    ReferralBasis,
+    ReferralState,
+    Relationship,
+    ReplyLabel,
+    RoleCategory,
+    ScoutPurpose,
+    SuppressionReason,
+    ThreadOutcome,
+    ThreadState,
     FieldType,
     JobSource,
     LogLevel,
@@ -163,6 +180,55 @@ def is_allowed_transition(frm: AppState | str, to: AppState | str, actor: Actor 
     if (frm, to) in USER_ONLY_TRANSITIONS and actor is not Actor.USER:
         return False
     return True
+
+
+# ---- cold outreach state machines (enforced by db.transition_outreach / outreach.referrals) ----
+
+M = MessageState
+
+#: Outbound message lifecycle. ``sending`` is written before the SMTP conversation; a crash
+#: leaves it to ``unknown``, which is NEVER resent automatically (the Sent Mail check or the
+#: user resolves it). ``received`` is for inbound rows only.
+MESSAGE_TRANSITIONS: dict[MessageState, frozenset[MessageState]] = {
+    M.DRAFT: frozenset({M.APPROVED, M.CANCELLED}),
+    M.APPROVED: frozenset({M.SCHEDULED, M.DRAFT, M.CANCELLED}),
+    M.SCHEDULED: frozenset({M.SENDING, M.DRAFT, M.CANCELLED}),
+    M.SENDING: frozenset({M.SENT, M.FAILED, M.UNKNOWN}),
+    M.UNKNOWN: frozenset({M.SENT, M.FAILED}),
+    M.FAILED: frozenset({M.DRAFT, M.CANCELLED}),
+    M.SENT: frozenset(),
+    M.CANCELLED: frozenset(),
+    M.RECEIVED: frozenset(),
+}
+
+#: Message states that are still waiting to go out (cancelled when a thread stops).
+PENDING_MESSAGE_STATES: frozenset[MessageState] = frozenset({M.DRAFT, M.APPROVED, M.SCHEDULED})
+
+#: Threads that may still send (a follow-up) or be sent.
+OPEN_THREAD_STATES: frozenset[ThreadState] = frozenset({ThreadState.DRAFT, ThreadState.ACTIVE})
+
+R = ReferralState
+
+#: Referral copilot: the user performs every LinkedIn step; these are the bookkeeping edges.
+REFERRAL_TRANSITIONS: dict[ReferralState, frozenset[ReferralState]] = {
+    R.SUGGESTED: frozenset({R.TO_CONNECT, R.REQUESTED, R.CONNECTED, R.DISMISSED}),
+    R.TO_CONNECT: frozenset({R.REQUESTED, R.CONNECTED, R.SUGGESTED, R.DISMISSED}),
+    R.REQUESTED: frozenset({R.CONNECTED, R.NO_RESPONSE, R.DISMISSED}),
+    R.CONNECTED: frozenset({R.ASKED, R.DISMISSED}),
+    R.ASKED: frozenset({R.REFERRED, R.DECLINED, R.NO_RESPONSE}),
+    R.NO_RESPONSE: frozenset({R.TO_CONNECT, R.REQUESTED, R.CONNECTED, R.ASKED, R.DISMISSED}),
+    R.REFERRED: frozenset(),
+    R.DECLINED: frozenset({R.DISMISSED}),
+    R.DISMISSED: frozenset({R.SUGGESTED}),
+}
+
+
+def is_allowed_message_transition(frm: MessageState | str, to: MessageState | str) -> bool:
+    return MessageState(to) in MESSAGE_TRANSITIONS[MessageState(frm)]
+
+
+def is_allowed_referral_transition(frm: ReferralState | str, to: ReferralState | str) -> bool:
+    return ReferralState(to) in REFERRAL_TRANSITIONS[ReferralState(frm)]
 
 
 # =====================================================================================
@@ -529,6 +595,166 @@ class EventRow(RowModel):
 # =====================================================================================
 
 
+# ---- cold outreach rows (schema v10) ------------------------------------------------------
+
+
+class Contact(RowModel):
+    _bool_fields = frozenset({"share_ok"})
+
+    id: int
+    company_id: int | None = None
+    full_name: str
+    first_name: str | None = None
+    last_name: str | None = None
+    title: str | None = None
+    role_category: RoleCategory = RoleCategory.OTHER
+    email: str | None = None
+    email_norm: str | None = None
+    email_status: EmailStatus = EmailStatus.NONE
+    email_confidence: int = 0
+    role_fit: int | None = None
+    linkedin_url: str | None = None
+    github_login: str | None = None
+    location: str | None = None
+    origin: ContactOrigin
+    relationship: Relationship | None = None
+    share_ok: bool = False
+    shared_at: Timestamp | None = None
+    notes: str | None = None
+    last_contacted_at: Timestamp | None = None
+    created_at: Timestamp
+    updated_at: Timestamp
+
+
+class ContactEvidence(RowModel):
+    id: int
+    contact_id: int
+    kind: EvidenceKind
+    field: Literal["name", "title", "email"]
+    url: str | None = None
+    snippet: str | None = None
+    provider: str | None = None
+    observed_at: Timestamp
+
+
+class DomainPattern(RowModel):
+    _json_fields = frozenset({"samples"})
+
+    domain: str
+    company_id: int | None = None
+    pattern: str | None = None
+    confidence: int = 0
+    samples: list[dict[str, Any]] = Field(default_factory=list)
+    mx_provider: MxProvider | None = None
+    bounces: int = 0
+    checked_at: Timestamp | None = None
+
+
+class OutreachThread(RowModel):
+    _bool_fields = frozenset({"unread_reply", "followup_approved"})
+
+    id: int
+    kind: OutreachKind
+    contact_id: int | None = None
+    company_id: int
+    job_id: int | None = None
+    application_id: int | None = None
+    state: ThreadState = ThreadState.DRAFT
+    outcome: ThreadOutcome | None = None
+    subject: str | None = None
+    gmail_thread_id: str | None = None
+    next_action_at: Timestamp | None = None
+    unread_reply: bool = False
+    followup_approved: bool = False
+    created_at: Timestamp
+    updated_at: Timestamp
+
+
+class OutreachMessage(RowModel):
+    _json_fields = frozenset({"unsupported_claims", "story_ids"})
+    _bool_fields = frozenset({"grounded", "claims_overridden"})
+
+    id: int
+    thread_id: int
+    seq: int = 0
+    direction: Literal["out", "in"]
+    kind: DraftKind | None = None
+    state: MessageState
+    to_email: str | None = None
+    from_email: str | None = None
+    subject: str | None = None
+    body: str
+    footer: str | None = None
+    origin: Literal["generated", "user"] = "generated"
+    grounded: bool = True
+    unsupported_claims: list[str] = Field(default_factory=list)
+    claims_overridden: bool = False
+    story_ids: list[int] = Field(default_factory=list)
+    message_id_header: str | None = None
+    in_reply_to: str | None = None
+    batch_uid: str | None = None
+    approved_at: Timestamp | None = None
+    send_at: Timestamp | None = None
+    sent_at: Timestamp | None = None
+    classification: str | None = None
+    error: str | None = None
+    tokens_in: int = 0
+    tokens_out: int = 0
+    created_at: Timestamp
+    updated_at: Timestamp
+
+
+class Suppression(RowModel):
+    id: int
+    email_norm: str | None = None
+    domain: str | None = None
+    reason: SuppressionReason
+    source: str | None = None
+    created_at: Timestamp
+
+
+class Referral(RowModel):
+    _json_fields = frozenset({"unsupported_claims"})
+    _bool_fields = frozenset({"grounded"})
+
+    id: int
+    company_id: int
+    job_id: int | None = None
+    contact_id: int | None = None
+    person_name: str
+    title: str | None = None
+    linkedin_url: str | None = None
+    basis: ReferralBasis
+    basis_detail: str | None = None
+    evidence_url: str | None = None
+    evidence_snippet: str | None = None
+    state: ReferralState = ReferralState.SUGGESTED
+    connect_note: str | None = None
+    referral_dm: str | None = None
+    grounded: bool = True
+    unsupported_claims: list[str] = Field(default_factory=list)
+    state_updated_at: Timestamp
+    created_at: Timestamp
+
+
+class Prospect(RowModel):
+    _json_fields = frozenset({"fit_reasons"})
+
+    id: int
+    company_id: int
+    status: ProspectStatus = ProspectStatus.SUGGESTED
+    fit_score: int | None = None
+    fit_reasons: dict[str, Any] = Field(default_factory=dict)
+    summary: str | None = None
+    summary_url: str | None = None
+    matching_roles: int | None = None
+    found_via: str | None = None
+    search_query: str | None = None
+    cooldown_until: Timestamp | None = None
+    created_at: Timestamp
+    updated_at: Timestamp
+
+
 class FormQuestion(BaseModel):
     """A question harvested from an application form (ATS API or browser scan)."""
 
@@ -645,6 +871,9 @@ class Counts(_P):
     discovered_today: int = 0
     submitted_total: int = 0
     suggestions_pending: int = Field(default=0, description="Company suggestions waiting for Add / Dismiss (Settings > Sources badge).")
+    outreach_drafts: int = Field(default=0, description="Cold email drafts waiting for review (Cold Email badge).")
+    outreach_replies_unread: int = Field(default=0, description="Outreach threads with a reply the user has not opened (Needs You > Replies).")
+    outreach_unknown: int = Field(default=0, description="Emails that may or may not have gone out (Needs You > Possibly sent).")
 
 
 class CapsStatus(_P):
@@ -655,6 +884,10 @@ class CapsStatus(_P):
     linkedin_sessions_limit: int = 0
     glassdoor_sessions_used: int = 0
     glassdoor_sessions_limit: int = 0
+    outreach_sent_today: int = Field(default=0, description="New outreach threads started today.")
+    outreach_daily_limit: int = Field(default=0, description="Today's limit for new threads (the cap, lower during the first-week ramp).")
+    people_finder_used: int = 0
+    people_finder_limit: int = 0
 
 
 class SourceStatus(_P):
@@ -959,6 +1192,163 @@ class OnboardingCompletePayload(_P):
     run_prep: bool = False
 
 
+# ---- cold outreach commands (docs/COLD_EMAIL_PLAN.md §G.3) ----------------------------------
+
+
+class ScoutContactsPayload(_P):
+    """Find people to email at a company (HTTP sources now; Google results when the browser is free)."""
+
+    company_id: int | None = Field(default=None, description="Company to scout (or give application_id).")
+    application_id: int | None = Field(default=None, description="Scout the company of this application.")
+    purpose: ScoutPurpose = ScoutPurpose.APPLICATION
+
+
+class AddContactPayload(_P):
+    company_id: int | None = None
+    company_name: str | None = Field(default=None, description="Used (find or create) when company_id is not given.")
+    full_name: str = Field(min_length=1)
+    email: str | None = None
+    title: str | None = None
+    linkedin_url: str | None = Field(default=None, description="Stored as a reference only; never opened by AutoApply.")
+    relationship: Relationship | None = None
+    notes: str | None = None
+    share_ok: bool = Field(default=False, description="Allowed into the shared library later (off for manual contacts).")
+
+
+class UpdateContactPayload(_P):
+    """Only the keys present are applied; null clears an optional field."""
+
+    id: int
+    company_id: int | None = None
+    full_name: str | None = None
+    email: str | None = Field(default=None, description="A typed email becomes status 'user' (confidence 100).")
+    title: str | None = None
+    linkedin_url: str | None = None
+    relationship: Relationship | None = None
+    notes: str | None = None
+    share_ok: bool | None = None
+
+
+class DeleteContactPayload(_P):
+    id: int
+    suppress: bool = Field(default=True, description="Also put the address on the do-not-contact list.")
+
+
+class ImportContactsPayload(_P):
+    file_path: str = Field(description="CSV with columns name,email,company,title,linkedin_url,notes (header row).")
+
+
+class DraftOutreachPayload(_P):
+    contact_id: int
+    kind: OutreachKind = OutreachKind.APPLICATION
+    application_id: int | None = Field(default=None, description="Required for kind 'application'.")
+    instructions: str | None = Field(default=None, description="Extra guidance for the drafter (tone, what to stress).")
+
+
+class EditOutreachDraftPayload(_P):
+    message_id: int
+    subject: str | None = None
+    body: str = Field(min_length=1, description="The user's text (the footer is added separately and cannot be removed).")
+    confirm_claims: bool = Field(default=False, description="'These are true': approve despite unsupported claims.")
+
+
+class ApproveOutreachPayload(_P):
+    message_ids: list[int] = Field(min_length=1)
+    include_followups: bool = Field(default=False, description="Also send the one follow-up without asking again.")
+    send_anyway: list[int] = Field(
+        default_factory=list, description="Message ids the user OK'd although the address is below the confidence bar.",
+    )
+
+
+class CancelOutreachPayload(_P):
+    message_ids: list[int] = Field(min_length=1)
+
+
+class DiscardOutreachPayload(_P):
+    thread_id: int
+
+
+class ResolveOutreachUnknownPayload(_P):
+    message_id: int
+    sent: bool = Field(description="The user checked Sent Mail: true = it went out.")
+
+
+class MarkReplyReadPayload(_P):
+    thread_id: int
+
+
+class SetThreadOutcomePayload(_P):
+    thread_id: int
+    outcome: ThreadOutcome | None = None
+    close: bool = False
+
+
+class SuppressPayload(_P):
+    email: str | None = None
+    domain: str | None = None
+    reason: SuppressionReason = SuppressionReason.USER
+
+
+class UnsuppressPayload(_P):
+    email: str | None = None
+    domain: str | None = None
+
+
+class EnableSendingPayload(_P):
+    enabled: bool = Field(description="true sends a test email to your own address first; sending stays off if it fails.")
+
+
+class SearchProspectsPayload(_P):
+    query: str = Field(min_length=1, description="e.g. 'Series B fintech in Bangalore'.")
+    location: str | None = None
+
+
+class AddProspectPayload(_P):
+    company_name: str | None = None
+    url: str | None = Field(default=None, description="Company website (or careers page).")
+
+
+class UpdateProspectPayload(_P):
+    id: int
+    status: ProspectStatus | None = Field(default=None, description="'shortlisted' starts a scout; 'dismissed' never suggests it again.")
+    watch: bool = Field(default=False, description="Also add the company to the job watchlist.")
+
+
+class SuggestReferrersPayload(_P):
+    company_id: int
+    job_id: int | None = None
+
+
+class AddReferralPayload(_P):
+    """'Could refer me': a contact (or a typed person) as a would-be referrer."""
+
+    company_id: int | None = Field(default=None, description="Defaults to the contact's company.")
+    job_id: int | None = None
+    contact_id: int | None = None
+    person_name: str | None = None
+    title: str | None = None
+    linkedin_url: str | None = None
+    basis: ReferralBasis = ReferralBasis.USER
+    basis_detail: str | None = None
+
+
+class DraftReferralPayload(_P):
+    id: int
+    instructions: str | None = None
+
+
+class UpdateReferralPayload(_P):
+    id: int
+    state: ReferralState | None = None
+    connect_note: str | None = None
+    referral_dm: str | None = None
+
+
+class SetProviderKeyPayload(_P):
+    provider: Literal["hunter", "github"]
+    api_key: str | None = Field(default=None, description="null removes the key. Stored in the macOS Keychain only.")
+
+
 COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "hello": HelloPayload,
     "ping": PingPayload,
@@ -1009,6 +1399,30 @@ COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "delete_site_account": DeleteSiteAccountPayload,
     "onboarding_set_step": OnboardingSetStepPayload,
     "onboarding_complete": OnboardingCompletePayload,
+    "scout_contacts": ScoutContactsPayload,
+    "add_contact": AddContactPayload,
+    "update_contact": UpdateContactPayload,
+    "delete_contact": DeleteContactPayload,
+    "import_contacts": ImportContactsPayload,
+    "draft_outreach": DraftOutreachPayload,
+    "edit_outreach_draft": EditOutreachDraftPayload,
+    "approve_outreach": ApproveOutreachPayload,
+    "cancel_outreach": CancelOutreachPayload,
+    "discard_outreach": DiscardOutreachPayload,
+    "resolve_outreach_unknown": ResolveOutreachUnknownPayload,
+    "mark_reply_read": MarkReplyReadPayload,
+    "set_thread_outcome": SetThreadOutcomePayload,
+    "suppress": SuppressPayload,
+    "unsuppress": UnsuppressPayload,
+    "enable_sending": EnableSendingPayload,
+    "search_prospects": SearchProspectsPayload,
+    "add_prospect": AddProspectPayload,
+    "update_prospect": UpdateProspectPayload,
+    "suggest_referrers": SuggestReferrersPayload,
+    "add_referral": AddReferralPayload,
+    "draft_referral": DraftReferralPayload,
+    "update_referral": UpdateReferralPayload,
+    "set_provider_key": SetProviderKeyPayload,
 }
 
 
@@ -1159,6 +1573,40 @@ class NudgeDuePayload(_P):
     title: str
 
 
+class OutreachStatePayload(_P):
+    """A cold-email thread or message changed state (the app re-reads the tables)."""
+
+    thread_id: int
+    message_id: int | None = Field(default=None, description="Set when a message changed; else the thread did.")
+    entity: Literal["message", "thread"] = "message"
+    from_state: str | None = Field(default=None, description="MessageState or ThreadState value (see entity).")
+    to_state: str
+    reason: str | None = None
+    at: Timestamp
+
+
+class OutreachReplyPayload(_P):
+    thread_id: int
+    message_id: int | None = None
+    contact_name: str
+    company: str
+    label: ReplyLabel
+    snippet: str = ""
+    application_id: int | None = None
+    suggested_status: BoardStatus | None = Field(default=None, description="A board move the reply suggests (never applied by itself).")
+
+
+class ScoutFinishedPayload(_P):
+    company_id: int
+    purpose: ScoutPurpose = ScoutPurpose.APPLICATION
+    application_id: int | None = None
+    found: int = 0
+    with_email: int = 0
+    best_confidence: int | None = None
+    queued_google: bool = Field(default=False, description="Google results are still to be read when the browser is free.")
+    thread_id: int | None = Field(default=None, description="Draft written automatically for the best contact, if any.")
+
+
 EVENT_PAYLOADS: dict[str, type[BaseModel]] = {
     "ack": AckPayload,
     "error": ErrorPayload,
@@ -1176,6 +1624,9 @@ EVENT_PAYLOADS: dict[str, type[BaseModel]] = {
     "cap_reached": CapReachedPayload,
     "source_status": SourceStatusPayload,
     "nudge_due": NudgeDuePayload,
+    "outreach_state": OutreachStatePayload,
+    "outreach_reply": OutreachReplyPayload,
+    "scout_finished": ScoutFinishedPayload,
     "log": LogPayload,
 }
 

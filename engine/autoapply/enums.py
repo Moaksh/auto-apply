@@ -197,6 +197,7 @@ class CapKind(StrEnum):
     LINKEDIN_BUDGET = "linkedin_budget"
     GLASSDOOR_BUDGET = "glassdoor_budget"
     GOOGLE_BUDGET = "google_budget"
+    OUTREACH_DAILY = "outreach_daily"  # cold email: new threads per day (sends move to the next day)
 
 
 class SuggestionStatus(StrEnum):
@@ -206,6 +207,173 @@ class SuggestionStatus(StrEnum):
     ACCEPTED = "accepted"    # the user added it to the watchlist
     DISMISSED = "dismissed"  # never suggest (or auto-watch) again
     AUTO = "auto"            # a verified ATS board the agent watched by itself
+
+
+# ---- cold outreach (schema v10) ----------------------------------------------------------
+
+
+class OutreachKind(StrEnum):
+    """``outreach_threads.kind``: why the thread exists."""
+
+    APPLICATION = "application"        # follow-up on a submitted application (mode a)
+    PROSPECT = "prospect"              # prospecting a company with no application (mode b)
+    REFERRAL_EMAIL = "referral_email"  # asking a would-be referrer by email
+
+
+class DraftKind(StrEnum):
+    """What a drafted text is for (prompt + word limit per kind)."""
+
+    APPLICATION_FOLLOWUP = "application_followup"
+    PROSPECT = "prospect"
+    FOLLOWUP = "followup"
+    LINKEDIN_CONNECT_NOTE = "linkedin_connect_note"
+    LINKEDIN_REFERRAL_DM = "linkedin_referral_dm"
+    REFERRAL_EMAIL = "referral_email"
+
+
+class ThreadState(StrEnum):
+    DRAFT = "draft"            # nothing sent yet
+    ACTIVE = "active"          # at least one message sent, waiting
+    REPLIED = "replied"
+    BOUNCED = "bounced"
+    OPTED_OUT = "opted_out"
+    CLOSED = "closed"          # the user closed it (outcome recorded)
+    CANCELLED = "cancelled"    # discarded before anything was sent
+
+
+class MessageState(StrEnum):
+    """``outreach_messages.state`` (transitions: ``models.MESSAGE_TRANSITIONS``)."""
+
+    DRAFT = "draft"
+    APPROVED = "approved"
+    SCHEDULED = "scheduled"
+    SENDING = "sending"        # committed (synchronous=FULL) before the SMTP conversation
+    SENT = "sent"
+    FAILED = "failed"          # refused before DATA: definitely not sent
+    UNKNOWN = "unknown"        # crash / timeout during DATA: maybe sent, never resent automatically
+    CANCELLED = "cancelled"
+    RECEIVED = "received"      # inbound (a reply, a bounce, an auto-reply)
+
+
+class ThreadOutcome(StrEnum):
+    POSITIVE = "positive"
+    REFERRED = "referred"
+    NOT_INTERESTED = "not_interested"
+    QUESTION = "question"
+    OTHER = "other"
+
+
+class ReplyLabel(StrEnum):
+    """Classification of an inbound message (``outreach_messages.classification``)."""
+
+    POSITIVE = "positive"
+    REFERRED = "referred"
+    NOT_INTERESTED = "not_interested"
+    OPT_OUT = "opt_out"
+    QUESTION = "question"
+    OTHER = "other"
+    OOO = "ooo"                # auto-reply: does not count as a reply
+    BOUNCE = "bounce"
+
+
+class RoleCategory(StrEnum):
+    RECRUITER = "recruiter"
+    TALENT_LEAD = "talent_lead"
+    HIRING_MANAGER = "hiring_manager"
+    ENG_LEADER = "eng_leader"
+    ENGINEER = "engineer"
+    FOUNDER = "founder"
+    ROLE_MAILBOX = "role_mailbox"
+    OTHER = "other"
+
+
+class EmailStatus(StrEnum):
+    NONE = "none"
+    PATTERN = "pattern"
+    PUBLISHED = "published"
+    PROVIDER_VERIFIED = "provider_verified"
+    USER = "user"
+    DELIVERED = "delivered"    # sent, no bounce within 72 h
+    REPLIED = "replied"
+    BOUNCED = "bounced"
+
+
+class ContactOrigin(StrEnum):
+    SCOUT = "scout"
+    USER = "user"
+    IMPORT = "import"
+    SHARED = "shared"
+
+
+class Relationship(StrEnum):
+    FRIEND = "friend"
+    EX_COLLEAGUE = "ex_colleague"
+    ALUMNI = "alumni"
+    MET = "met"
+    OTHER = "other"
+
+
+class EvidenceKind(StrEnum):
+    USER = "user"
+    JOB_POSTING = "job_posting"
+    COMPANY_PAGE = "company_page"
+    GITHUB = "github"
+    GOOGLE_SERP = "google_serp"
+    PATTERN = "pattern"
+    PROVIDER = "provider"
+    SHARED_LIBRARY = "shared_library"
+    REPLY = "reply"
+    BOUNCE = "bounce"
+
+
+class SuppressionReason(StrEnum):
+    OPT_OUT = "opt_out"        # can never be undone in the UI
+    HARD_BOUNCE = "hard_bounce"
+    USER = "user"
+    SHARED_REMOVAL = "shared_removal"
+    COMPLAINT = "complaint"
+
+
+class ScoutPurpose(StrEnum):
+    APPLICATION = "application"
+    PROSPECT = "prospect"
+    REFERRAL = "referral"
+
+
+class ReferralState(StrEnum):
+    """Referral copilot (the user does every LinkedIn step; transitions: ``models.REFERRAL_TRANSITIONS``)."""
+
+    SUGGESTED = "suggested"
+    TO_CONNECT = "to_connect"
+    REQUESTED = "requested"
+    CONNECTED = "connected"
+    ASKED = "asked"
+    REFERRED = "referred"
+    DECLINED = "declined"
+    NO_RESPONSE = "no_response"
+    DISMISSED = "dismissed"
+
+
+class ReferralBasis(StrEnum):
+    ALUMNI = "alumni"
+    EX_COLLEAGUE = "ex_colleague"
+    SAME_FUNCTION = "same_function"
+    USER = "user"
+    OTHER = "other"
+
+
+class ProspectStatus(StrEnum):
+    SUGGESTED = "suggested"
+    SHORTLISTED = "shortlisted"
+    CONTACTED = "contacted"
+    DISMISSED = "dismissed"
+
+
+class MxProvider(StrEnum):
+    GOOGLE = "google"
+    MICROSOFT = "microsoft"
+    OTHER = "other"
+    NONE = "none"
 
 
 class SourceName(StrEnum):

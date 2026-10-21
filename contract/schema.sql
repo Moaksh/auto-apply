@@ -1,6 +1,6 @@
 -- =====================================================================================
 -- AutoApply SQLite schema — SINGLE SOURCE OF TRUTH for the database.
--- Contract version: schema_version = 9   (keep in sync with autoapply.db.SCHEMA_VERSION)
+-- Contract version: schema_version = 10  (keep in sync with autoapply.db.SCHEMA_VERSION)
 --
 -- Location: ~/Library/Application Support/AutoApply/autoapply.db (AUTOAPPLY_HOME overrides)
 --
@@ -116,6 +116,15 @@ CREATE TABLE IF NOT EXISTS preferences (
     jobs_per_session            INTEGER NOT NULL DEFAULT 30 CHECK (jobs_per_session BETWEEN 1 AND 200),     -- v2
     parallel_applications       INTEGER NOT NULL DEFAULT 3 CHECK (parallel_applications BETWEEN 1 AND 4),   -- v6
     create_accounts             INTEGER NOT NULL DEFAULT 1 CHECK (create_accounts IN (0, 1)),               -- v9
+    outreach_auto_scout         INTEGER NOT NULL DEFAULT 1 CHECK (outreach_auto_scout IN (0, 1)),           -- v10
+    outreach_auto_draft         INTEGER NOT NULL DEFAULT 1 CHECK (outreach_auto_draft IN (0, 1)),           -- v10
+    outreach_daily_cap          INTEGER NOT NULL DEFAULT 10 CHECK (outreach_daily_cap BETWEEN 0 AND 40),    -- v10
+    outreach_followup_days      INTEGER NOT NULL DEFAULT 5 CHECK (outreach_followup_days BETWEEN 1 AND 30), -- v10
+    outreach_max_followups      INTEGER NOT NULL DEFAULT 1 CHECK (outreach_max_followups BETWEEN 0 AND 2),  -- v10
+    outreach_send_window        TEXT NOT NULL DEFAULT '["09:30","17:30"]' CHECK (json_valid(outreach_send_window)), -- v10
+    outreach_weekdays_only      INTEGER NOT NULL DEFAULT 1 CHECK (outreach_weekdays_only IN (0, 1)),        -- v10
+    outreach_min_email_confidence INTEGER NOT NULL DEFAULT 60 CHECK (outreach_min_email_confidence BETWEEN 0 AND 100), -- v10
+    people_finder_visits_per_day INTEGER NOT NULL DEFAULT 6 CHECK (people_finder_visits_per_day BETWEEN 0 AND 30), -- v10
     sources_enabled             TEXT NOT NULL DEFAULT '{"greenhouse":true,"lever":true,"ashby":true,"careers":true,"linkedin":false,"glassdoor":false,"google":true}' CHECK (json_valid(sources_enabled)),
     career_page_urls            TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(career_page_urls)),
     always_ask_patterns         TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(always_ask_patterns)),
@@ -438,6 +447,179 @@ BEGIN
     SELECT RAISE(ABORT, 'events is append-only');
 END;
 
+-- =====================================================================================
+-- Cold outreach (v10). docs/COLD_EMAIL_PLAN.md. Nothing here is ever sent without the user's
+-- approval (outreach_messages.state 'approved' only via the approve_outreach command).
+-- =====================================================================================
+
+-- contacts: people at companies (scouted, typed by the user, imported). email_norm is unique.
+CREATE TABLE IF NOT EXISTS contacts (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id        INTEGER REFERENCES companies(id) ON DELETE CASCADE,
+    full_name         TEXT NOT NULL,
+    first_name        TEXT,
+    last_name         TEXT,
+    title             TEXT,
+    role_category     TEXT NOT NULL DEFAULT 'other' CHECK (role_category IN ('recruiter','talent_lead','hiring_manager','eng_leader','engineer','founder','role_mailbox','other')),
+    email             TEXT,
+    email_norm        TEXT,                                 -- lower(trim(nfkc(email)))
+    email_status      TEXT NOT NULL DEFAULT 'none' CHECK (email_status IN ('none','pattern','published','provider_verified','user','delivered','replied','bounced')),
+    email_confidence  INTEGER NOT NULL DEFAULT 0 CHECK (email_confidence BETWEEN 0 AND 100),
+    role_fit          INTEGER CHECK (role_fit IS NULL OR role_fit BETWEEN 0 AND 100),
+    linkedin_url      TEXT,                                 -- reference only: never opened by AutoApply
+    github_login      TEXT,
+    location          TEXT,
+    origin            TEXT NOT NULL CHECK (origin IN ('scout','user','import','shared')),
+    relationship      TEXT CHECK (relationship IS NULL OR relationship IN ('friend','ex_colleague','alumni','met','other')),
+    share_ok          INTEGER NOT NULL DEFAULT 0 CHECK (share_ok IN (0, 1)),
+    shared_at         TEXT,
+    notes             TEXT,
+    last_contacted_at TEXT,
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_contacts_email ON contacts(email_norm) WHERE email_norm IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_contacts_company ON contacts(company_id);
+
+-- contact_evidence: one row per observation (provenance shown in the UI).
+CREATE TABLE IF NOT EXISTS contact_evidence (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    contact_id  INTEGER NOT NULL REFERENCES contacts(id) ON DELETE CASCADE,
+    kind        TEXT NOT NULL CHECK (kind IN ('user','job_posting','company_page','github','google_serp','pattern','provider','shared_library','reply','bounce')),
+    field       TEXT NOT NULL CHECK (field IN ('name','title','email')),
+    url         TEXT,
+    snippet     TEXT,                                       -- <= 280 chars
+    provider    TEXT,
+    observed_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS ix_contact_evidence_contact ON contact_evidence(contact_id);
+
+-- domain_patterns: per email domain, the inferred address pattern and MX provider.
+CREATE TABLE IF NOT EXISTS domain_patterns (
+    domain      TEXT PRIMARY KEY,
+    company_id  INTEGER REFERENCES companies(id) ON DELETE SET NULL,
+    pattern     TEXT,                                       -- first.last | first | flast | ...
+    confidence  INTEGER NOT NULL DEFAULT 0,
+    samples     TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(samples)),   -- [{name,email,source,url}]
+    mx_provider TEXT CHECK (mx_provider IS NULL OR mx_provider IN ('google','microsoft','other','none')),
+    bounces     INTEGER NOT NULL DEFAULT 0,
+    checked_at  TEXT
+);
+
+-- outreach_threads: one conversation with one contact.
+CREATE TABLE IF NOT EXISTS outreach_threads (
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind              TEXT NOT NULL CHECK (kind IN ('application','prospect','referral_email')),
+    contact_id        INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
+    company_id        INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    job_id            INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+    application_id    INTEGER REFERENCES applications(id) ON DELETE SET NULL,
+    state             TEXT NOT NULL DEFAULT 'draft' CHECK (state IN ('draft','active','replied','bounced','opted_out','closed','cancelled')),
+    outcome           TEXT CHECK (outcome IS NULL OR outcome IN ('positive','referred','not_interested','question','other')),
+    subject           TEXT,
+    gmail_thread_id   TEXT,
+    next_action_at    TEXT,                                 -- earliest follow-up (pushed back by an out-of-office reply)
+    unread_reply      INTEGER NOT NULL DEFAULT 0 CHECK (unread_reply IN (0, 1)),
+    followup_approved INTEGER NOT NULL DEFAULT 0 CHECK (followup_approved IN (0, 1)),  -- pre-approved in the first batch
+    created_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at        TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS ix_outreach_threads_state ON outreach_threads(state);
+CREATE INDEX IF NOT EXISTS ix_outreach_threads_application ON outreach_threads(application_id);
+
+-- outreach_messages: drafts, sent mail and inbound replies / bounces. The footer is stored
+-- apart from the editable body and always appended when sending.
+CREATE TABLE IF NOT EXISTS outreach_messages (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id          INTEGER NOT NULL REFERENCES outreach_threads(id) ON DELETE CASCADE,
+    seq                INTEGER NOT NULL DEFAULT 0,
+    direction          TEXT NOT NULL CHECK (direction IN ('out','in')),
+    kind               TEXT CHECK (kind IS NULL OR kind IN ('application_followup','prospect','followup','referral_email')),
+    state              TEXT NOT NULL CHECK (state IN ('draft','approved','scheduled','sending','sent','failed','unknown','cancelled','received')),
+    to_email           TEXT,
+    from_email         TEXT,
+    subject            TEXT,
+    body               TEXT NOT NULL,
+    footer             TEXT,
+    origin             TEXT NOT NULL DEFAULT 'generated' CHECK (origin IN ('generated','user')),
+    grounded           INTEGER NOT NULL DEFAULT 1 CHECK (grounded IN (0, 1)),
+    unsupported_claims TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(unsupported_claims)),
+    claims_overridden  INTEGER NOT NULL DEFAULT 0 CHECK (claims_overridden IN (0, 1)),
+    story_ids          TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(story_ids)),
+    message_id_header  TEXT,
+    in_reply_to        TEXT,
+    batch_uid          TEXT,
+    approved_at        TEXT,
+    send_at            TEXT,
+    sent_at            TEXT,
+    classification     TEXT,
+    error              TEXT,
+    tokens_in          INTEGER NOT NULL DEFAULT 0,
+    tokens_out         INTEGER NOT NULL DEFAULT 0,
+    created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS ix_outreach_messages_due ON outreach_messages(state, send_at);
+CREATE INDEX IF NOT EXISTS ix_outreach_messages_thread ON outreach_messages(thread_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_outreach_messages_mid ON outreach_messages(message_id_header) WHERE message_id_header IS NOT NULL;
+
+-- suppression: the do-not-contact list (an address or a whole domain). Checked when drafting,
+-- approving and immediately before sending. Opt-outs are never removed by the UI.
+CREATE TABLE IF NOT EXISTS suppression (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    email_norm  TEXT,
+    domain      TEXT,
+    reason      TEXT NOT NULL CHECK (reason IN ('opt_out','hard_bounce','user','shared_removal','complaint')),
+    source      TEXT,
+    created_at  TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    CHECK (email_norm IS NOT NULL OR domain IS NOT NULL)
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_suppression_email ON suppression(email_norm) WHERE email_norm IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS ux_suppression_domain ON suppression(domain) WHERE domain IS NOT NULL;
+
+-- referrals: the LinkedIn referral copilot. The USER does every LinkedIn step in their own
+-- browser; AutoApply only finds people through Google results and drafts the notes.
+CREATE TABLE IF NOT EXISTS referrals (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id         INTEGER NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+    job_id             INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
+    contact_id         INTEGER REFERENCES contacts(id) ON DELETE SET NULL,
+    person_name        TEXT NOT NULL,
+    title              TEXT,
+    linkedin_url       TEXT,
+    basis              TEXT NOT NULL CHECK (basis IN ('alumni','ex_colleague','same_function','user','other')),
+    basis_detail       TEXT,
+    evidence_url       TEXT,
+    evidence_snippet   TEXT,
+    state              TEXT NOT NULL DEFAULT 'suggested' CHECK (state IN ('suggested','to_connect','requested','connected','asked','referred','declined','no_response','dismissed')),
+    connect_note       TEXT,
+    referral_dm        TEXT,
+    grounded           INTEGER NOT NULL DEFAULT 1 CHECK (grounded IN (0, 1)),
+    unsupported_claims TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(unsupported_claims)),
+    state_updated_at   TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    created_at         TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_referrals_person ON referrals(company_id, linkedin_url) WHERE linkedin_url IS NOT NULL;
+CREATE INDEX IF NOT EXISTS ix_referrals_state ON referrals(state);
+
+-- prospects: companies to reach out to without an application (company search, watchlist).
+CREATE TABLE IF NOT EXISTS prospects (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    company_id      INTEGER NOT NULL UNIQUE REFERENCES companies(id) ON DELETE CASCADE,
+    status          TEXT NOT NULL DEFAULT 'suggested' CHECK (status IN ('suggested','shortlisted','contacted','dismissed')),
+    fit_score       INTEGER CHECK (fit_score IS NULL OR fit_score BETWEEN 0 AND 100),
+    fit_reasons     TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(fit_reasons)),
+    summary         TEXT,                                   -- homepage description: evidence drafts may cite
+    summary_url     TEXT,
+    matching_roles  INTEGER,
+    found_via       TEXT,                                   -- search | watchlist | user
+    search_query    TEXT,
+    cooldown_until  TEXT,                                   -- no new prospect thread before this
+    created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+CREATE INDEX IF NOT EXISTS ix_prospects_status ON prospects(status);
+
 -- -------------------------------------------------------------------------------------
 -- updated_at maintenance is done by autoapply.db (explicit), not triggers, to keep the
 -- app's GRDB observation cheap and predictable.
@@ -456,3 +638,4 @@ INSERT OR IGNORE INTO schema_version (version) VALUES (6);
 INSERT OR IGNORE INTO schema_version (version) VALUES (7);
 INSERT OR IGNORE INTO schema_version (version) VALUES (8);
 INSERT OR IGNORE INTO schema_version (version) VALUES (9);
+INSERT OR IGNORE INTO schema_version (version) VALUES (10);

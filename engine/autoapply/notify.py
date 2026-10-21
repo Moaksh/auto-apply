@@ -70,5 +70,8 @@ class Notifier:
             await self.notify("Ready for review", "A filled application is waiting for your approval.")
         elif event_type == "application_state" and d.get("to_state") == "failed":
             await self.notify("Application failed", d.get("reason") or "See the activity log.")
+        elif event_type == "outreach_reply" and d.get("label") not in ("ooo", "bounce"):
+            who = (d.get("contact_name") or "Someone").split()[0]
+            await self.notify(f"{who} at {d.get('company')} replied", d.get("snippet") or "Open it in Gmail.")
         elif event_type == "error":
             await self.notify("AutoApply problem", d.get("message") or "See the activity log.")
