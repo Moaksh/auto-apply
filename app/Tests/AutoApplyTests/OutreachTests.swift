@@ -63,7 +63,7 @@ struct OutreachTests {
                                  subject: "Next steps", snippet: "We'd like to set up a call.", receivedAt: now, label: .interviewInvite,
                                  suggestedStatus: .interview, suggestionState: .pending),
             ApplicationReplyItem(id: 2, applicationID: 2, messageID: "<e2@acme.com>", fromEmail: "no-reply@acme.com", subject: "Received",
-                                 snippet: "Thanks for applying", receivedAt: now, label: .receivedAck),
+                                 snippet: "Thanks for applying", receivedAt: now, label: .receivedAck, readAt: now),
         ]
         return d
     }
@@ -528,5 +528,29 @@ struct OutreachTests {
         #expect(await store.updateReferral(id: suggested.id, state: .toConnect))
         #expect(ReferralState.referred.nextStates.isEmpty && ReferralState.asked.nextStates.contains(.referred))
         await store.stop()
+    }
+}
+
+@MainActor
+@Suite("Outreach · saved suggestions and read flags (v12)")
+struct OutreachV12Tests {
+    @Test func unreadAcknowledgementNeedsYouUntilRead() async {
+        let now = Date()
+        var data = RepositoryData()
+        data.jobs = [C2.job(id: 1, state: .submitted, status: .applied)]
+        data.applicationReplies = [
+            ApplicationReplyItem(id: 9, applicationID: 1, messageID: "<ack@acme.com>", fromEmail: "no-reply@acme.com",
+                                 subject: "Received", snippet: "Thanks for applying", receivedAt: now, label: .receivedAck),
+        ]
+        let daemon = StubDaemon()
+        let store = AppStore(client: daemon, repository: InMemoryRepository(data))
+        store.commandTimeout = .milliseconds(150)
+        store.start()
+        _ = await waitUntil { store.outreach.repliesLoaded }
+        #expect(store.outreach.unreadEmployerNotes.map(\.id) == [9])
+        #expect(store.outreach.employerRepliesNeedingYou == 1)
+        #expect(await store.markApplicationReplyRead(store.outreach.unreadEmployerNotes[0]))
+        #expect(daemon.sent.contains { if case .markApplicationReplyRead(let p) = $0 { p.replyId == 9 } else { false } })
+        #expect(store.outreach.unreadEmployerNotes.isEmpty && store.outreach.employerRepliesNeedingYou == 0)
     }
 }

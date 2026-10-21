@@ -170,6 +170,9 @@ struct OutreachThreadItem: Identifiable, Sendable, Hashable {
     var subject: String?
     var unreadReply = false
     var followupApproved = false
+    /// A reply suggested moving the application here (schema v12); Accept / Dismiss in Needs You.
+    var suggestedStatus: BoardStatus?
+    var suggestionPending = false
     var nextActionAt: Date?
     var createdAt: Date
     var updatedAt: Date
@@ -397,8 +400,12 @@ struct ApplicationReplyItem: Identifiable, Sendable, Hashable {
     var suggestedStatus: BoardStatus?
     var suggestionState: SuggestionState = .none
     var ambiguous = false
+    /// When the user read it (schema v12); nil = unread.
+    var readAt: Date?
 
     var isPendingSuggestion: Bool { suggestionState == .pending && suggestedStatus != nil }
+    /// Unread and with nothing to decide (an acknowledgement, a reply with no suggested move).
+    var isUnreadNote: Bool { readAt == nil && !isPendingSuggestion }
     var sender: String { fromName.c3Trimmed ?? fromEmail }
     var gmailURL: URL? { GmailLink.url(messageID: messageID) }
 }

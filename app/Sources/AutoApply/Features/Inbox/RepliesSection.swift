@@ -34,7 +34,7 @@ extension InboxModel {
     var replyItems: [NeedsYouReply] {
         let o = store.outreach
         return o.unreadReplyThreads.map(NeedsYouReply.outreach)
-            + o.pendingSuggestions.sorted { $0.receivedAt > $1.receivedAt }.map(NeedsYouReply.employer)
+            + (o.pendingSuggestions + o.unreadEmployerNotes).sorted { $0.receivedAt > $1.receivedAt }.map(NeedsYouReply.employer)
             + o.unknownSends.map(NeedsYouReply.possiblySent)
     }
 
@@ -210,13 +210,10 @@ private struct OutreachReplyPane: View {
                         Image(systemName: StatusKind(status: move).symbol).foregroundStyle(StatusKind(status: move).color)
                         Text("This reply suggests moving the application to \(move.label).").font(Typography.body)
                         Spacer()
-                        Button("Move to \(move.label)") {
-                            run {
-                                if await store.setStatus(applicationID: app, status: move) { store.outreach.clearSuggestedMove(threadID: thread.id) }
-                            }
-                        }
-                        .buttonStyle(.secondaryLink)
-                        Button("Keep as is") { store.outreach.clearSuggestedMove(threadID: thread.id) }.buttonStyle(.secondaryLink)
+                        Button("Move to \(move.label)") { run { _ = await store.acceptOutreachSuggestion(threadID: thread.id) } }
+                            .buttonStyle(.secondaryLink)
+                        Button("Keep as is") { run { _ = await store.dismissOutreachSuggestion(threadID: thread.id) } }
+                            .buttonStyle(.secondaryLink)
                     }
                     .padding(Space.m)
                     .well()
@@ -289,7 +286,7 @@ private struct EmployerReplyPane: View {
                     .padding(Space.m)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .well()
-                if let move = reply.suggestedStatus {
+                if reply.isPendingSuggestion, let move = reply.suggestedStatus {
                     HStack(spacing: Space.s) {
                         Image(systemName: StatusKind(status: move).symbol).foregroundStyle(StatusKind(status: move).color)
                         Text("Suggested: move it from \((job?.status ?? .applied).label) to \(move.label). Nothing changes unless you accept.")
@@ -300,13 +297,16 @@ private struct EmployerReplyPane: View {
             }
         } actions: {
             Group {
-                if let move = reply.suggestedStatus {
+                if reply.isPendingSuggestion, let move = reply.suggestedStatus {
                     Button("Move to \(move.label)") { run { _ = await store.acceptReplySuggestion(reply) } }
                         .buttonStyle(.primaryPill)
+                    Button("Keep as is") { run { _ = await store.dismissReplySuggestion(reply) } }
+                        .buttonStyle(.secondaryLink)
+                        .help("Leave it where it is in Pipeline. The email still counts as hearing back.")
+                } else {
+                    Button("Mark as read") { run { _ = await store.markApplicationReplyRead(reply) } }
+                        .buttonStyle(.primaryPill)
                 }
-                Button("Keep as is") { run { _ = await store.dismissReplySuggestion(reply) } }
-                    .buttonStyle(.secondaryLink)
-                    .help("Leave it where it is in Pipeline. The email still counts as hearing back.")
                 if let url = reply.gmailURL {
                     Button("Open in Gmail") { NSWorkspace.shared.open(url) }.buttonStyle(.secondaryLink)
                 }

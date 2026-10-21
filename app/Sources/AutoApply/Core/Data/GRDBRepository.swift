@@ -371,7 +371,7 @@ final class GRDBRepository: AppRepository {
                     label: ApplicationReplyLabel(rawValue: row["label"] ?? "other") ?? .other,
                     suggestedStatus: (row["suggested_status"] as String?).flatMap(BoardStatus.init(rawValue:)),
                     suggestionState: ApplicationReplyItem.SuggestionState(rawValue: row["suggestion_state"] ?? "none") ?? .none,
-                    ambiguous: (row["ambiguous"] as Int?) == 1)
+                    ambiguous: (row["ambiguous"] as Int?) == 1, readAt: DBJSON.date(row["read_at"]))
             }
         }
     }
@@ -396,6 +396,8 @@ final class GRDBRepository: AppRepository {
             state: OutreachThreadState(rawValue: row["state"] ?? "draft") ?? .draft,
             outcome: (row["outcome"] as String?).flatMap(ThreadOutcome.init(rawValue:)), subject: row["subject"],
             unreadReply: (row["unread_reply"] as Int?) == 1, followupApproved: (row["followup_approved"] as Int?) == 1,
+            suggestedStatus: (row["suggested_status"] as String?).flatMap(BoardStatus.init(rawValue:)),
+            suggestionPending: (row["suggestion_state"] as String?) == "pending",
             nextActionAt: DBJSON.date(row["next_action_at"]),
             createdAt: DBJSON.date(row["created_at"]) ?? .distantPast, updatedAt: DBJSON.date(row["updated_at"]) ?? .distantPast)
     }

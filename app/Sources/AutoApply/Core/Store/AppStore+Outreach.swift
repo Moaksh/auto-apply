@@ -350,6 +350,53 @@ extension AppStore {
         return false
     }
 
+    /// Apply the board move a reply to one of your emails suggested (stored on the thread).
+    @discardableResult
+    func acceptOutreachSuggestion(threadID: Int) async -> Bool {
+        guard let thread = outreach.thread(id: threadID), let appID = thread.applicationID,
+              let target = outreach.suggestedMove(threadID: threadID) else { return false }
+        let previousStatus = jobs.job(applicationID: appID)?.status
+        let result = await perform(
+            .acceptOutreachSuggestion(AcceptOutreachSuggestionPayload(threadId: threadID)),
+            optimistic: { [outreach, jobs] in
+                outreach.mutateThread(threadID) { $0.suggestionPending = false }
+                outreach.clearSuggestedMove(threadID: threadID)
+                jobs.mutate(applicationID: appID) { $0.status = target; $0.statusUpdatedAt = Date() }
+            },
+            rollback: { [outreach, jobs] in
+                outreach.mutateThread(threadID) { $0.suggestionPending = thread.suggestionPending }
+                jobs.mutate(applicationID: appID) { $0.status = previousStatus }
+            })
+        guard case .success = result else { return false }
+        toasts.show("Moved to \(target.label)", symbol: StatusKind(status: target).symbol, style: .success)
+        return true
+    }
+
+    @discardableResult
+    func dismissOutreachSuggestion(threadID: Int) async -> Bool {
+        let was = outreach.thread(id: threadID)?.suggestionPending ?? false
+        let result = await perform(
+            .dismissOutreachSuggestion(DismissOutreachSuggestionPayload(threadId: threadID)),
+            optimistic: { [outreach] in
+                outreach.mutateThread(threadID) { $0.suggestionPending = false }
+                outreach.clearSuggestedMove(threadID: threadID)
+            },
+            rollback: { [outreach] in outreach.mutateThread(threadID) { $0.suggestionPending = was } })
+        if case .success = result { return true }
+        return false
+    }
+
+    /// An employer email the user has seen (no decision needed).
+    @discardableResult
+    func markApplicationReplyRead(_ reply: ApplicationReplyItem) async -> Bool {
+        let result = await perform(
+            .markApplicationReplyRead(MarkApplicationReplyReadPayload(replyId: reply.id)),
+            optimistic: { [outreach] in outreach.mutateReply(reply.id) { $0.readAt = Date() } },
+            rollback: { [outreach] in outreach.mutateReply(reply.id) { $0.readAt = nil } })
+        if case .success = result { return true }
+        return false
+    }
+
     /// Apply an employer reply's suggested board move (the board never moves by itself).
     @discardableResult
     func acceptReplySuggestion(_ reply: ApplicationReplyItem) async -> Bool {
@@ -360,7 +407,7 @@ extension AppStore {
         let result = await perform(
             .acceptReplySuggestion(AcceptReplySuggestionPayload(replyId: reply.id)),
             optimistic: { [outreach, jobs] in
-                outreach.mutateReply(reply.id) { $0.suggestionState = .accepted }
+                outreach.mutateReply(reply.id) { $0.suggestionState = .accepted; $0.readAt = $0.readAt ?? Date() }
                 if let target { jobs.mutate(applicationID: reply.applicationID) { $0.status = target; $0.statusUpdatedAt = Date() } }
             },
             rollback: { [outreach, jobs] in
@@ -378,7 +425,7 @@ extension AppStore {
         let previousState = outreach.replies.first { $0.id == reply.id }?.suggestionState ?? reply.suggestionState
         let result = await perform(
             .dismissReplySuggestion(DismissReplySuggestionPayload(replyId: reply.id)),
-            optimistic: { [outreach] in outreach.mutateReply(reply.id) { $0.suggestionState = .dismissed } },
+            optimistic: { [outreach] in outreach.mutateReply(reply.id) { $0.suggestionState = .dismissed; $0.readAt = $0.readAt ?? Date() } },
             rollback: { [outreach] in outreach.mutateReply(reply.id) { $0.suggestionState = previousState } })
         if case .success = result { return true }
         return false

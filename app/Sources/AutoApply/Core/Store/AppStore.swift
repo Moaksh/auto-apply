@@ -390,7 +390,7 @@ final class AppStore {
             c.outreachRepliesUnread = snapshotCounts.outreachRepliesUnread
             c.outreachUnknown = snapshotCounts.outreachUnknown
         }
-        c.applicationRepliesUnread = outreach.repliesLoaded ? outreach.pendingSuggestionCount : snapshotCounts.applicationRepliesUnread
+        c.applicationRepliesUnread = outreach.repliesLoaded ? outreach.employerRepliesNeedingYou : snapshotCounts.applicationRepliesUnread
         return c
     }
 
@@ -399,7 +399,7 @@ final class AppStore {
     var repliesNeedingYou: Int {
         let unread = outreach.isLoaded ? outreach.unreadReplyCount : snapshotCounts.outreachRepliesUnread
         let unknown = outreach.isLoaded ? outreach.unknownCount : snapshotCounts.outreachUnknown
-        let suggestions = outreach.repliesLoaded ? outreach.pendingSuggestionCount : snapshotCounts.applicationRepliesUnread
+        let suggestions = outreach.repliesLoaded ? outreach.employerRepliesNeedingYou : snapshotCounts.applicationRepliesUnread
         return unread + unknown + suggestions
     }
 

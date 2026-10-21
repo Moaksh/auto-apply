@@ -238,7 +238,8 @@ enum MockOutreach {
             data.applicationReplies.append(ApplicationReplyItem(
                 id: k + 1, applicationID: app, messageID: "<reply-\(k + 1)@\(domain(job))>", fromEmail: "talent@\(domain(job))",
                 fromName: "\(job.company) Talent", subject: r.2, snippet: r.3, receivedAt: now.addingTimeInterval(-Double(k + 1) * 5_400),
-                label: r.0, suggestedStatus: r.1, suggestionState: r.1 == nil ? .none : .pending))
+                label: r.0, suggestedStatus: r.1, suggestionState: r.1 == nil ? .none : .pending,
+                readAt: r.1 == nil ? now : nil))
         }
     }
 

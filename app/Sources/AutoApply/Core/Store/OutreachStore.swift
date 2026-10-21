@@ -55,8 +55,8 @@ final class OutreachStore {
     private(set) var scouting: Set<Int> = []
     /// The last scout result per company (this session).
     private(set) var lastScout: [Int: ScoutFinishedPayload] = [:]
-    /// Board moves suggested by `outreach_reply` events, per thread. The DB keeps no column for
-    /// this, so a suggestion lives for the session; it is only ever a suggestion.
+    /// Board moves suggested by `outreach_reply` events, per thread, until the DB row (v12
+    /// `outreach_threads.suggested_status`) arrives. Only ever a suggestion.
     private(set) var replyMoves: [Int: BoardStatus] = [:]
 
     // Indexes, rebuilt on every change.
@@ -173,6 +173,9 @@ final class OutreachStore {
     /// Employer replies whose suggested board move waits for Accept / Dismiss.
     var pendingSuggestions: [ApplicationReplyItem] { replies.filter(\.isPendingSuggestion) }
 
+    /// Employer emails not read yet that need no decision (e.g. "we received your application").
+    var unreadEmployerNotes: [ApplicationReplyItem] { replies.filter(\.isUnreadNote) }
+
     func pendingSuggestion(applicationID: Int?) -> ApplicationReplyItem? {
         guard let applicationID else { return nil }
         return replies.first { $0.applicationID == applicationID && $0.isPendingSuggestion }
@@ -188,6 +191,8 @@ final class OutreachStore {
     var unreadReplyCount: Int { data.threads.reduce(0) { $0 + ($1.unreadReply ? 1 : 0) } }
     var unknownCount: Int { unknownSends.count }
     var pendingSuggestionCount: Int { replies.reduce(0) { $0 + ($1.isPendingSuggestion ? 1 : 0) } }
+    /// Matches the engine's Counts.application_replies_unread: unread or a pending suggestion.
+    var employerRepliesNeedingYou: Int { replies.reduce(0) { $0 + ($1.isPendingSuggestion || $1.readAt == nil ? 1 : 0) } }
 
     /// Outreach status of an applied job.
     func followUpStatus(for job: JobItem) -> FollowUpStatus {
@@ -293,8 +298,9 @@ final class OutreachStore {
 
     /// The board move a reply suggested for this thread's application, if any (this session).
     func suggestedMove(threadID: Int) -> BoardStatus? {
-        guard let move = replyMoves[threadID], thread(id: threadID)?.applicationID != nil else { return nil }
-        return move
+        guard let thread = thread(id: threadID), thread.applicationID != nil else { return nil }
+        if thread.suggestionPending, let stored = thread.suggestedStatus { return stored }
+        return replyMoves[threadID]
     }
 
     func clearSuggestedMove(threadID: Int) { replyMoves.removeValue(forKey: threadID) }
