@@ -1,0 +1,29 @@
+{
+  "total": 3,
+  "jobPostings": [
+    {
+      "title": "Backend Engineer, Payments",
+      "externalPath": "/job/India-Bengaluru/Backend-Engineer--Payments_JR2027049",
+      "locationsText": "India, Bengaluru",
+      "postedOn": "Posted 2 Days Ago",
+      "bulletFields": ["JR2027049"]
+    },
+    {
+      "title": "Senior Software Engineer, Backend Platform",
+      "externalPath": "/job/US-CA-Santa-Clara/Senior-Software-Engineer--Backend-Platform_JR2021512",
+      "locationsText": "2 Locations",
+      "postedOn": "Posted Today",
+      "remoteType": "Hybrid",
+      "bulletFields": ["JR2021512"]
+    },
+    {
+      "title": "Account Executive",
+      "externalPath": "/job/Remote-UK/Account-Executive_JR2019001",
+      "locationsText": "Remote, UK",
+      "postedOn": "Posted 30+ Days Ago",
+      "bulletFields": ["JR2019001"]
+    }
+  ],
+  "facets": [],
+  "userAuthenticated": false
+}

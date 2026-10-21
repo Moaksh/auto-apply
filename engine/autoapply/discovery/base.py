@@ -128,6 +128,66 @@ def _token(value: str | None) -> str | None:
     return None
 
 
+# ---- boards without their own ``Ats`` value ------------------------------------------
+# ``companies.ats`` / ``jobs.ats`` have a CHECK constraint (greenhouse, lever, ashby, workday,
+# linkedin_easy_apply, other). SmartRecruiters / Workable / Recruitee boards are therefore stored as
+# ``ats = 'other'`` (or NULL) with the provider in the board token: ``"{provider}:{slug}"``.
+
+#: Providers whose identity lives in a ``"{provider}:{slug}"`` board token.
+TOKEN_PROVIDERS = ("smartrecruiters", "workable", "recruitee")
+
+
+def provider_token(provider: str, slug: str | None) -> str | None:
+    """``("workable", "acme")`` -> ``"workable:acme"`` (None when ``slug`` is not a valid token)."""
+    tok = _token(slug)
+    return f"{provider}:{tok}" if tok and provider in TOKEN_PROVIDERS else None
+
+
+def split_provider_token(token: str | None) -> tuple[str, str] | None:
+    """``"workable:acme"`` -> ``("workable", "acme")``; anything else -> None."""
+    if not token or ":" not in token:
+        return None
+    provider, _, slug = token.partition(":")
+    if provider in TOKEN_PROVIDERS and _token(slug):
+        return provider, slug
+    return None
+
+
+# Workday board tokens: ``"{tenant}.{instance}/{site}"`` (``"nvidia.wd5/NVIDIAExternalCareerSite"``),
+# everything the CXS endpoint needs. A bare ``"{tenant}"`` (when the URL names no site) is kept for
+# identity only and is not readable.
+_WD_INSTANCE = re.compile(r"^wd\d{1,3}$", re.I)
+_WD_LOCALE = re.compile(r"^[a-z]{2}(-[A-Za-z]{2,4})?$")
+_WD_NOT_SITE = {"job", "jobs", "login", "apply", "details", "wday", "userhome", "candidatehome"}
+
+
+def split_workday_token(token: str | None) -> tuple[str, str, str] | None:
+    """``"nvidia.wd5/Ext"`` -> ``("nvidia.wd5.myworkdayjobs.com", "nvidia", "Ext")``; bare tenant -> None."""
+    if not token or "/" not in token:
+        return None
+    host_part, _, site = token.partition("/")
+    tenant, _, instance = host_part.partition(".")
+    if not (_token(tenant) and _WD_INSTANCE.match(instance or "") and _token(site)):
+        return None
+    return f"{tenant}.{instance}.myworkdayjobs.com".lower(), tenant, site
+
+
+def _workday_token(host: str, segs: list[str]) -> str | None:
+    labels = host.split(".")
+    tenant = labels[0]
+    instance = labels[1] if len(labels) == 4 and _WD_INSTANCE.match(labels[1]) else None
+    site: str | None = None
+    if segs[:2] == ["wday", "cxs"] and len(segs) >= 4:  # the CXS API itself: /wday/cxs/{tenant}/{site}/jobs
+        tenant, site = segs[2], segs[3]
+    else:
+        rest = segs[1:] if segs and _WD_LOCALE.match(segs[0]) else segs
+        if rest and rest[0].lower() not in _WD_NOT_SITE:
+            site = rest[0]
+    if instance and _token(tenant) and _token(site):
+        return f"{tenant}.{instance.lower()}/{site}"
+    return _token(tenant)
+
+
 def detect_ats(url: str | None) -> tuple[Ats, str | None]:
     """Infer ``(ats, board_token)`` from an apply / board URL.
 
@@ -140,7 +200,10 @@ def detect_ats(url: str | None) -> tuple[Ats, str | None]:
         https://jobs.lever.co/acme/<uuid>/apply               -> (lever, "acme")
         https://jobs.eu.lever.co/acme/<uuid>                  -> (lever, "eu:acme")
         https://jobs.ashbyhq.com/ramp/<uuid>/application      -> (ashby, "ramp")
-        https://nvidia.wd5.myworkdayjobs.com/en-US/Ext/job/.. -> (workday, "nvidia")
+        https://nvidia.wd5.myworkdayjobs.com/en-US/Ext/job/.. -> (workday, "nvidia.wd5/Ext")
+        https://jobs.smartrecruiters.com/Acme/7431-eng        -> (other, "smartrecruiters:Acme")
+        https://apply.workable.com/acme/j/AB12CD/             -> (other, "workable:acme")
+        https://acme.recruitee.com/o/backend-engineer         -> (other, "recruitee:acme")
         anything else                                         -> (other, None)
     """
     if not url:
@@ -199,13 +262,45 @@ def detect_ats(url: str | None) -> tuple[Ats, str | None]:
         return Ats.ASHBY, None
 
     # ---- Workday ---------------------------------------------------------------------
-    if host.endswith(".myworkdayjobs.com") or host.endswith(".myworkdaysite.com") or host.endswith(".workday.com"):
+    if host.endswith(".myworkdayjobs.com"):
+        return Ats.WORKDAY, _workday_token(host, segs)
+    if host.endswith(".myworkdaysite.com") or host.endswith(".workday.com"):
         tenant = host.split(".")[0]
         if host.endswith(".myworkdaysite.com") and segs[:1] == ["recruiting"] and len(segs) >= 2:
             tenant = segs[1]
         return Ats.WORKDAY, _token(tenant)
 
+    # ---- SmartRecruiters / Workable / Recruitee (ats 'other', provider-prefixed token) --
+    if host in ("jobs.smartrecruiters.com", "careers.smartrecruiters.com"):
+        if segs and segs[0].lower() not in _SR_RESERVED:
+            return Ats.OTHER, provider_token("smartrecruiters", segs[0])
+        return Ats.OTHER, None
+    if host == "api.smartrecruiters.com":
+        # /v1/companies/{id}/postings
+        if len(segs) >= 3 and segs[0] == "v1" and segs[1] == "companies":
+            return Ats.OTHER, provider_token("smartrecruiters", segs[2])
+        return Ats.OTHER, None
+    if host == "apply.workable.com":
+        # /{slug}/j/{shortcode}; /api/v3/accounts/{slug}/jobs; /api/v1/widget/accounts/{slug}
+        if segs[:1] == ["api"]:
+            if "accounts" in segs and segs.index("accounts") + 1 < len(segs):
+                return Ats.OTHER, provider_token("workable", segs[segs.index("accounts") + 1])
+            return Ats.OTHER, None
+        if segs and segs[0].lower() not in _WORKABLE_RESERVED:
+            return Ats.OTHER, provider_token("workable", segs[0])
+        return Ats.OTHER, None
+    if host.endswith(".workable.com") and host.count(".") == 2 and host.split(".")[0] not in _WORKABLE_HOSTS:
+        return Ats.OTHER, provider_token("workable", host.split(".")[0])
+    if host.endswith(".recruitee.com") and host.count(".") == 2 and host.split(".")[0] not in _RECRUITEE_HOSTS:
+        return Ats.OTHER, provider_token("recruitee", host.split(".")[0])
+
     return Ats.OTHER, None
+
+
+_SR_RESERVED = {"oneclick-ui", "sr-jobs", "api", "widget", "static"}
+_WORKABLE_RESERVED = {"j", "api", "static", "assets"}
+_WORKABLE_HOSTS = {"www", "apply", "jobs", "api", "help", "resources", "careers", "app"}
+_RECRUITEE_HOSTS = {"www", "app", "api", "careers", "blog", "support", "docs", "help"}
 
 
 def extract_job_id(url: str | None) -> str | None:
@@ -472,6 +567,40 @@ async def fetch_json(
                 last = DiscoveryHTTPError(f"GET {url}: HTTP {resp.status_code}")
             else:
                 raise DiscoveryHTTPError(f"GET {url}: HTTP {resp.status_code}")
+        if attempt < retries:
+            await asyncio.sleep(backoff * (2**attempt))
+    raise DiscoveryHTTPError(str(last)) from last
+
+
+async def post_json(
+    http: httpx.AsyncClient,
+    url: str,
+    body: Any,
+    *,
+    retries: int = 2,
+    backoff: float = 0.5,
+) -> Any:
+    """POST a JSON body and decode the JSON answer, with :func:`fetch_json`'s retry rules.
+    Used by read-only search endpoints that take their query as a POST body (Workday CXS,
+    Workable); nothing is ever submitted."""
+    last: Exception | None = None
+    headers = {"User-Agent": USER_AGENT, "Accept": "application/json", "Content-Type": "application/json",
+               "Accept-Language": "en-US,en;q=0.9"}
+    for attempt in range(retries + 1):
+        try:
+            resp = await http.post(url, json=body, headers=headers)
+        except httpx.TransportError as e:
+            last = e
+        else:
+            if resp.status_code == 200:
+                try:
+                    return resp.json()
+                except ValueError as e:
+                    raise DiscoveryHTTPError(f"POST {url}: invalid JSON") from e
+            if resp.status_code in (429, 500, 502, 503, 504):
+                last = DiscoveryHTTPError(f"POST {url}: HTTP {resp.status_code}")
+            else:
+                raise DiscoveryHTTPError(f"POST {url}: HTTP {resp.status_code}")
         if attempt < retries:
             await asyncio.sleep(backoff * (2**attempt))
     raise DiscoveryHTTPError(str(last)) from last

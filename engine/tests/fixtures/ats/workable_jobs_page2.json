@@ -1,0 +1,9 @@
+{
+  "total": 3,
+  "results": [
+    {"id": 5851144, "shortcode": "19A136F8E2", "title": "Office Manager", "remote": false,
+     "location": {"city": "Warsaw", "country": "Poland", "countryCode": "PL", "region": "Masovian"},
+     "locations": [], "state": "published", "published": "2026-05-29T00:00:00.000Z", "type": "full",
+     "department": ["Operations"], "workplace": "on_site"}
+  ]
+}

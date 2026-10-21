@@ -1,0 +1,15 @@
+{
+  "id": "744000156878278",
+  "name": "Backend Engineer (Java)",
+  "company": {"identifier": "AcmeRobotics", "name": "Acme Robotics"},
+  "postingUrl": "https://jobs.smartrecruiters.com/AcmeRobotics/744000156878278-backend-engineer-java-",
+  "applyUrl": "https://jobs.smartrecruiters.com/AcmeRobotics/744000156878278-backend-engineer-java-?oga=true",
+  "jobAd": {
+    "sections": {
+      "companyDescription": {"title": "Company Description", "text": "<p>Acme builds robots.</p>"},
+      "jobDescription": {"title": "Job Description", "text": "<p>Build payment APIs in Java and Kafka.</p>"},
+      "qualifications": {"title": "Qualifications", "text": "<ul><li>4+ years backend</li></ul>"},
+      "additionalInformation": {"title": "Additional Information", "text": "<p>Salary: ₹30L - ₹45L per year.</p>"}
+    }
+  }
+}

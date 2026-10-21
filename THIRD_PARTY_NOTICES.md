@@ -9,6 +9,7 @@ AutoApply includes material adapted from the third-party projects listed below.
 - Used in:
   - `engine/autoapply/liveness.py`: the closed-posting phrase list, the conditional-clause guard ("... until the position has been filled" is not a closure), the anti-bot guard, and the ATS API rules (a Lever API 404 is not authoritative; Ashby is checked at board level). Ported to Python from `liveness-core.mjs` and `liveness-api.mjs`.
   - `engine/autoapply/legitimacy.py`: the posting-legitimacy signal set (candidate-paid fees, an agency posting with no employer named, a repost pattern that needs a minimum span and title identity, JD vagueness). Adapted from `modes/oferta-signals/21-candidate-paid-fees.md`, `modes/oferta-signals/10-agency-licensing-check.md` and `detect-reposts.mjs`.
+  - `engine/autoapply/discovery/workday.py` (the Workday CXS endpoint shape, `postedOn` label parsing and the location-from-posting-path fallback) and the endpoint shapes used in `smartrecruiters.py`, `workable.py` and `recruitee.py`. Adapted from `providers/*.mjs`.
 
 ```
 MIT License

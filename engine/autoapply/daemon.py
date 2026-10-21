@@ -472,6 +472,7 @@ def _construct(cls: type, available: dict[str, Any]) -> Any | None:
 
 def default_sources(available: dict[str, Any]) -> list[Source]:
     from autoapply.discovery.ashby import AshbySource
+    from autoapply.discovery.boards import BOARD_SOURCES
     from autoapply.discovery.careers_agent import CareerPageAgent
     from autoapply.discovery.company_finder import CompanyFinder
     from autoapply.discovery.glassdoor import GlassdoorSource
@@ -480,8 +481,8 @@ def default_sources(available: dict[str, Any]) -> list[Source]:
     from autoapply.discovery.lever import LeverSource
     from autoapply.discovery.linkedin import LinkedinSource
 
-    out = [_construct(c, available) for c in (GreenhouseSource, LeverSource, AshbySource, CareerPageAgent, LinkedinSource,
-                                              GlassdoorSource, GoogleJobsSource, CompanyFinder)]
+    out = [_construct(c, available) for c in (GreenhouseSource, LeverSource, AshbySource, *BOARD_SOURCES, CareerPageAgent,
+                                              LinkedinSource, GlassdoorSource, GoogleJobsSource, CompanyFinder)]
     return [s for s in out if s is not None]
 
 

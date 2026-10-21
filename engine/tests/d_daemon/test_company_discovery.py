@@ -15,6 +15,7 @@ from autoapply import db
 from autoapply.discovery.base import DiscoveredJob, DiscoveryContext
 from autoapply.discovery.careers_agent import CareerPageAgent, content_hash, link_postings, parse_jsonld_postings
 from autoapply.discovery.company_finder import (
+    ATS_SITES,
     BoardHit,
     CompanyFinder,
     company_name_for,
@@ -241,7 +242,7 @@ def test_plan_queries_rotates_and_rests() -> None:
     assert not {q.key for q in second} & {q.key for q in first}  # new queries first
     state["queries"] = {q.key: {"runs": 1, "rest_until": "2999-01-01T00:00:00"} for q in [*first, *second]}
     third = plan_queries(["AI Engineer", "ML Engineer"], ["Bengaluru"], state, 8)
-    assert len(third) == 4 and not {q.key for q in third} & {q.key for q in [*first, *second]}
+    assert len(third) == min(8, 2 * len(ATS_SITES) - 4) and not {q.key for q in third} & {q.key for q in [*first, *second]}
     assert "start=10" in type(first[0])(first[0].key, "r", "", Ats.LEVER, "jobs.lever.co", 1).url()
 
 

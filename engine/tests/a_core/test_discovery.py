@@ -56,7 +56,7 @@ GH_API = "https://boards-api.greenhouse.io/v1/boards"
         ("https://jobs.ashbyhq.com/ramp/34413f8d/application", (Ats.ASHBY, "ramp")),
         ("https://api.ashbyhq.com/posting-api/job-board/linear", (Ats.ASHBY, "linear")),
         ("https://www.notion.so/careers?ashby_jid=abc", (Ats.ASHBY, None)),
-        ("https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite/job/x_JR1", (Ats.WORKDAY, "nvidia")),
+        ("https://nvidia.wd5.myworkdayjobs.com/en-US/NVIDIAExternalCareerSite/job/x_JR1", (Ats.WORKDAY, "nvidia.wd5/NVIDIAExternalCareerSite")),
         ("https://www.linkedin.com/jobs/view/123", (Ats.OTHER, None)),
         ("", (Ats.OTHER, None)),
         (None, (Ats.OTHER, None)),
@@ -308,7 +308,7 @@ async def test_careers_source(conn) -> None:  # type: ignore[no-untyped-def]
     companies = {j.company_name for j in jobs}
     assert "Globex" in companies  # derived from the career page domain
     sre = [j for j in jobs if j.ats is Ats.WORKDAY]
-    assert len(sre) == 1 and sre[0].title == "Site Reliability Engineer" and sre[0].board_token == "globex"
+    assert len(sre) == 1 and sre[0].title == "Site Reliability Engineer" and sre[0].board_token == "globex.wd5/Globex_Careers"
     assert len(jobs) == 3 + 2 + 3 + 1
     assert ctx.errors == {}
 

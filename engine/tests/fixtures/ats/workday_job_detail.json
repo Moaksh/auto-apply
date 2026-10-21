@@ -1,0 +1,21 @@
+{
+  "jobPostingInfo": {
+    "id": "d78cc46938e010393f2ae54d49830000",
+    "title": "Senior Software Engineer, Backend Platform",
+    "jobDescription": "<p>Globex is hiring a backend engineer.</p><ul><li>5+ years of Go or Java</li><li>Distributed systems</li></ul><p>The base salary range is $180,000 - $220,000.</p>",
+    "location": "US, CA, Santa Clara",
+    "additionalLocations": ["US, WA, Seattle"],
+    "postedOn": "Posted Today",
+    "startDate": "2026-10-21",
+    "timeType": "Full time",
+    "jobReqId": "JR2021512",
+    "jobPostingId": "Senior-Software-Engineer--Backend-Platform_JR2021512",
+    "jobPostingSiteId": "Globex_Careers",
+    "remoteType": "Hybrid",
+    "canApply": true,
+    "posted": true,
+    "externalUrl": "https://globex.wd5.myworkdayjobs.com/Globex_Careers/job/US-CA-Santa-Clara/Senior-Software-Engineer--Backend-Platform_JR2021512"
+  },
+  "hiringOrganization": {"name": "Globex Corp", "url": ""},
+  "userAuthenticated": false
+}

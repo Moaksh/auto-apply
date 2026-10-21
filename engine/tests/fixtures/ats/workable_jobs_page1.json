@@ -1,0 +1,17 @@
+{
+  "total": 3,
+  "nextPage": "WzE3ODkzNDQwMDAwMDAsNjA5NzUyMl0=",
+  "results": [
+    {"id": 6125026, "shortcode": "DB4D7C0EC8", "title": "Senior Backend Engineer - EMEA Remote", "remote": true,
+     "location": {"city": "", "country": "France", "countryCode": "FR", "region": null},
+     "locations": [{"city": "", "country": "France", "countryCode": "FR", "hidden": true, "region": null}],
+     "state": "published", "published": "2026-09-21T00:00:00.000Z", "type": "full", "department": ["Engineering"],
+     "workplace": "remote"},
+    {"id": 6074222, "shortcode": "9E2A4C02C7", "title": "Backend Developer (Python)", "remote": false,
+     "location": {"city": "Pune", "country": "India", "countryCode": "IN", "region": "Maharashtra"},
+     "locations": [{"city": "Pune", "country": "India", "countryCode": "IN", "hidden": false, "region": "Maharashtra"},
+                   {"city": "Bengaluru", "country": "India", "countryCode": "IN", "hidden": false, "region": "Karnataka"}],
+     "state": "published", "published": "2026-09-02T00:00:00.000Z", "type": "full", "department": ["Engineering"],
+     "workplace": "hybrid"}
+  ]
+}

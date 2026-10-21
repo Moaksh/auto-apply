@@ -48,6 +48,7 @@ from autoapply.discovery.base import (
     infer_remote,
     parse_datetime,
 )
+from autoapply.discovery.boards import is_readable_board
 from autoapply.discovery.careers import _BOARD_FETCHERS, company_name_from_url, find_ats_boards, pick_rendered_postings
 from autoapply.enums import Ats, JobSource
 from autoapply.models import LogPayload, utcnow
@@ -301,8 +302,8 @@ class CareerPageAgent:
         for c in ctx.companies:
             if not c.careers_url or c.careers_url in seen:
                 continue
-            if c.ats is not None and Ats(c.ats) in _BOARD_FETCHERS and c.board_token:
-                continue  # the Greenhouse / Lever / Ashby source already reads this company
+            if is_readable_board(c.ats, c.board_token):
+                continue  # a board source (Greenhouse / Lever / Ashby / Workday / ...) already reads this company
             seen.add(c.careers_url)
             out.append((c.careers_url, c.name))
         for url in ctx.preferences.career_page_urls:

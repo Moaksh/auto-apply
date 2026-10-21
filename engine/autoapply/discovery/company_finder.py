@@ -2,7 +2,8 @@
 
 Each run reads a couple of Google result pages for queries like
 ``site:boards.greenhouse.io "Backend Engineer" Bengaluru`` (also ``job-boards.greenhouse.io``,
-``jobs.lever.co``, ``jobs.ashbyhq.com``), turns the result links into ``(ats, board_token)``,
+``jobs.lever.co``, ``jobs.ashbyhq.com``, ``myworkdayjobs.com``, ``jobs.smartrecruiters.com``,
+``apply.workable.com``, ``recruitee.com``), turns the result links into ``(ats, board_token)``,
 verifies every new board through its free public JSON API (the same readers the board sources
 use) and counts the open roles that match the user's roles (:mod:`autoapply.role_focus`):
 
@@ -33,7 +34,8 @@ from typing import Any
 from urllib.parse import parse_qs, quote_plus, urlsplit
 
 from autoapply import db
-from autoapply.discovery.base import DiscoveredJob, DiscoveryContext, detect_ats, wanted_title
+from autoapply.discovery.base import DiscoveredJob, DiscoveryContext, detect_ats, split_provider_token, wanted_title
+from autoapply.discovery.boards import is_readable_board, read_board
 from autoapply.discovery.linkedin import (
     BrowserFactory,
     EmitFn,
@@ -76,7 +78,14 @@ ATS_SITES: tuple[tuple[Ats, str], ...] = (
     (Ats.GREENHOUSE, "job-boards.greenhouse.io"),
     (Ats.LEVER, "jobs.lever.co"),
     (Ats.ASHBY, "jobs.ashbyhq.com"),
+    # Boards read by :mod:`autoapply.discovery.boards` (the token says which provider).
+    (Ats.WORKDAY, "myworkdayjobs.com"),
+    (Ats.OTHER, "jobs.smartrecruiters.com"),
+    (Ats.OTHER, "apply.workable.com"),
+    (Ats.OTHER, "recruitee.com"),
 )
+#: ATSs whose boards are always readable given a token; Workday / ``other`` depend on the token
+#: (:func:`autoapply.discovery.boards.is_readable_board`).
 READERS = (Ats.GREENHOUSE, Ats.LEVER, Ats.ASHBY)
 _CAPTCHA_SELECTORS = {"captcha": ["form#captcha-form", "#recaptcha"], "login_wall": []}
 
@@ -178,7 +187,7 @@ def parse_board_results(html: str, query: str = "") -> list[BoardHit]:
         if not url.startswith("http"):
             continue
         ats, token = detect_ats(url)
-        if ats not in READERS or not token:
+        if not token or not is_readable_board(ats, token):
             continue
         key = (ats, token.lower())
         if key in out:
@@ -201,6 +210,10 @@ _TITLE_PATTERNS = (
 def company_name_for(hit: BoardHit, jobs: list[DiscoveredJob]) -> str:
     """The company's display name: the board's own name, then the Google title, then the token."""
     token = hit.token.removeprefix("eu:")
+    if (prov := split_provider_token(token)) is not None:
+        token = prov[1]  # "workable:acme" -> "acme"
+    elif "/" in token:
+        token = token.split(".", 1)[0]  # Workday "acme.wd5/External" -> "acme"
     for j in jobs:  # Greenhouse returns ``company_name``; the others echo the token
         name = (j.company_name or "").strip()
         if name and name.lower() != token.lower():
@@ -364,6 +377,11 @@ class CompanyFinder:
         return hits
 
     def _known(self, ats: Ats, token: str) -> Any:
+        if ats is Ats.OTHER:  # provider-prefixed token ("workable:acme"); the row's ats may be NULL
+            return self.conn.execute(
+                "SELECT id, name, watch FROM companies WHERE (ats IS NULL OR ats = 'other') AND lower(board_token) = lower(?)",
+                (token,),
+            ).fetchone()
         return self.conn.execute(
             "SELECT id, name, watch FROM companies WHERE ats = ? AND lower(board_token) = lower(?)", (ats.value, token)
         ).fetchone()
@@ -372,8 +390,6 @@ class CompanyFinder:
         return len(db.list_companies(self.conn, watch_only=True)) < self.max_watched
 
     async def _verify(self, ctx: DiscoveryContext, hits: list[BoardHit], st: dict[str, Any], report: FinderReport) -> list[DiscoveredJob]:
-        from autoapply.discovery.careers import _BOARD_FETCHERS
-
         checked: dict[str, str] = st.setdefault("checked", {})
         cutoff = (utcnow() - timedelta(days=RECHECK_DAYS)).isoformat()
         todo: list[BoardHit] = []
@@ -395,7 +411,7 @@ class CompanyFinder:
         async def fetch(h: BoardHit) -> tuple[BoardHit, list[DiscoveredJob] | None]:
             async with sem:
                 try:
-                    return h, await _BOARD_FETCHERS[h.ats](ctx.http, h.token, None)
+                    return h, await read_board(ctx.http, h.ats, h.token, None)
                 except Exception as e:  # noqa: BLE001 - a dead board is just not a suggestion
                     log.info("company finder: board %s:%s did not verify: %s", h.ats.value, h.token, e)
                     return h, None

@@ -1,0 +1,41 @@
+{
+  "offers": [
+    {
+      "id": 2783543, "slug": "backend-engineer-6", "title": "Backend Engineer", "status": "published",
+      "careers_url": "https://careers.acme.example/o/backend-engineer-6",
+      "careers_apply_url": "https://careers.acme.example/o/backend-engineer-6/c/new",
+      "company_name": "Acme Robotics", "department": "Engineering",
+      "location": "Amsterdam, Noord-Holland, Netherlands", "city": "Amsterdam", "country": "Netherlands",
+      "locations": [
+        {"id": 39979, "name": "Amsterdam", "city": "Amsterdam", "country": "Netherlands", "country_code": "NL"},
+        {"id": 39967, "name": "Sofia", "city": "Sofia", "country": "Bulgaria", "country_code": "BG"}
+      ],
+      "remote": false, "hybrid": true, "on_site": false,
+      "description": "<p>Build the core banking ledger in Go.</p>",
+      "requirements": "<ul><li>Go, Postgres</li></ul>",
+      "salary": {"min": "5000", "max": "7000", "period": "month", "currency": "EUR"},
+      "employment_type_code": "fulltime_permanent",
+      "published_at": "2026-10-15 09:31:36 UTC", "created_at": "2026-10-14 11:37:16 UTC"
+    },
+    {
+      "id": 2783544, "slug": "data-engineer", "title": "Data Engineer (Remote)", "status": "published",
+      "careers_url": "https://acme.recruitee.com/o/data-engineer",
+      "company_name": "Acme Robotics", "location": "", "city": "", "country": "Germany", "locations": [],
+      "remote": true, "hybrid": false, "on_site": false,
+      "description": "<p>Pipelines. €60k - €80k.</p>", "requirements": "",
+      "salary": {"min": null, "max": null, "period": null, "currency": null},
+      "published_at": "2026-10-10 10:00:00 UTC"
+    },
+    {
+      "id": 2783545, "slug": "warehouse-lead", "title": "Warehouse Lead", "status": "published",
+      "careers_url": "https://acme.recruitee.com/o/warehouse-lead",
+      "company_name": "Acme Robotics", "location": "Utrecht, Netherlands", "locations": [],
+      "remote": false, "hybrid": false, "on_site": true,
+      "description": "<p>Run the warehouse.</p>", "published_at": "2026-10-01 10:00:00 UTC"
+    },
+    {
+      "id": 2783546, "slug": "old-role", "title": "Archived Role", "status": "closed",
+      "careers_url": "https://acme.recruitee.com/o/old-role", "company_name": "Acme Robotics"
+    }
+  ]
+}

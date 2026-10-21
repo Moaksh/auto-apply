@@ -1,0 +1,37 @@
+{
+  "offset": 0,
+  "limit": 100,
+  "totalFound": 3,
+  "content": [
+    {
+      "id": "744000156878278",
+      "name": "Backend Engineer (Java)",
+      "uuid": "bf69ef4d-3ff8-47ef-805e-8348a8460433",
+      "refNumber": "REF299048B",
+      "company": {"identifier": "AcmeRobotics", "name": "Acme Robotics"},
+      "releasedDate": "2026-10-21T19:25:58.435Z",
+      "location": {"city": "Bengaluru", "region": "KA", "country": "in", "remote": false, "hybrid": true,
+                   "fullLocation": "Bengaluru, KA, India"},
+      "department": {"id": "1", "label": "Engineering"},
+      "typeOfEmployment": {"id": "permanent", "label": "Full-time"},
+      "experienceLevel": {"id": "associate", "label": "Associate"}
+    },
+    {
+      "id": "744000156878279",
+      "name": "Platform Engineer",
+      "company": {"identifier": "AcmeRobotics", "name": "Acme Robotics"},
+      "releasedDate": "2026-10-20T08:00:00.000Z",
+      "location": {"city": "", "country": "de", "remote": true, "hybrid": false},
+      "department": {},
+      "typeOfEmployment": {"id": "permanent", "label": "Full-time"}
+    },
+    {
+      "id": "744000156878280",
+      "name": "Shipping Supervisor (1st Shift)",
+      "company": {"identifier": "AcmeRobotics", "name": "Acme Robotics"},
+      "releasedDate": "2026-10-19T08:00:00.000Z",
+      "location": {"city": "Vernon Hills", "region": "IL", "country": "us", "remote": false, "hybrid": false,
+                   "fullLocation": "Vernon Hills, IL, United States"}
+    }
+  ]
+}

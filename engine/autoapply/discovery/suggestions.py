@@ -7,7 +7,9 @@ Ashby) or a company's own career site. Companies that are not on the watchlist b
 * an ATS board we can read is watched automatically while there is room
   (``MAX_WATCHED_COMPANIES``), recorded as status ``auto`` so it can be undone; past the cap it
   becomes a pending suggestion;
-* a plain career page (or an ATS without a public reader, e.g. Workday / SmartRecruiters) is
+* a readable board also covers Workday (when the URL names the career site), SmartRecruiters,
+  Workable and Recruitee (:mod:`autoapply.discovery.boards`);
+* a plain career page (or an ATS without a public reader, e.g. iCIMS / Taleo) is
   never watched by itself: it is only suggested, with the guessed career-page URL that the
   career-page agents (:mod:`autoapply.discovery.careers_agent`) read once accepted;
 * a company the user dismissed is never suggested or watched automatically again.
@@ -24,7 +26,8 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from autoapply import db
-from autoapply.discovery.base import DiscoveredJob, detect_ats
+from autoapply.discovery.base import DiscoveredJob, detect_ats, split_provider_token, split_workday_token
+from autoapply.discovery.boards import is_readable_board
 from autoapply.enums import Ats, SuggestionStatus
 from autoapply.models import Company, CompanySuggestion
 
@@ -32,7 +35,9 @@ log = logging.getLogger("autoapply.discovery.suggestions")
 
 #: Sources whose listings point at other companies' sites (the ones worth learning from).
 BROWSER_SOURCES = frozenset({"linkedin", "glassdoor", "google"})
-#: ATSs with a public board reader (``discovery.greenhouse`` / ``lever`` / ``ashby``).
+#: ATSs with a public board reader (``discovery.greenhouse`` / ``lever`` / ``ashby``). Workday and the
+#: provider-prefixed ``other`` boards are readable too, depending on the token: see
+#: :func:`autoapply.discovery.boards.is_readable_board`.
 READABLE_ATS = (Ats.GREENHOUSE, Ats.LEVER, Ats.ASHBY)
 
 #: Job boards / aggregators: an apply link there says nothing about the company's own site.
@@ -106,6 +111,16 @@ def board_url(ats: Ats, token: str) -> str:
         return f"https://jobs.eu.lever.co/{token[3:]}" if token.startswith("eu:") else f"https://jobs.lever.co/{token}"
     if ats is Ats.ASHBY:
         return f"https://jobs.ashbyhq.com/{token}"
+    if ats is Ats.WORKDAY and (wd := split_workday_token(token)):
+        return f"https://{wd[0]}/{wd[2]}"
+    if (prov := split_provider_token(token)) is not None:
+        provider, slug = prov
+        if provider == "smartrecruiters":
+            return f"https://jobs.smartrecruiters.com/{slug}"
+        if provider == "workable":
+            return f"https://apply.workable.com/{slug}/"
+        if provider == "recruitee":
+            return f"https://{slug}.recruitee.com/"
     return token
 
 
@@ -115,7 +130,7 @@ def board_enrichment(conn: sqlite3.Connection, dj: DiscoveredJob, *, room: bool)
     A browser listing that links to a readable ATS board watches the company (free JSON every later
     run) while there is ``room`` under the watchlist cap, unless the user dismissed it."""
     enrich: dict[str, Any] = {}
-    if dj.board_token and dj.ats in READABLE_ATS:
+    if dj.board_token and is_readable_board(dj.ats, dj.board_token):
         enrich = {"ats": dj.ats, "board_token": dj.board_token}
     auto = False
     if enrich and str(getattr(dj.source, "value", dj.source)) in BROWSER_SOURCES and room:
@@ -149,7 +164,7 @@ def _note_listing(
         ats = ats if ats is not Ats.OTHER else d_ats
         token = token or d_tok
     via = f"{dj.title} ({source})"
-    if auto_watched and ats in READABLE_ATS and token:
+    if auto_watched and is_readable_board(ats, token):
         return db.suggest_company(
             conn, dj.company_name, url=board_url(ats, token), source=source, ats=ats, board_token=token, found_via=via,
             sample_title=dj.title, add_matching=1 if created else 0, status=SuggestionStatus.AUTO,
@@ -162,7 +177,7 @@ def _note_listing(
                 db.suggest_company(conn, dj.company_name, url=existing.url, source=existing.source, add_matching=1,
                                    status=SuggestionStatus.AUTO)
         return None
-    if ats in READABLE_ATS and token:
+    if is_readable_board(ats, token):
         # Readable board but no room left on the watchlist: let the user decide.
         return db.suggest_company(
             conn, dj.company_name, url=board_url(ats, token), source=source, ats=ats, board_token=token, found_via=via,
