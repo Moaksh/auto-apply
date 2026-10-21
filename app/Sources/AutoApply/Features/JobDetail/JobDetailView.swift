@@ -137,7 +137,11 @@ struct JobDetailView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .background(Palette.error.opacity(0.10), in: RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
             }
+            if let reply = store.outreach.pendingSuggestion(applicationID: job.applicationID) {
+                ReplySuggestionCard(reply: reply)
+            }
             MatchBreakdown(job: job, threshold: store.preferences.matchThreshold)
+            if job.state == .submitted { JobOutreachSection(job: job) }
             resumeSection(job)
             overrides(job)
             JobNotesEditor(jobID: job.id, notes: job.notes, onEditingChanged: actions.editingChanged)

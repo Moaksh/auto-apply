@@ -18,6 +18,9 @@ struct RepositoryData: Sendable {
     var profile = Profile()
     var neverGuess = NeverGuess()
     var runs: [RunItem] = []
+    var outreach = OutreachData()
+    var contactEvidence: [ContactEvidenceItem] = []
+    var applicationReplies: [ApplicationReplyItem] = []
 
     // MARK: Mutation helpers (used by MockDaemon to mirror daemon writes)
 
@@ -127,5 +130,12 @@ final class InMemoryRepository: AppRepository {
     func neverGuess() -> AsyncStream<NeverGuess> { observe { $0.neverGuess } }
     func runs(limit: Int) -> AsyncStream<[RunItem]> {
         observe { Array($0.runs.sorted { $0.startedAt > $1.startedAt }.prefix(limit)) }
+    }
+    func outreach() -> AsyncStream<OutreachData> { observe { $0.outreach } }
+    func contactEvidence(contactID: Int) async -> [ContactEvidenceItem] {
+        data.withLock { d in d.contactEvidence.filter { $0.contactID == contactID }.sorted { $0.observedAt > $1.observedAt } }
+    }
+    func applicationReplies() -> AsyncStream<[ApplicationReplyItem]> {
+        observe { $0.applicationReplies.sorted { ($0.receivedAt, $0.id) > ($1.receivedAt, $1.id) } }
     }
 }

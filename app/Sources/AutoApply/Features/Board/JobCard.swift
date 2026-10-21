@@ -12,11 +12,16 @@ struct JobCard: View, Equatable {
     var isSelected: Bool
     var isDragging: Bool
     var now: Date
+    /// Cold outreach on this application (the envelope badge).
+    var outreach: JobOutreachMark? = nil
+    /// An employer reply's suggested board move, waiting for Accept / Keep as is.
+    var replySuggestion: BoardStatus? = nil
     var onNudgeAnswer: (BoardStatus) -> Void = { _ in }
 
     nonisolated static func == (a: JobCard, b: JobCard) -> Bool {
         a.job == b.job && a.threshold == b.threshold && a.questionCount == b.questionCount && a.nudge == b.nudge
             && a.resumeLabel == b.resumeLabel && a.isSelected == b.isSelected && a.isDragging == b.isDragging
+            && a.outreach == b.outreach && a.replySuggestion == b.replySuggestion
             && BoardRules.ageText(since: BoardRules.ageReference(a.job), now: a.now) == BoardRules.ageText(since: BoardRules.ageReference(b.job), now: b.now)
     }
 
@@ -74,7 +79,8 @@ struct JobCard: View, Equatable {
     @ViewBuilder
     private var chips: some View {
         let stalled = job.state == .queued || job.state == .failed || job.state == .unknownVerify
-        if questionCount > 0 || nudge != nil || job.state == .failed || job.state == .unknownVerify || job.state == .awaitingReview || (stalled && ageDays >= 7) {
+        if questionCount > 0 || nudge != nil || job.state == .failed || job.state == .unknownVerify || job.state == .awaitingReview || (stalled && ageDays >= 7)
+            || outreach != nil || replySuggestion != nil {
             HStack(spacing: Space.xs) {
                 if questionCount > 0 {
                     Badge(C3Format.plural(questionCount, "question"), symbol: StatusKind.needsYou.symbol, tone: .warning)
@@ -97,6 +103,14 @@ struct JobCard: View, Equatable {
                     .background(Palette.sunken, in: Capsule())
                 }
                 if stalled && ageDays >= 7 { Badge("\(ageDays) days", symbol: "clock") }
+                if let replySuggestion {
+                    Badge("Reply: \(replySuggestion.label)?", symbol: "envelope.badge", tone: .warning)
+                        .help("An email about this application suggests moving it to \(replySuggestion.label). Accept it in Needs You or the job's details.")
+                }
+                if let outreach {
+                    Badge(outreach.text, symbol: outreach.symbol, tone: { if case .replied = outreach { return .status(.interview) } else { return .neutral } }())
+                        .help("Cold email for this application")
+                }
             }
         }
     }
@@ -110,6 +124,8 @@ struct JobCard: View, Equatable {
         parts.append(job.ats.label)
         if questionCount > 0 { parts.append("\(questionCount) open questions") }
         if case .heardBack(let days)? = nudge { parts.append("applied \(days) days ago, heard back?") }
+        if let outreach { parts.append(outreach.text) }
+        if let replySuggestion { parts.append("an employer reply suggests \(replySuggestion.label)") }
         return parts.joined(separator: ", ")
     }
 }

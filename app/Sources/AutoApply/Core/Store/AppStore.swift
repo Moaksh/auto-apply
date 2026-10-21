@@ -55,6 +55,7 @@ final class AppStore {
     let jobs = JobsStore()
     let library = LibraryStore()
     let activity = ActivityStore()
+    let outreach = OutreachStore()
     private(set) var stats = DashboardStats()
 
     @ObservationIgnored private(set) var client: any DaemonConnecting
@@ -205,6 +206,8 @@ final class AppStore {
         pump(repo.profile()) { store, v in store.library.profile = v }
         pump(repo.neverGuess()) { store, v in store.library.neverGuess = v }
         pump(repo.runs(limit: 50)) { store, v in store.library.runs = v }
+        pump(repo.outreach()) { store, v in store.outreach.replace(v) }
+        pump(repo.applicationReplies()) { store, v in store.outreach.replaceReplies(v) }
         pump(repo.activity(initialLimit: activity.maxRows)) { store, delta in store.activity.apply(delta) }
     }
 
@@ -228,6 +231,7 @@ final class AppStore {
         }
         live.apply(event, replyTo: envelope.replyTo, now: now)
         inbox.apply(event, now: now)
+        outreach.apply(event)
         AppNotifier.shared.handle(event, store: self)
         switch event {
         case .snapshot:
@@ -377,7 +381,35 @@ final class AppStore {
         c.submittedToday = stats.computedAt == .distantPast ? jobs.submittedCount(on: today) : stats.appliedToday
         c.discoveredToday = stats.computedAt == .distantPast ? jobs.discoveredCount(on: today) : stats.discoveredToday
         c.submittedTotal = jobs.count(.submitted)
+        if outreach.isLoaded {
+            c.outreachDrafts = outreach.draftCount
+            c.outreachRepliesUnread = outreach.unreadReplyCount
+            c.outreachUnknown = outreach.unknownCount
+        } else {
+            c.outreachDrafts = snapshotCounts.outreachDrafts
+            c.outreachRepliesUnread = snapshotCounts.outreachRepliesUnread
+            c.outreachUnknown = snapshotCounts.outreachUnknown
+        }
+        c.applicationRepliesUnread = outreach.repliesLoaded ? outreach.pendingSuggestionCount : snapshotCounts.applicationRepliesUnread
         return c
+    }
+
+    /// Needs You ▸ Replies: unread replies to your emails, employer replies with a suggested board
+    /// move, and emails that may not have gone out. From the DB once loaded, else the snapshot.
+    var repliesNeedingYou: Int {
+        let unread = outreach.isLoaded ? outreach.unreadReplyCount : snapshotCounts.outreachRepliesUnread
+        let unknown = outreach.isLoaded ? outreach.unknownCount : snapshotCounts.outreachUnknown
+        let suggestions = outreach.repliesLoaded ? outreach.pendingSuggestionCount : snapshotCounts.applicationRepliesUnread
+        return unread + unknown + suggestions
+    }
+
+    /// The Needs You sidebar badge: open questions and tasks plus the Replies section.
+    var needsYouCount: Int { inbox.openCount + repliesNeedingYou }
+
+    /// The Cold Email sidebar badge: drafts waiting for your review plus unread replies.
+    var coldEmailBadge: Int {
+        outreach.isLoaded ? outreach.draftCount + outreach.unreadReplyCount
+            : snapshotCounts.outreachDrafts + snapshotCounts.outreachRepliesUnread
     }
 
     var caps: CapsStatus {

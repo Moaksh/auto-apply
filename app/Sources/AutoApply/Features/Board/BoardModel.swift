@@ -140,6 +140,30 @@ enum BoardRules {
         return out
     }
 
+    // MARK: Outreach
+
+    /// The envelope on a card: emailed someone there, or they replied. Keyed by application id.
+    @MainActor
+    static func outreachMarks(_ outreach: OutreachStore) -> [Int: JobOutreachMark] {
+        var marks: [Int: JobOutreachMark] = [:]
+        for thread in outreach.data.threads where thread.applicationID != nil && thread.state != .cancelled {
+            let name = outreach.contact(id: thread.contactID)?.fullName.split(separator: " ").first.map(String.init)
+            let mark: JobOutreachMark?
+            switch thread.state {
+            case .replied: mark = .replied(name)
+            case .active, .closed, .bounced, .optedOut:
+                mark = outreach.lastSent(threadID: thread.id) != nil ? .emailed(name) : nil
+            case .draft:
+                mark = outreach.lastSent(threadID: thread.id) != nil ? .emailed(name) : nil
+            case .cancelled: mark = nil
+            }
+            guard let mark, let app = thread.applicationID else { continue }
+            if case .replied = marks[app] { continue }
+            marks[app] = mark
+        }
+        return marks
+    }
+
     // MARK: Skip reasons
 
     /// Normalized key: "excluded_keyword:crypto" → "excluded_keyword".
@@ -165,6 +189,9 @@ enum BoardRules {
         case "company_cooldown": return "Applied here recently"
         case "daily_cap_reached": return "Daily cap reached"
         case "no_apply_url": return "No company apply link"
+        case "posting_closed": return "Posting closed"
+        case "asks_candidate_to_pay": return "Asks you to pay a fee"
+        case "risk_review": return "Flagged: review before sending"
         default: return skipReasonLabel(raw)
         }
     }
@@ -185,6 +212,9 @@ enum BoardRules {
         case "seniority_mismatch": "Seniority mismatch"
         case "duplicate": "Duplicate"
         case "user": "Skipped by you"
+        case "posting_closed": "Posting closed"
+        case "asks_candidate_to_pay": "Asks for a fee"
+        case "risk_review": "Risk review"
         default: (raw ?? "Other").replacingOccurrences(of: "_", with: " ").capitalized
         }
     }
@@ -420,6 +450,27 @@ extension BoardColumn {
         case .offer: self = .offer
         case .rejected: self = .rejected
         case .ghosted: self = .ghosted
+        }
+    }
+}
+
+/// A pipeline card's outreach marker (the envelope).
+enum JobOutreachMark: Equatable, Sendable {
+    /// First name of the person emailed, when known.
+    case emailed(String?)
+    case replied(String?)
+
+    var text: String {
+        switch self {
+        case .emailed(let name): name.map { "Emailed \($0)" } ?? "Emailed"
+        case .replied(let name): name.map { "\($0) replied" } ?? "Replied"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .emailed: "envelope"
+        case .replied: "envelope.open.fill"
         }
     }
 }

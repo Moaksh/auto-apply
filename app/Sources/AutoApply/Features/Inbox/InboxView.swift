@@ -30,7 +30,7 @@ struct InboxView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if !store.hasSnapshot {
                 LoadingState(message: "Loading questions…")
-            } else if model.isInboxZero {
+            } else if model.isInboxZero && model.replyItems.isEmpty {
                 InboxZeroView(model: model)
             } else {
                 HStack(spacing: 0) {
@@ -38,7 +38,11 @@ struct InboxView: View {
                         .frame(width: 340)
                     Divider()
                     Group {
-                        if let cluster = model.selectedCluster {
+                        if let reply = model.selectedReply {
+                            ReplyPane(model: model, item: reply)
+                                .id(reply.key)
+                                .transition(reduced ? AnyTransition.opacity : AnyTransition(.blurReplace))
+                        } else if let cluster = model.selectedCluster {
                             Group {
                                 if cluster.isAction {
                                     ActionPane(model: model, cluster: cluster, undoManager: undoManager)
@@ -62,6 +66,7 @@ struct InboxView: View {
         .background(Palette.windowBackground)
         .onAppear { model.ensureSelection() }
         .onChange(of: store.inbox.clusters.map(\.clusterId)) { model.ensureSelection() }
+        .onChange(of: model.replyItems.map(\.key)) { model.ensureSelection() }
     }
 
     private func clusterList(_ model: InboxModel) -> some View {
@@ -79,6 +84,8 @@ struct InboxView: View {
                             .padding(.top, actions.isEmpty ? 0 : Space.m)
                         ForEach(questions, id: \.clusterId) { row($0, model) }
                     }
+                    RepliesListSection(model: model)
+                        .padding(.top, actions.isEmpty && questions.isEmpty ? 0 : Space.m)
                     AnsweredTodaySection(model: model)
                         .padding(.top, Space.l)
                 }
@@ -145,7 +152,7 @@ private struct InboxHeader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScreenHeader("Needs You", summary: InboxHeader.summary(tasks: model.actionCount, questions: model.questionCount,
-                                                                     jobs: model.jobsWaiting)) {
+                                                                     jobs: model.jobsWaiting, replies: model.replyItems.count)) {
                 if store.queuedCount > 0 {
                     // Answered jobs go back to the queue: send them now instead of waiting for a full run.
                     Button("Apply \(store.queuedCount) queued now") { Task { await store.applyQueued() } }
@@ -174,11 +181,12 @@ private struct InboxHeader: View {
     }
 
     /// "2 tasks · 5 questions · 14 jobs waiting".
-    static func summary(tasks: Int, questions: Int, jobs: Int) -> String {
+    static func summary(tasks: Int, questions: Int, jobs: Int, replies: Int = 0) -> String {
         var parts: [String] = []
         if tasks > 0 { parts.append(C3Format.plural(tasks, "task")) }
         parts.append(C3Format.plural(questions, "question"))
         parts.append("\(C3Format.plural(jobs, "job")) waiting")
+        if replies > 0 { parts.append(C3Format.plural(replies, "reply", "replies")) }
         return parts.joined(separator: " · ")
     }
 }

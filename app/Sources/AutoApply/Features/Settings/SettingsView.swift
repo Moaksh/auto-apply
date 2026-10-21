@@ -54,6 +54,7 @@ private struct SettingsTabContent: View {
                 case .modes: ModesSettingsTab(model: model)
                 case .sources: SourcesSettingsTab(model: model)
                 case .schedule: ScheduleSettingsTab(model: model)
+                case .outreach: OutreachSettingsTab(model: model)
                 case .agent: AgentSettingsTab()
                 case .data: DataSettingsTab()
                 }

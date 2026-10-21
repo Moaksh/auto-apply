@@ -12,6 +12,10 @@ struct KanbanColumn: View {
     var threshold: Int
     var questionCounts: [Int: Int]
     var resumeLabels: [Int: String]
+    /// Application id → envelope (emailed / replied).
+    var outreachMarks: [Int: JobOutreachMark] = [:]
+    /// Application id → an employer reply's suggested move.
+    var replySuggestions: [Int: BoardStatus] = [:]
     var selectedJobID: Int?
     var now: Date
     var nudgeDays: [Int]
@@ -123,7 +127,9 @@ struct KanbanColumn: View {
             JobCard(job: job, threshold: threshold, questionCount: questionCounts[job.id] ?? 0,
                     nudge: BoardRules.nudge(for: job, now: now, nudgeDays: nudgeDays, ghostAfterDays: ghostAfterDays),
                     resumeLabel: job.resumeVariantID.flatMap { resumeLabels[$0] },
-                    isSelected: selectedJobID == job.id, isDragging: model.draggingJobID == job.id, now: now) { status in
+                    isSelected: selectedJobID == job.id, isDragging: model.draggingJobID == job.id, now: now,
+                    outreach: job.applicationID.flatMap { outreachMarks[$0] },
+                    replySuggestion: job.applicationID.flatMap { replySuggestions[$0] }) { status in
                 Task { await model.move(jobID: job.id, to: status, undoManager: undoManager) }
             }
             .equatable()

@@ -45,6 +45,15 @@ final class AppNotifier: NSObject, UNUserNotificationCenterDelegate {
                 post(id: "fail-\(p.applicationId)", title: "Application failed", body: [jobLabel(p.jobId, store), p.reason].compactMap { $0 }.joined(separator: " · "),
                      route: ["route": "job", "job": String(p.jobId)])
             }
+        case .outreachReply(let p):
+            // Off by default (Settings ▸ General ▸ Notifications). Auto-replies and bounces never notify.
+            guard GeneralSettings.isNotificationOn("REPLIES"), ![.ooo, .bounce].contains(p.label) else { return }
+            post(id: "reply-\(p.threadId)", title: "\(p.contactName) at \(p.company) replied", body: p.snippet,
+                 route: ["route": "replies"])
+        case .applicationReply(let p):
+            guard GeneralSettings.isNotificationOn("REPLIES"), let move = p.suggestedStatus, !p.ambiguous else { return }
+            post(id: "areply-\(p.replyId)", title: "\(p.company) replied", body: "\(p.subject) · suggests \(move.label)",
+                 route: ["route": "replies"])
         default:
             break
         }
@@ -96,6 +105,9 @@ final class AppNotifier: NSObject, UNUserNotificationCenterDelegate {
             if let cluster = info["cluster"] { InboxModel.shared(for: store).select(cluster) }
         case "review":
             store.router.go(.review)
+        case "replies":
+            store.router.go(.needsYou)
+            InboxModel.shared(for: store).ensureSelection()
         case "update":
             Updater.shared.restartPrompt()
         case "job":

@@ -292,7 +292,8 @@ struct StoreMockIntegrationTests {
         #expect(await waitUntil(timeout: .seconds(20)) { store.live.lastRun?.runId.hasPrefix("mockrun") == true && store.live.currentRun == nil })
         #expect(store.live.runCounts.submitted == 9)
         #expect(store.live.runCounts.discovered == 40)
-        #expect(await waitUntil { store.jobs.all.filter { MockScripts.happyJobIDs.contains($0.id) && $0.state == .submitted }.count == 9 })
+        // The DB stream can trail the events under a loaded parallel test run: allow it the run's own budget.
+        #expect(await waitUntil(timeout: .seconds(20)) { store.jobs.all.filter { MockScripts.happyJobIDs.contains($0.id) && $0.state == .submitted }.count == 9 })
         #expect(store.inbox.clusters.contains { $0.jobIds.contains(MockScripts.happyJobIDs[37]) })
         #expect(store.activity.isLoaded)
         #expect(await waitUntil { store.stats.computedAt != .distantPast })
@@ -303,7 +304,8 @@ struct StoreMockIntegrationTests {
         let daemon = MockDaemon(scenario: .idle, speed: 50)
         let store = AppStore(client: daemon, repository: daemon.repository)
         store.start()
-        #expect(await waitUntil { store.isConnected })
+        // Wait for the snapshot too: a late snapshot copy would reset the live paused flag.
+        #expect(await waitUntil { store.isConnected && store.hasSnapshot })
         await store.togglePause()
         #expect(store.live.paused)
         #expect(await waitUntil { daemon.world.isPaused })

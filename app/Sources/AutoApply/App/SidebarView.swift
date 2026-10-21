@@ -36,9 +36,10 @@ struct SidebarView: View {
 
     private func badge(for item: SidebarItem) -> Int {
         switch item {
-        case .needsYou: store.inbox.openCount
+        case .needsYou: store.needsYouCount
         case .review: (store.mode == .auto && store.counts.awaitingReview == 0) ? 0 : store.counts.awaitingReview
         case .easyApply: store.library.easyApplyOpenCount
+        case .coldEmail: store.coldEmailBadge
         default: 0
         }
     }

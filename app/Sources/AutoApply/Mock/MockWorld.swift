@@ -11,7 +11,8 @@ final class MockWorld: Sendable {
         var onboarding = OnboardingState(completed: true, step: 7)
         var sources: [SourceStatus] = MockWorld.defaultSources
         var caps = CapsStatus(dailyUsed: 0, dailyLimit: 15, companiesCoolingDown: 2, linkedinSessionsUsed: 1,
-                              linkedinSessionsLimit: 3, glassdoorSessionsUsed: 0, glassdoorSessionsLimit: 3)
+                              linkedinSessionsLimit: 3, glassdoorSessionsUsed: 0, glassdoorSessionsLimit: 3,
+                              outreachSentToday: 1, outreachDailyLimit: 10, peopleFinderUsed: 2, peopleFinderLimit: 6)
         var openClusters: [QuestionCluster] = []
         var currentRun: RunInfo?
         var lastRun: RunInfo?
@@ -106,6 +107,11 @@ final class MockWorld: Sendable {
             }
             c.easyApplyOpen = data.easyApply.filter { $0.isOpen && !$0.opened }.count
             c.needsYouClusters = read { $0.openClusters.count }
+            let live = Set(data.outreach.threads.filter { $0.state != .cancelled }.map(\.id))
+            c.outreachDrafts = data.outreach.messages.filter { !$0.isInbound && $0.state == .draft && live.contains($0.threadID) }.count
+            c.outreachRepliesUnread = data.outreach.threads.filter(\.unreadReply).count
+            c.outreachUnknown = data.outreach.messages.filter { $0.state == .unknown }.count
+            c.applicationRepliesUnread = data.applicationReplies.filter(\.isPendingSuggestion).count
             return c
         }
     }

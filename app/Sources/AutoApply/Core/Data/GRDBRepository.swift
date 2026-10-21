@@ -305,7 +305,148 @@ final class GRDBRepository: AppRepository {
         }
     }
 
+    func outreach() -> AsyncStream<OutreachData> {
+        observe { db in
+            // The tables arrive with schema v10; an older daemon's DB simply has no outreach.
+            guard try db.tableExists("outreach_threads") else { return OutreachData() }
+            var out = OutreachData()
+            out.contacts = try Row.fetchAll(db, sql: """
+                SELECT ct.*, c.name AS company_name FROM contacts ct LEFT JOIN companies c ON c.id = ct.company_id
+                ORDER BY ct.updated_at DESC, ct.id DESC LIMIT 3000
+                """).map(Self.contactItem)
+            out.threads = try Row.fetchAll(db, sql: """
+                SELECT t.*, c.name AS company_name FROM outreach_threads t JOIN companies c ON c.id = t.company_id
+                ORDER BY t.updated_at DESC, t.id DESC LIMIT 3000
+                """).map(Self.threadItem)
+            out.messages = try Row.fetchAll(db, sql: """
+                SELECT * FROM outreach_messages WHERE state != 'cancelled' ORDER BY thread_id, seq, id LIMIT 6000
+                """).map(Self.messageItem)
+            out.suppression = try Row.fetchAll(db, sql: "SELECT * FROM suppression ORDER BY created_at DESC, id DESC").map { row in
+                SuppressionItem(id: row["id"], emailNorm: row["email_norm"], domain: row["domain"],
+                                reason: SuppressionReason(rawValue: row["reason"] ?? "user") ?? .user, source: row["source"],
+                                createdAt: DBJSON.date(row["created_at"]) ?? .distantPast)
+            }
+            out.referrals = try Row.fetchAll(db, sql: """
+                SELECT r.*, c.name AS company_name, j.title AS job_title FROM referrals r
+                JOIN companies c ON c.id = r.company_id LEFT JOIN jobs j ON j.id = r.job_id
+                ORDER BY r.state_updated_at DESC, r.id DESC LIMIT 2000
+                """).map(Self.referralItem)
+            out.prospects = try Row.fetchAll(db, sql: """
+                SELECT p.*, c.name AS company_name, c.domain AS company_domain, c.watch AS company_watch FROM prospects p
+                JOIN companies c ON c.id = p.company_id
+                ORDER BY p.status = 'dismissed', p.fit_score IS NULL, p.fit_score DESC, p.updated_at DESC LIMIT 1000
+                """).map(Self.prospectItem)
+            let meta = try String.fetchOne(db, sql: "SELECT value FROM meta WHERE key = 'mail_account'")
+            if case .object(let o) = DBJSON.decode(JSONValue.self, from: meta, default: .null) {
+                if case .string(let email)? = o["email"] { out.mailAccount.email = email }
+                if case .bool(let on)? = o["send_enabled"] { out.mailAccount.sendEnabled = on }
+            }
+            return out
+        }
+    }
+
+    func contactEvidence(contactID: Int) async -> [ContactEvidenceItem] {
+        await read { db in
+            guard try db.tableExists("contact_evidence") else { return [] }
+            return try Row.fetchAll(db, sql: "SELECT * FROM contact_evidence WHERE contact_id = ? ORDER BY observed_at DESC, id DESC",
+                                    arguments: [contactID]).map { row in
+                ContactEvidenceItem(id: row["id"], contactID: row["contact_id"], kind: row["kind"] ?? "user", field: row["field"] ?? "email",
+                                    url: row["url"], snippet: row["snippet"], provider: row["provider"],
+                                    observedAt: DBJSON.date(row["observed_at"]) ?? .distantPast)
+            }
+        } ?? []
+    }
+
+    func applicationReplies() -> AsyncStream<[ApplicationReplyItem]> {
+        observe { db in
+            guard try db.tableExists("application_replies") else { return [] }
+            return try Row.fetchAll(db, sql: """
+                SELECT * FROM application_replies
+                ORDER BY suggestion_state = 'pending' DESC, received_at DESC, id DESC LIMIT 300
+                """).map { row in
+                ApplicationReplyItem(
+                    id: row["id"], applicationID: row["application_id"], messageID: row["message_id"] ?? "",
+                    fromEmail: row["from_email"] ?? "", fromName: row["from_name"], subject: row["subject"] ?? "",
+                    snippet: row["snippet"] ?? "", receivedAt: DBJSON.date(row["received_at"]) ?? .distantPast,
+                    label: ApplicationReplyLabel(rawValue: row["label"] ?? "other") ?? .other,
+                    suggestedStatus: (row["suggested_status"] as String?).flatMap(BoardStatus.init(rawValue:)),
+                    suggestionState: ApplicationReplyItem.SuggestionState(rawValue: row["suggestion_state"] ?? "none") ?? .none,
+                    ambiguous: (row["ambiguous"] as Int?) == 1)
+            }
+        }
+    }
+
     // MARK: - Row mapping
+
+    static func contactItem(_ row: Row) -> ContactItem {
+        ContactItem(
+            id: row["id"], companyID: row["company_id"], company: row["company_name"], fullName: row["full_name"] ?? "",
+            title: row["title"], roleCategory: ContactRoleCategory(rawValue: row["role_category"] ?? "other") ?? .other,
+            email: row["email"], emailStatus: row["email_status"] ?? "none", emailConfidence: row["email_confidence"] ?? 0,
+            origin: ContactOrigin(rawValue: row["origin"] ?? "scout") ?? .scout,
+            relationship: (row["relationship"] as String?).flatMap(Relationship.init(rawValue:)),
+            linkedinURL: row["linkedin_url"], notes: row["notes"], shareOk: (row["share_ok"] as Int?) == 1,
+            lastContactedAt: DBJSON.date(row["last_contacted_at"]), createdAt: DBJSON.date(row["created_at"]) ?? .distantPast)
+    }
+
+    static func threadItem(_ row: Row) -> OutreachThreadItem {
+        OutreachThreadItem(
+            id: row["id"], kind: OutreachKind(rawValue: row["kind"] ?? "application") ?? .application, contactID: row["contact_id"],
+            companyID: row["company_id"], company: row["company_name"] ?? "", jobID: row["job_id"], applicationID: row["application_id"],
+            state: OutreachThreadState(rawValue: row["state"] ?? "draft") ?? .draft,
+            outcome: (row["outcome"] as String?).flatMap(ThreadOutcome.init(rawValue:)), subject: row["subject"],
+            unreadReply: (row["unread_reply"] as Int?) == 1, followupApproved: (row["followup_approved"] as Int?) == 1,
+            nextActionAt: DBJSON.date(row["next_action_at"]),
+            createdAt: DBJSON.date(row["created_at"]) ?? .distantPast, updatedAt: DBJSON.date(row["updated_at"]) ?? .distantPast)
+    }
+
+    static func messageItem(_ row: Row) -> OutreachMessageItem {
+        OutreachMessageItem(
+            id: row["id"], threadID: row["thread_id"], seq: row["seq"] ?? 0, isInbound: (row["direction"] as String?) == "in",
+            kind: row["kind"], state: OutreachMessageState(rawValue: row["state"] ?? "draft") ?? .draft,
+            toEmail: row["to_email"], fromEmail: row["from_email"], subject: row["subject"], body: row["body"] ?? "",
+            footer: row["footer"], origin: row["origin"] ?? "generated", grounded: (row["grounded"] as Int?) != 0,
+            unsupportedClaims: DBJSON.decode([String].self, from: row["unsupported_claims"], default: []),
+            claimsOverridden: (row["claims_overridden"] as Int?) == 1, messageIDHeader: row["message_id_header"],
+            sendAt: DBJSON.date(row["send_at"]), sentAt: DBJSON.date(row["sent_at"]), classification: row["classification"],
+            error: row["error"], createdAt: DBJSON.date(row["created_at"]) ?? .distantPast,
+            updatedAt: DBJSON.date(row["updated_at"]) ?? .distantPast)
+    }
+
+    static func referralItem(_ row: Row) -> ReferralItem {
+        ReferralItem(
+            id: row["id"], companyID: row["company_id"], company: row["company_name"] ?? "", jobID: row["job_id"], jobTitle: row["job_title"],
+            contactID: row["contact_id"], personName: row["person_name"] ?? "", title: row["title"], linkedinURL: row["linkedin_url"],
+            basis: ReferralBasis(rawValue: row["basis"] ?? "other") ?? .other, basisDetail: row["basis_detail"],
+            evidenceURL: row["evidence_url"], evidenceSnippet: row["evidence_snippet"],
+            state: ReferralState(rawValue: row["state"] ?? "suggested") ?? .suggested,
+            connectNote: row["connect_note"], referralDM: row["referral_dm"], grounded: (row["grounded"] as Int?) != 0,
+            unsupportedClaims: DBJSON.decode([String].self, from: row["unsupported_claims"], default: []),
+            stateUpdatedAt: DBJSON.date(row["state_updated_at"]) ?? .distantPast, createdAt: DBJSON.date(row["created_at"]) ?? .distantPast)
+    }
+
+    static func prospectItem(_ row: Row) -> ProspectItem {
+        var item = ProspectItem(
+            id: row["id"], companyID: row["company_id"], company: row["company_name"] ?? "", domain: row["company_domain"],
+            status: ProspectStatus(rawValue: row["status"] ?? "suggested") ?? .suggested, fitScore: row["fit_score"],
+            summary: row["summary"], summaryURL: row["summary_url"], matchingRoles: row["matching_roles"], foundVia: row["found_via"],
+            searchQuery: row["search_query"], cooldownUntil: DBJSON.date(row["cooldown_until"]),
+            watched: (row["company_watch"] as Int?) == 1, createdAt: DBJSON.date(row["created_at"]) ?? .distantPast)
+        if case .object(let reasons) = DBJSON.decode(JSONValue.self, from: row["fit_reasons"], default: .object([:])) {
+            if case .string(let s)? = reasons["summary"] { item.fitSummary = s }
+            if case .object(let factors)? = reasons["factors"] {
+                for (k, v) in factors {
+                    switch v {
+                    case .int(let i): item.fitFactors[k] = i
+                    case .double(let d): item.fitFactors[k] = Int(d.rounded())
+                    default: break
+                    }
+                }
+            }
+        }
+        return item
+    }
+
 
     static let jobsSQL = """
         SELECT j.id, j.source, j.source_url, j.apply_url, j.ats, j.company_id, j.title, j.location, j.remote,

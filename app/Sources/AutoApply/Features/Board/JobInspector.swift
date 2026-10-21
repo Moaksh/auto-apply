@@ -31,7 +31,11 @@ struct JobInspector: View {
                             }
                         }
                     }
+                    if let reply = store.outreach.pendingSuggestion(applicationID: job.applicationID) {
+                        ReplySuggestionCard(reply: reply)
+                    }
                     facts(job)
+                    if job.state == .submitted { JobOutreachSection(job: job) }
                     actions(job)
                 }
                 .padding(Space.l)

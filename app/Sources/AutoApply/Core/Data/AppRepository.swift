@@ -29,6 +29,13 @@ protocol AppRepository: AnyObject, Sendable {
     func profile() -> AsyncStream<Profile>
     func neverGuess() -> AsyncStream<NeverGuess>
     func runs(limit: Int) -> AsyncStream<[RunItem]>
+    /// Cold outreach (schema v10): contacts, threads, messages, do-not-contact list, referrals,
+    /// prospects and the mailbox's sending switch. Empty on older DBs.
+    func outreach() -> AsyncStream<OutreachData>
+    /// The provenance of one contact (`contact_evidence`), newest first.
+    func contactEvidence(contactID: Int) async -> [ContactEvidenceItem]
+    /// Employer replies (schema v11), newest first: every pending suggestion plus recent rows.
+    func applicationReplies() -> AsyncStream<[ApplicationReplyItem]>
     /// Whether the backing store is currently readable (false e.g. before the daemon created the DB).
     var isAvailable: Bool { get }
 }

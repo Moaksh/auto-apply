@@ -120,11 +120,52 @@ struct DesignSystemTests {
     @Test func retiredJargonIsGone() {
         let banned = ["Prep pass", "Never-guess", "never-guess fact", "kill switch", "get you hired", "Everything stays on this Mac",
                       "no invented facts", "jobs resumed", "Join beta", "Mode: inherit", "Inherit (", "Q&A audit", "Step ticker",
-                      "Can't reach autoapplyd", "Restart daemon", "Tokens · ", "pick %.2f", "Skip (reject)", "Receipts"]
-        for phrase in banned {
-            #expect(offenders("\"" + phrase).isEmpty && offenders(" " + phrase + "\"").isEmpty && offenders(phrase + "\"").isEmpty,
-                    "\(phrase): \(offenders(phrase))")
+                      "Can't reach autoapplyd", "Restart daemon", "Tokens · ", "pick %.2f", "Skip (reject)", "Receipts",
+                      // Cold outreach: honest about what happens (owner decisions 2026-10-21).
+                      "never a sequence of follow-ups", "Not built yet", "get you replies", "guaranteed", "land you", "Join waitlist",
+                      "sample · not sent", "auto-send", "sends automatically"]
+        // One pass over the sources (this suite runs on the main actor; keep it cheap).
+        var hits: [String: [String]] = [:]
+        for file in Self.sources() {
+            for (i, line) in file.lines.enumerated() where line.contains("\"") {
+                for phrase in banned where line.contains("\"" + phrase) || line.contains(" " + phrase + "\"") || line.contains(phrase + "\"") {
+                    hits[phrase, default: []].append("\(file.path):\(i + 1)")
+                }
+            }
         }
+        #expect(hits.isEmpty, "\(hits)")
+    }
+
+    /// The glossary inside the UI strings of the outreach screens: Needs You (never Inbox), Agent
+    /// (never daemon / autoapplyd), Application site (never ATS), Pipeline (never board / tracker),
+    /// Applied (never Submitted).
+    @Test func outreachScreensUseTheGlossary() {
+        let files = ["Features/ColdEmail/", "Features/Inbox/RepliesSection.swift", "Features/Settings/OutreachSettingsTab.swift",
+                     "Core/Models/OutreachModels.swift", "Core/Store/OutreachStore.swift", "Core/Store/AppStore+Outreach.swift"]
+        let banned = ["Inbox", "inbox", "daemon", "autoapplyd", "ATS", "board", "Board", "tracker", "Submitted", "submitted", "LaunchAgent"]
+        let literal = try! NSRegularExpression(pattern: #""((?:[^"\\]|\\.)*)""#)
+        var hits: [String] = []
+        for file in Self.sources() where files.contains(where: { file.path.hasPrefix($0) }) {
+            for (i, line) in file.lines.enumerated() {
+                let ns = line as NSString
+                for match in literal.matches(in: line, range: NSRange(location: 0, length: ns.length)) {
+                    let text = ns.substring(with: match.range(at: 1))
+                    for word in banned where text.range(of: "\\b\(word)\\b", options: .regularExpression) != nil {
+                        hits.append("\(file.path):\(i + 1): \(word) in \"\(text)\"")
+                    }
+                }
+            }
+        }
+        #expect(hits.isEmpty, "\(hits.joined(separator: "\n"))")
+        #expect(Self.sources().contains { $0.path == "Features/ColdEmail/OutboxTab.swift" }, "the lint found the new screens")
+    }
+
+    @Test func outreachNeverDrivesLinkedIn() {
+        // The referral copilot hands links to the user's browser; nothing opens LinkedIn in the agent.
+        let offenders = Self.sources().filter { $0.path.hasPrefix("Features/ColdEmail/") }.flatMap { file in
+            file.lines.enumerated().filter { $0.element.contains("openAgentChrome") }.map { "\(file.path):\($0.offset + 1)" }
+        }
+        #expect(offenders.isEmpty)
     }
 
     // MARK: One prominent action per screen
@@ -134,7 +175,7 @@ struct DesignSystemTests {
         let store = AppStore(client: daemon, repository: daemon.repository, mockScenarioName: scenario.rawValue)
         store.statsDebounce = .milliseconds(1)
         store.start()
-        _ = await waitUntil { store.hasSnapshot && store.jobs.isLoaded }
+        _ = await waitUntil { store.hasSnapshot && store.jobs.isLoaded && store.isConnected }
         store.recomputeStats()
         return store
     }
@@ -190,6 +231,55 @@ struct DesignSystemTests {
         }
         if let applied = store.jobs.all.first(where: { $0.state == .submitted }) {
             #expect(prominentCount(store: store) { JobDetailView(jobID: applied.id) } == 0, "Job detail (applied)")
+        }
+        await store.stop()
+    }
+
+    @Test func coldEmailHasAtMostOnePrimaryPerTab() async {
+        let store = await makeStore(.idle)
+        _ = await waitUntil { store.outreach.isLoaded && store.outreach.repliesLoaded }
+        for sendingOn in [true, false] {
+            if !sendingOn {
+                (store.repository as? InMemoryRepository)?.update { $0.outreach.mailAccount.sendEnabled = false }
+                _ = await waitUntil { !store.outreach.sendEnabled }
+            }
+            for tab in ColdEmailTab.allCases {
+                let model = ColdEmailModel(store: store)
+                model.tab = tab
+                if tab == .outbox, let first = store.outreach.drafts.first {
+                    model.selectAllDrafts()
+                    model.focusedMessageID = first.id
+                }
+                let count = prominentCount(store: store) { ColdEmailView(modelOverride: model) }
+                await Task.yield()
+                #expect(count <= 1, "Cold Email ▸ \(tab.title) (sending \(sendingOn ? "on" : "off")) shows \(count) primary actions")
+            }
+        }
+        let model = ColdEmailModel(store: store)
+        model.selectAllDrafts()
+        #expect(prominentCount(store: store, width: 560, height: 720) { SendConfirmSheet(model: model) } == 1, "Send N… sheet")
+        #expect(prominentCount(store: store, width: 480, height: 420) { EnableSendingSheet(model: model) } == 1, "Enable sending sheet")
+        #expect(prominentCount(store: store, width: 480, height: 560) { AddContactSheet() } == 1, "Add contact sheet")
+        #expect(prominentCount(store: store, width: 680, height: 1400) {
+            ScrollView { VStack { OutreachSettingsTab(model: SettingsModel(store: store)) } }
+        } == 0, "Settings ▸ Outreach has no primary")
+        await store.stop()
+    }
+
+    @Test func needsYouRepliesKeepOnePrimary() async {
+        let store = await makeStore(.idle)
+        _ = await waitUntil { store.outreach.isLoaded && store.outreach.repliesLoaded }
+        let inbox = InboxModel.shared(for: store)
+        #expect(!inbox.replyItems.isEmpty)
+        for item in inbox.replyItems {
+            inbox.selectReply(item.key)
+            let count = prominentCount(store: store) { InboxView() }
+            await Task.yield()
+            #expect(count <= 1, "Needs You with \(item.key) selected shows \(count) primary actions")
+        }
+        if let suggested = store.outreach.pendingSuggestions.first.flatMap({ store.jobs.job(applicationID: $0.applicationID) }) {
+            #expect(prominentCount(store: store) { JobDetailView(jobID: suggested.id) } == 0, "a reply suggestion on an applied job stays secondary")
+            #expect(prominentCount(store: store, width: LayoutMetrics.inspectorWidth) { JobInspector(jobID: suggested.id) } == 0)
         }
         await store.stop()
     }

@@ -201,6 +201,9 @@ struct BoardView: View {
         let visible = BoardRules.visibleColumns(filter: filter)
         let byColumn = BoardRules.columns(from: store.jobs.columns, visible: visible, filter: filter).mapValues(filteredJobs)
         let questionCounts = BoardRules.questionCounts(store.inbox.clusters)
+        let outreachMarks = BoardRules.outreachMarks(store.outreach)
+        let replySuggestions = Dictionary(store.outreach.pendingSuggestions.compactMap { r in r.suggestedStatus.map { (r.applicationID, $0) } },
+                                          uniquingKeysWith: { a, _ in a })
         let labels = resumeLabels
         let skipGroups = BoardRules.skipReasonGroups(filteredJobs(BoardRules.filtered(store.jobs.jobs(in: .skipped), filter: PipelineFilter(source: filter.source, minScore: filter.minScore, searchText: filter.searchText))))
         let signature = visible.map { col in (byColumn[col] ?? []).map(\.id) }
@@ -212,7 +215,8 @@ struct BoardView: View {
                     KanbanColumn(
                         column: column, jobs: byColumn[column] ?? [], model: model,
                         threshold: store.preferences.matchThreshold, questionCounts: questionCounts,
-                        resumeLabels: labels, selectedJobID: selected, now: now,
+                        resumeLabels: labels, outreachMarks: outreachMarks, replySuggestions: replySuggestions,
+                        selectedJobID: selected, now: now,
                         nudgeDays: store.preferences.nudgeDays, ghostAfterDays: store.preferences.ghostAfterDays,
                         skipGroups: skipGroups, skipReasonFilter: filter.skipReason, namespace: flightNS,
                         firstName: store.library.firstName,

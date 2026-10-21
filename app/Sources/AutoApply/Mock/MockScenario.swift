@@ -110,6 +110,11 @@ enum MockScenario: String, CaseIterable, Sendable, Identifiable {
         case .stress, .firstRunEmpty, .onboarding, .reviewMode: break
         default: MockScripts.addReviewSamples(&data, now: now)
         }
+        // Cold outreach on the applied jobs (drafts, a reply, prospects, referrals, employer replies).
+        switch self {
+        case .stress, .firstRunEmpty, .onboarding: break
+        default: MockOutreach.seed(&data, now: now)
+        }
 
         let submittedToday = data.jobs.filter { $0.submittedAt.map { Calendar.current.isDate($0, inSameDayAs: now) } ?? false }.count
         state.caps.dailyUsed = max(state.caps.dailyUsed, submittedToday)

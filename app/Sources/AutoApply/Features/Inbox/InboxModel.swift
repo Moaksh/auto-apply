@@ -335,6 +335,8 @@ final class InboxModel {
     @ObservationIgnored var undoWindow: Duration = .seconds(10)
 
     var selectedClusterID: String?
+    /// The selected item in the Replies section (mutually exclusive with a selected cluster).
+    var selectedReplyKey: NeedsYouReply.Key?
     private(set) var drafts: [String: AnswerDraft] = [:]
     private(set) var answered: [InboxAnsweredRecord] = []
     private(set) var seenClusterIDs: Set<String> = []
@@ -470,10 +472,20 @@ final class InboxModel {
 
     /// Keep a valid selection: the first (highest impact) cluster when nothing valid is selected.
     func ensureSelection() {
-        if selectedCluster == nil { select(clusters.first?.clusterId) }
+        if let key = selectedReplyKey, replyItems.contains(where: { $0.key == key }) { return }
+        selectedReplyKey = nil
+        if selectedCluster == nil {
+            if let first = clusters.first {
+                select(first.clusterId)
+            } else {
+                selectedClusterID = nil
+                selectedReplyKey = replyItems.first?.key
+            }
+        }
     }
 
     func select(_ clusterID: String?) {
+        selectedReplyKey = nil
         selectedClusterID = clusterID
         validationMessage = nil
         if let clusterID { seenClusterIDs.insert(clusterID) }

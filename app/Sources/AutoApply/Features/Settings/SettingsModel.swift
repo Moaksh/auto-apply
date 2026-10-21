@@ -8,7 +8,7 @@ import Observation
 import ServiceManagement
 
 enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
-    case general, preferences, guardrails, modes, sources, schedule, agent, data
+    case general, preferences, guardrails, modes, sources, schedule, outreach, agent, data
 
     var id: String { rawValue }
 
@@ -20,6 +20,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         case .modes: "Modes"
         case .sources: "Sources"
         case .schedule: "Schedule & Limits"
+        case .outreach: "Outreach"
         case .agent: "Agent"
         case .data: "Data"
         }
@@ -33,6 +34,7 @@ enum SettingsTab: String, CaseIterable, Identifiable, Sendable {
         case .modes: "bolt.horizontal.circle"
         case .sources: "antenna.radiowaves.left.and.right"
         case .schedule: "calendar.badge.clock"
+        case .outreach: "envelope"
         case .agent: "cpu"
         case .data: "externaldrive"
         }
@@ -81,6 +83,17 @@ enum PreferencesValidator {
         }
         if !(0...10).contains(p.linkedinSessionsPerDay) { issues.append(Issue(key: .linkedinSessionsPerDay, message: "LinkedIn sessions: 0–10 per day.")) }
         if !(0...10).contains(p.glassdoorSessionsPerDay) { issues.append(Issue(key: .glassdoorSessionsPerDay, message: "Glassdoor sessions: 0–10 per day.")) }
+        if !(0...40).contains(p.outreachDailyCap) { issues.append(Issue(key: .outreachDailyCap, message: "New emails a day: 0–40.")) }
+        if !(0...2).contains(p.outreachMaxFollowups) { issues.append(Issue(key: .outreachMaxFollowups, message: "Follow-ups: 0–2 per conversation.")) }
+        if !(1...30).contains(p.outreachFollowupDays) { issues.append(Issue(key: .outreachFollowupDays, message: "Follow-up after 1–30 business days.")) }
+        if !(0...100).contains(p.outreachMinEmailConfidence) {
+            issues.append(Issue(key: .outreachMinEmailConfidence, message: "Email confidence is 0–100."))
+        }
+        if !(0...30).contains(p.peopleFinderVisitsPerDay) { issues.append(Issue(key: .peopleFinderVisitsPerDay, message: "People finder: 0–30 pages a day.")) }
+        let window = p.outreachSendWindow.compactMap(ScheduleTimes.parse)
+        if window.count != 2 || window[0].hour * 60 + window[0].minute >= window[1].hour * 60 + window[1].minute {
+            issues.append(Issue(key: .outreachSendWindow, message: "The send window must start before it ends."))
+        }
         if let bad = p.careerPageUrls.first(where: { !CareerURL.isValid($0) }) {
             issues.append(Issue(key: .careerPageUrls, message: "“\(bad)” isn't a valid http(s) URL."))
         }
@@ -410,6 +423,7 @@ enum GeneralSettings {
         ("RUN_SUMMARY", "Run summary", true),
         ("SUBMITTED", "Each submission", false),
         ("NUDGE", "Did you hear back? nudges", true),
+        ("REPLIES", "Replies to your emails and from employers", false),
         ("ERROR", "Errors (agent down, login expired)", true),
     ]
 
