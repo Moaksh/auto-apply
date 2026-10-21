@@ -60,6 +60,7 @@ struct ColdEmailView: View {
         .sheet(isPresented: $model.isEnableSheetPresented) { EnableSendingSheet(model: model).environment(store) }
         .sheet(isPresented: $model.isAddContactPresented) { AddContactSheet().environment(store) }
         .sheet(isPresented: $model.isAddReferralPresented) { AddReferralSheet().environment(store) }
+        .sheet(isPresented: $model.isLinkedInImportPresented) { LinkedInImportSheet(model: model).environment(store) }
     }
 }
 

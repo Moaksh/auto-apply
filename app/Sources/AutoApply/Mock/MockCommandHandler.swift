@@ -411,13 +411,7 @@ enum MockCommandHandler {
             return Handled(reply: ack(encoding: Self.mockSuggestion))
 
         case .getInsights:
-            let none = "Not enough data yet."
-            return Handled(reply: ack(encoding: Insights(
-                computedAt: Date(),
-                calibration: ScoreCalibration(minBandSample: 8, matchThreshold: 70, finding: none),
-                skipBlockers: SkipBlockers(windowDays: 30),
-                upskill: UpskillHints(windowDays: 90, minJobs: 3, note: none),
-                variants: VariantInsights(finding: none))))
+            return MockCareer.handle(command, world: world)
 
         case .onboardingConnectSource(let p):
             let source: SourceName = p.source == .linkedin ? .linkedin : .glassdoor
@@ -472,21 +466,13 @@ enum MockCommandHandler {
              .addReferral, .draftReferral, .updateReferral, .setProviderKey, .acceptReplySuggestion, .dismissReplySuggestion:
             return MockOutreach.handle(command, world: world) ?? Handled(reply: ack())
         case .generateInterviewPrep, .getInterviewPrep, .interviewDebrief:
-            // No interview prep in the mock world yet (no UI): "no pack stored".
-            return Handled(reply: ack())
+            return MockCareer.handle(command, world: world)
         case .importLinkedinConnections:
-            return Handled(reply: ack(["imported": .int(0), "merged": .int(0), "skipped": .int(0),
-                                       "matched_companies": .array([]), "referral_suggestions": .int(0)]))
+            return MockCareer.handle(command, world: world)
         case .getVoiceProfile:
-            return Handled(reply: ack(encoding: VoiceProfile()))
-        case .updateVoiceProfile(let p):
-            var profile = VoiceProfile()
-            if let v = p.signOff { profile.signOff = v }
-            if let v = p.formality { profile.formality = v }
-            if let v = p.maxWords { profile.maxWords = v }
-            if let v = p.avoidPhrases { profile.avoidPhrases = v }
-            profile.writingSample = p.writingSample
-            return Handled(reply: ack(encoding: profile))
+            return MockCareer.handle(command, world: world)
+        case .updateVoiceProfile:
+            return MockCareer.handle(command, world: world)
         }
     }
 

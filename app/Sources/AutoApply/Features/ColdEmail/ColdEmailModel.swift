@@ -84,6 +84,10 @@ final class ColdEmailModel {
     var contactSearch = ""
     var isAddContactPresented = false
 
+    // Warm intros (LinkedIn export)
+    var isLinkedInImportPresented = false
+    var linkedInImport: LinkedInImportState = .idle
+
     // Referrals
     var isAddReferralPresented = false
     private(set) var sentCheck: SentCheck?

@@ -83,6 +83,8 @@ enum SidebarItem: String, CaseIterable, Identifiable, Hashable, Sendable {
 /// Things pushed onto the detail column's navigation stack.
 enum Destination: Hashable, Sendable {
     case job(id: Int)
+    /// Dashboard ▸ What's working (the advisory insights report).
+    case insights
 }
 
 /// Deep-link filters other screens can set before navigating (e.g. hero "27 skipped" label).
@@ -139,6 +141,8 @@ final class Router {
     /// Bumped to ask the on-screen Job detail to approve its job (⌘K "Approve & submit"); the
     /// detail runs it through the same low-confidence safeguard as its button and ⌘↵.
     private(set) var jobApproveRequest: JobActionRequest?
+    /// Bumped to ask the on-screen Job detail to show a tab (⌘K "Interview prep: …").
+    private(set) var jobTabRequest: JobTabRequest?
 
     struct JobWindowRequest: Equatable, Sendable {
         var id: Int
@@ -150,12 +154,34 @@ final class Router {
         var serial: Int
     }
 
+    struct JobTabRequest: Equatable, Sendable {
+        var jobID: Int
+        /// A `JobDetailTab` raw value.
+        var tab: String
+        var serial: Int
+    }
+
     init() {}
 
     /// The job whose detail page is on top of the detail column, if any.
     var openJobDetailID: Int? {
         if case .job(let id) = path.last { return id }
         return nil
+    }
+
+    /// Open `jobID`'s detail on `tab` (a `JobDetailTab` raw value), from anywhere.
+    func openJob(id: Int, tab: String) {
+        if openJobDetailID != id {
+            if selection != .pipeline { selection = .pipeline }
+            openJob(id: id)
+        }
+        jobTabRequest = JobTabRequest(jobID: id, tab: tab, serial: (jobTabRequest?.serial ?? 0) + 1)
+    }
+
+    /// Dashboard ▸ What's working.
+    func showInsights() {
+        selection = .dashboard
+        if path.last != .insights { path = [.insights] }
     }
 
     func requestApprove(jobID: Int) {

@@ -109,13 +109,7 @@ final class JobsStore {
             job.applicationID = p.applicationId
             job.score = p.score
             job.skipReason = p.skipReason
-            if case .string(let summary)? = p.reasons["summary"] { job.scoreSummary = summary }
-            if case .object(let factors)? = p.reasons["factors"] {
-                for (k, v) in factors {
-                    if case .int(let i) = v { job.scoreFactors[k] = i }
-                    if case .double(let d) = v { job.scoreFactors[k] = Int(d.rounded()) }
-                }
-            }
+            ScoreEvidence.apply(p.reasons, to: &job)
         }
     }
 

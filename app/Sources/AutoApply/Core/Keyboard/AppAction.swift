@@ -22,6 +22,12 @@ enum AppAction: Hashable, Sendable, Identifiable {
     case openMainWindow
     /// Approve & submit the awaiting-review job open in Job detail (only listed when there is one).
     case approveOpenJob
+    /// Dashboard ▸ What's working (the advisory insights report).
+    case showInsights
+    /// Job detail ▸ Interview prep for the open job, else the latest job at Assessment / Interview / Offer.
+    case openInterviewPrep
+    /// Cold Email ▸ Contacts ▸ Import LinkedIn connections…
+    case importLinkedInConnections
 
     var id: String {
         switch self {
@@ -34,6 +40,7 @@ enum AppAction: Hashable, Sendable, Identifiable {
     /// Actions listed in the ⌘K palette's ACTIONS / NAVIGATE sections.
     static var paletteActions: [AppAction] {
         [.approveOpenJob, .addJobByLink, .togglePause, .runNow, .applyQueued, .runPrep, .nextQuestion, .setMode(.auto), .setMode(.review),
+         .showInsights, .openInterviewPrep, .importLinkedInConnections,
          .openAgentChrome, .openDataFolder, .toggleInspector, .openSettings]
             + SidebarItem.allCases.map { .go($0) }
     }
@@ -55,7 +62,7 @@ enum AppAction: Hashable, Sendable, Identifiable {
         case .openSettings: .openSettings
         case .openMainWindow: .openMainWindow
         case .approveOpenJob: .submit
-        case .setMode, .openAgentChrome, .openDataFolder: nil
+        case .setMode, .openAgentChrome, .openDataFolder, .showInsights, .openInterviewPrep, .importLinkedInConnections: nil
         }
     }
 
@@ -78,6 +85,9 @@ enum AppAction: Hashable, Sendable, Identifiable {
         case .openDataFolder: "Open data folder"
         case .openMainWindow: "Open AutoApply"
         case .approveOpenJob: approvableJob(in: store).map { "Approve & submit \($0.company)" } ?? "Approve & submit"
+        case .showInsights: "Show what's working (insights)"
+        case .openInterviewPrep: interviewPrepJob(in: store).map { "Interview prep: \($0.company)" } ?? "Interview prep"
+        case .importLinkedInConnections: "Import LinkedIn connections…"
         }
     }
 
@@ -86,6 +96,7 @@ enum AppAction: Hashable, Sendable, Identifiable {
     func isAvailable(in store: AppStore) -> Bool {
         switch self {
         case .approveOpenJob: approvableJob(in: store) != nil
+        case .openInterviewPrep: interviewPrepJob(in: store) != nil
         default: true
         }
     }
@@ -95,6 +106,16 @@ enum AppAction: Hashable, Sendable, Identifiable {
     func approvableJob(in store: AppStore) -> JobItem? {
         guard let id = store.router.openJobDetailID, let job = store.jobs.job(id: id), job.state == .awaitingReview else { return nil }
         return job
+    }
+
+    /// The open job when it is at Assessment / Interview / Offer (or has a pack), else the most
+    /// recently moved job at one of those stages.
+    @MainActor
+    func interviewPrepJob(in store: AppStore) -> JobItem? {
+        let prep = InterviewPrepModel.shared(for: store)
+        if let id = store.router.openJobDetailID, let job = store.jobs.job(id: id), prep.showsTab(for: job) { return job }
+        return store.jobs.all.filter(InterviewPrepModel.isStage)
+            .max { ($0.statusUpdatedAt ?? $0.submittedAt ?? .distantPast) < ($1.statusUpdatedAt ?? $1.submittedAt ?? .distantPast) }
     }
 
     @MainActor
@@ -116,6 +137,9 @@ enum AppAction: Hashable, Sendable, Identifiable {
         case .openDataFolder: "folder"
         case .openMainWindow: "macwindow"
         case .approveOpenJob: "paperplane.fill"
+        case .showInsights: "chart.bar.xaxis"
+        case .openInterviewPrep: "person.crop.rectangle.stack"
+        case .importLinkedInConnections: "person.2.badge.plus"
         }
     }
 }
@@ -146,6 +170,13 @@ extension AppStore {
         case .openMainWindow: router.requestMainWindow()
         case .approveOpenJob:
             if let job = action.approvableJob(in: self) { router.requestApprove(jobID: job.id) }
+        case .showInsights:
+            router.showInsights()
+        case .openInterviewPrep:
+            if let job = action.interviewPrepJob(in: self) { router.openJob(id: job.id, tab: JobDetailTab.prep.rawValue) }
+        case .importLinkedInConnections:
+            router.go(.coldEmail)
+            ColdEmailModel.shared(for: self).beginLinkedInImport()
         }
     }
 }

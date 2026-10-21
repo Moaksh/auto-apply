@@ -1,6 +1,7 @@
 // ContactsTab.swift — Cold Email ▸ Contacts (plan §A.4, §B.5): everyone found or added, with the
 // email's confidence tier, where it came from (provenance popover), and when you last wrote.
-// Add contact is the tab's one primary action; Import CSV, Suppress and Delete are secondary.
+// Add contact is the tab's one primary action; Import LinkedIn connections, Import CSV, Suppress
+// and Delete are secondary.
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -18,6 +19,10 @@ struct ContactsTab: View {
                     .frame(maxWidth: 320)
                 Spacer()
                 if importing { ProgressView().controlSize(.small) }
+                Button("Import LinkedIn connections…") { model.beginLinkedInImport() }
+                    .buttonStyle(.secondaryLink)
+                    .disabled(!store.isConnected)
+                    .help("From the Connections.csv you download from LinkedIn yourself. Stays on this Mac.")
                 Button("Import CSV…") { importCSV() }
                     .buttonStyle(.secondaryLink)
                     .disabled(importing || !store.isConnected)

@@ -78,6 +78,10 @@ struct JobItem: Identifiable, Sendable, Hashable {
     var scoreSummary: String?
     /// Factor name -> 0…100 (`scores.reasons.factors`).
     var scoreFactors: [String: Int] = [:]
+    /// Requirement-level evidence (`scores.reasons.requirements`); nil for older scores.
+    var scoreRequirements: [RequirementEvidence]?
+    /// What the scorer's grounding guard dropped (`scores.reasons.grounding`).
+    var scoreGrounding: ScoreGrounding?
     var skipReason: String?
     var scoredAt: Date?
 

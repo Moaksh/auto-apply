@@ -1,5 +1,7 @@
 // MatchBreakdown.swift — match score + factor bars (animate from 0 on first open with
-// `.gentle`, 40 ms stagger) + the agent's 1–2 sentence rationale (§5.4).
+// `.gentle`, 40 ms stagger) + the agent's 1–2 sentence rationale (§5.4), and for newer scores the
+// requirements table: met / partly / missing with the quote from your own profile, dealbreakers
+// with the job's own words.
 import SwiftUI
 
 struct FactorBar: View {
@@ -67,6 +69,79 @@ struct MatchBreakdown: View {
                 Text("Why: \(summary)").font(Typography.callout).foregroundStyle(Palette.textSecondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            // Older scores have no requirement evidence: nothing is shown for them.
+            if let requirements = job.scoreRequirements, !requirements.isEmpty {
+                RequirementsTable(requirements: requirements, grounding: job.scoreGrounding)
+            }
         }
+    }
+}
+
+/// The job's key requirements, each with whether your profile shows it (met / partly / missing),
+/// the quote from your own profile or resume that backs it, and, for a dealbreaker, the job's
+/// own words saying it is mandatory.
+struct RequirementsTable: View {
+    var requirements: [RequirementEvidence]
+    var grounding: ScoreGrounding?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            Text("Requirements").eyebrowStyle()
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(requirements) { r in
+                    if r.index > 0 { Divider() }
+                    row(r)
+                }
+            }
+            .padding(.horizontal, Space.m)
+            .padding(.vertical, Space.xs)
+            .surface(cornerRadius: Radius.inner)
+            if let note = Self.groundingNote(grounding) {
+                Text(note).font(Typography.callout).foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func row(_ r: RequirementEvidence) -> some View {
+        VStack(alignment: .leading, spacing: Space.xs) {
+            HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                Text(r.requirement).font(Typography.callout.weight(.medium)).fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: Space.xs)
+                if r.dealbreaker { Badge("Must have", symbol: "exclamationmark.octagon", tone: .warning, accessibilityText: "Dealbreaker") }
+                Badge(r.status.label, symbol: r.status.symbol, tone: Self.tone(r.status), accessibilityText: "Requirement \(r.status.label.lowercased())")
+            }
+            if !r.evidence.isEmpty {
+                Text("“\(r.evidence)”").font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityLabel("From your profile: \(r.evidence)")
+            } else if r.status != .met {
+                Text("Nothing in your profile or resume shows this.").font(Typography.callout).foregroundStyle(Palette.textTertiary)
+            }
+            if r.dealbreaker, let quote = r.jdQuote {
+                Text("The job says: “\(quote)”").font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, Space.s)
+        .accessibilityElement(children: .contain)
+    }
+
+    static func tone(_ status: RequirementEvidence.Status) -> Badge.Tone {
+        switch status {
+        case .met: .status(.applied)
+        case .partial: .accent
+        case .missing: .warning
+        }
+    }
+
+    /// A quiet line when the scorer's guard removed evidence it couldn't find in your own text.
+    static func groundingNote(_ g: ScoreGrounding?) -> String? {
+        guard let g, g.evidenceDropped > 0 else { return nil }
+        return g.evidenceDropped == 1
+            ? "One quote couldn't be found in your profile or resume, so it was left out and that requirement marked down."
+            : "\(g.evidenceDropped) quotes couldn't be found in your profile or resume, so they were left out and those requirements marked down."
     }
 }

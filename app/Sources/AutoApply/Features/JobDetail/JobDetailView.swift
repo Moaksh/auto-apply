@@ -2,8 +2,9 @@
 // the status menu and the one state-dependent primary action (Approve & submit, Try again, Queue
 // for next run), match breakdown + resume + mode on the left, and Overview (job description) |
 // Questions (this job's open Needs You questions, answered in place; only while it has some) |
-// Application (answer log + page as sent) | Screenshots | Timeline. Token counts and the resume
-// pick score sit behind "Technical details".
+// Application (answer log + page as sent) | Interview prep (Assessment / Interview / Offer, or
+// whenever a pack exists) | Screenshots | Timeline. Token counts and the resume pick score sit
+// behind "Technical details".
 import SwiftUI
 
 @objc(JobDetailFeature)
@@ -14,13 +15,14 @@ final class JobDetailFeature: NSObject, FeatureRegistrant {
 }
 
 enum JobDetailTab: String, CaseIterable, Sendable {
-    case overview, questions, application, screenshots, timeline
+    case overview, questions, application, prep, screenshots, timeline
 
     var title: String {
         switch self {
         case .overview: "Overview"
         case .questions: "Questions"
         case .application: "Application"
+        case .prep: "Interview prep"
         case .screenshots: "Screenshots"
         case .timeline: "Timeline"
         }
@@ -49,12 +51,18 @@ struct JobDetailView: View {
     @State private var quickLookURL: URL?
     @Environment(\.motionReduced) private var reduced
 
+    private var prep: InterviewPrepModel { InterviewPrepModel.shared(for: store) }
+
     var body: some View {
         if let job = store.jobs.job(id: jobID) {
             content(job)
                 .task(id: job.applicationID) { await loader.streamAnswers(applicationID: job.applicationID, repository: store.repository) }
                 .task(id: jobID) { await loader.loadDescription(jobID: jobID, fallback: job.description, repository: store.repository) }
                 .task(id: store.activity.events.count) { events = store.activity.events(forJob: jobID) }
+                .task(id: PrepLoadKey(applicationID: job.applicationID, status: job.status, state: job.state)) {
+                    // Applied jobs: find out whether a pack is stored (a file read; no model call).
+                    if job.state == .submitted { await prep.load(applicationID: job.applicationID, force: InterviewPrepModel.isStage(job)) }
+                }
                 .onAppear {
                     if tab == nil { tab = JobDetailTab.initial(for: job, openQuestions: openClusters(job).count) }
                     router.focusedJobID = jobID
@@ -66,6 +74,9 @@ struct JobDetailView: View {
                 }
                 .onChange(of: router.jobApproveRequest) { _, request in
                     if request?.jobID == jobID { requestApprove(job) }
+                }
+                .onChange(of: router.jobTabRequest) { _, request in
+                    if request?.jobID == jobID, let t = request.flatMap({ JobDetailTab(rawValue: $0.tab) }) { tab = t }
                 }
                 .quickLookPreview($quickLookURL)
                 .focusedSceneValue(\.copyAllAnswers, CopyAllAnswersAction { copyAll(job) })
@@ -217,7 +228,8 @@ struct JobDetailView: View {
 
     private func main(_ job: JobItem) -> some View {
         let questions = openClusters(job)
-        let tabs = JobDetailTab.allCases.filter { $0 != .questions || !questions.isEmpty }
+        let showsPrep = prep.showsTab(for: job)
+        let tabs = JobDetailTab.allCases.filter { ($0 != .questions || !questions.isEmpty) && ($0 != .prep || showsPrep) }
         // The Questions tab leaves once its last question is answered.
         let chosen = tab ?? JobDetailTab.initial(for: job, openQuestions: questions.count)
         let current = tabs.contains(chosen) ? chosen : JobDetailTab.initial(for: job)
@@ -229,12 +241,13 @@ struct JobDetailView: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
-            .frame(maxWidth: questions.isEmpty ? 420 : 540)
+            .frame(maxWidth: (questions.isEmpty ? 420 : 540) + (showsPrep ? 120 : 0))
 
             switch current {
             case .overview: overview(job)
             case .questions: JobQuestionsPane(job: job, clusters: questions)
             case .application: application(job)
+            case .prep: InterviewPrepPane(job: job, model: prep)
             case .screenshots: ScreenshotViewer(shots: JobDetailRules.screenshots(for: job), highlighted: nil)
             case .timeline: JobTimeline(items: JobDetailRules.timeline(job: job, events: events))
             }
@@ -594,4 +607,12 @@ struct CopyAllAnswersAction {
 
 extension FocusedValues {
     @Entry var copyAllAnswers: CopyAllAnswersAction?
+}
+
+/// Re-check for a stored pack when the job's application or board status changes (a move to
+/// Interview writes one in the background).
+private struct PrepLoadKey: Hashable {
+    var applicationID: Int?
+    var status: BoardStatus?
+    var state: AppState
 }

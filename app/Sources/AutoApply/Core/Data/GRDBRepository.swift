@@ -506,16 +506,7 @@ final class GRDBRepository: AppRepository {
         job.skipReason = row["skip_reason"]
         job.scoredAt = DBJSON.date(row["scored_at"])
         let reasons = DBJSON.decode(JSONValue.self, from: row["reasons"], default: .object([:]))
-        if case .string(let summary)? = reasons["summary"] { job.scoreSummary = summary }
-        if case .object(let factors)? = reasons["factors"] {
-            for (k, v) in factors {
-                switch v {
-                case .int(let i): job.scoreFactors[k] = i
-                case .double(let d): job.scoreFactors[k] = Int(d.rounded())
-                default: break
-                }
-            }
-        }
+        ScoreEvidence.apply(reasons, to: &job)
         return job
     }
 

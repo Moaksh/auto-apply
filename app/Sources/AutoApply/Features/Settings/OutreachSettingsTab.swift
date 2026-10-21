@@ -2,8 +2,8 @@
 // (on only after a test email to yourself goes through), the daily limit, send window, weekdays
 // only, follow-ups, the email confidence bar, what happens after each application, the people
 // finder's daily Google budget, the Hunter key (Keychain only, never shown back), the
-// do-not-contact list (opt-outs can't be removed) and deleting contacts. Preference fields
-// auto-save through the shared draft like every other tab.
+// writing voice (WritingVoiceSection), the do-not-contact list (opt-outs can't be removed) and
+// deleting contacts. Preference fields auto-save through the shared draft like every other tab.
 import SwiftUI
 
 struct OutreachSettingsTab: View {
@@ -64,6 +64,8 @@ struct OutreachSettingsTab: View {
                 .font(Typography.callout).foregroundStyle(Palette.textSecondary)
         }
         HunterKeyRow()
+        Divider()
+        WritingVoiceSection(model: VoiceProfileModel.shared(for: store))
         Divider()
         SuppressionListRow()
         ContactDataRow()

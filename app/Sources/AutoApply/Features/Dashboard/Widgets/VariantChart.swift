@@ -14,14 +14,24 @@ struct VariantChart: View {
             : (variants.isEmpty ? .empty(symbol: "doc.on.doc", message: "Shows which resume gets responses after your first applications") : .content)
 
         Surface("By resume", state: state, onRetry: { store.recomputeStats() }) {
-            VStack(alignment: .leading, spacing: Space.s) {
-                ForEach(Array(variants.enumerated()), id: \.element.id) { index, v in
-                    row(v, color: Palette.categorical[index % Palette.categorical.count])
-                }
-            }
-            .motion(Motion.gentle, value: variants)
-            .accessibilityChartDescriptor(VariantDescriptor(variants: variants))
+            VariantBars(variants: variants)
         }
+    }
+}
+
+/// One bar per resume variant: response rate, with "n=64" and hatching below 10 applications.
+/// Shared by the Dashboard's "By resume" card and Insights ▸ Resume variants.
+struct VariantBars: View {
+    var variants: [VariantStat]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            ForEach(Array(variants.enumerated()), id: \.element.id) { index, v in
+                row(v, color: Palette.categorical[index % Palette.categorical.count])
+            }
+        }
+        .motion(Motion.gentle, value: variants)
+        .accessibilityChartDescriptor(VariantDescriptor(variants: variants))
     }
 
     private func row(_ v: VariantStat, color: Color) -> some View {

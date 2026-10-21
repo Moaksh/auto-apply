@@ -2,6 +2,7 @@
 // (date, greeting, next run · mode), the one global banner, the live agent, then a calm grid of
 // numbers and charts. Status only: Run lives in the toolbar, ⌘K and the Agent menu (the live
 // agent shows "Run now" only before the very first run). Nothing animates on arrival or at rest.
+// "What's working" opens the advisory insights report (Dashboard ▸ What's working).
 import SwiftUI
 
 @objc(DashboardFeature)
@@ -37,6 +38,7 @@ struct DashboardView: View {
                     ScoreHistogram()
                 }
                 .environment(\.surfaceFillsHeight, true)
+                InsightsCard()
                 ActivityHeatmap()
             }
             .padding(Space.contentPadding)

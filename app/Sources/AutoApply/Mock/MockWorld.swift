@@ -24,6 +24,8 @@ final class MockWorld: Sendable {
         var nextResumeID = 100
         var nextAnswerRowID = 100_000
         var runCounter = 0
+        /// Interview prep packs, the writing voice and the insights summary (MockCareer).
+        var career = MockCareer.State()
     }
 
     static let defaultSources: [SourceStatus] = [

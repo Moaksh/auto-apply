@@ -105,6 +105,7 @@ struct PaletteSettingEntry: Sendable, Hashable {
         .init(title: "Hunter key", keywords: "cold email outreach provider api key hunter", tab: .outreach, key: "hunter"),
         .init(title: "Do-not-contact list", keywords: "cold email outreach suppress unsubscribe opt out block", tab: .outreach, key: "suppression"),
         .init(title: "Delete contacts", keywords: "cold email outreach data delete contacts privacy", tab: .outreach, key: "delete_contacts"),
+        .init(title: "Writing voice", keywords: "sign-off tone formality style phrases avoid sample cover letter email words", tab: .outreach, key: "voice_profile"),
         .init(title: "Notifications", keywords: "alerts notify", tab: .general, key: "notifications"),
         .init(title: "Show in Dock / launch at login", keywords: "dock login startup menu bar", tab: .general, key: "show_in_dock"),
         .init(title: "Haptics & sounds", keywords: "feedback trackpad", tab: .general, key: "haptics"),

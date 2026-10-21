@@ -23,6 +23,7 @@ struct RootView: View {
                     .navigationDestination(for: Destination.self) { destination in
                         switch destination {
                         case .job(let id): registry.jobDetail(id: id)
+                        case .insights: InsightsView()
                         }
                     }
             }

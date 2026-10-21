@@ -136,12 +136,16 @@ struct DesignSystemTests {
         #expect(hits.isEmpty, "\(hits)")
     }
 
-    /// The glossary inside the UI strings of the outreach screens: Needs You (never Inbox), Agent
-    /// (never daemon / autoapplyd), Application site (never ATS), Pipeline (never board / tracker),
-    /// Applied (never Submitted).
+    /// The glossary inside the UI strings of the outreach and career screens: Needs You (never
+    /// Inbox), Agent (never daemon / autoapplyd), Application site (never ATS), Pipeline (never
+    /// board / tracker), Applied (never Submitted).
     @Test func outreachScreensUseTheGlossary() {
         let files = ["Features/ColdEmail/", "Features/Inbox/RepliesSection.swift", "Features/Settings/OutreachSettingsTab.swift",
-                     "Core/Models/OutreachModels.swift", "Core/Store/OutreachStore.swift", "Core/Store/AppStore+Outreach.swift"]
+                     "Core/Models/OutreachModels.swift", "Core/Store/OutreachStore.swift", "Core/Store/AppStore+Outreach.swift",
+                     // What's working, Interview prep, requirement evidence, writing voice, LinkedIn import.
+                     "Features/Dashboard/Insights/", "Features/JobDetail/InterviewPrep", "Features/JobDetail/MatchBreakdown.swift",
+                     "Features/Settings/WritingVoiceSection.swift", "Core/Store/AppStore+Career.swift", "Core/Models/ScoreEvidence.swift",
+                     "Mock/MockCareer.swift"]
         let banned = ["Inbox", "inbox", "daemon", "autoapplyd", "ATS", "board", "Board", "tracker", "Submitted", "submitted", "LaunchAgent"]
         let literal = try! NSRegularExpression(pattern: #""((?:[^"\\]|\\.)*)""#)
         var hits: [String] = []
@@ -158,6 +162,33 @@ struct DesignSystemTests {
         }
         #expect(hits.isEmpty, "\(hits.joined(separator: "\n"))")
         #expect(Self.sources().contains { $0.path == "Features/ColdEmail/OutboxTab.swift" }, "the lint found the new screens")
+        #expect(Self.sources().contains { $0.path == "Features/Dashboard/Insights/InsightsView.swift" }, "the lint found the career screens")
+    }
+
+    /// The career helpers are honest about what they are: insights are advisory and change
+    /// nothing, prep is grounded in your own stories, drafts are never sent, the LinkedIn file
+    /// stays on this Mac. None of their strings promise otherwise.
+    @Test func careerScreensStayHonest() {
+        let files = ["Features/Dashboard/Insights/", "Features/JobDetail/InterviewPrep", "Features/JobDetail/MatchBreakdown.swift",
+                     "Features/Settings/WritingVoiceSection.swift", "Features/ColdEmail/LinkedInImport.swift", "Mock/MockCareer.swift"]
+        let banned = ["we'll send", "will be sent", "sent automatically", "sends it for you", "automatically adjust", "we adjusted",
+                      "threshold was changed", "AI-powered", "magic", "scrape", "scraping", "guarantee", "ace the interview",
+                      "land the job", "sync your LinkedIn", "connect your LinkedIn", "Insights engine"]
+        var hits: [String] = []
+        for file in Self.sources() where files.contains(where: { file.path.hasPrefix($0) }) {
+            for (i, line) in file.lines.enumerated() where line.contains("\"") {
+                for phrase in banned where line.range(of: phrase, options: .caseInsensitive) != nil {
+                    hits.append("\(file.path):\(i + 1): \(phrase)")
+                }
+            }
+        }
+        #expect(hits.isEmpty, "\(hits.joined(separator: "\n"))")
+        // And the promises that must be there.
+        let text = Self.sources().filter { f in files.contains { f.path.hasPrefix($0) } }.flatMap(\.lines).joined(separator: "\n")
+        for promise in ["nothing is changed automatically", "never claim a skill you don't have", "Nothing is sent", "Never sent",
+                        "never shared", "never opens LinkedIn", "never adds facts", "Uses one Claude request"] {
+            #expect(text.contains(promise), "missing honest copy: \(promise)")
+        }
     }
 
     @Test func outreachNeverDrivesLinkedIn() {
@@ -263,6 +294,52 @@ struct DesignSystemTests {
         #expect(prominentCount(store: store, width: 680, height: 1400) {
             ScrollView { VStack { OutreachSettingsTab(model: SettingsModel(store: store)) } }
         } == 0, "Settings ▸ Outreach has no primary")
+        await store.stop()
+    }
+
+    @Test func careerScreensHaveOnePrimary() async throws {
+        let store = await makeStore(.idle)
+        // What's working: Refresh is the one primary, loaded or loading.
+        let insights = InsightsModel(store: store)
+        insights.show(CareerFixtures.insights())
+        #expect(prominentCount(store: store) { InsightsView(modelOverride: insights) } == 1, "What's working")
+        #expect(prominentCount(store: store) { InsightsView(modelOverride: InsightsModel(store: store)) } == 1, "What's working (loading)")
+        // The Dashboard's card is a link, not another primary.
+        #expect(prominentCount(store: store, height: 1700) { DashboardView() } <= 1, "Dashboard with What's working")
+
+        // Interview prep: "Prepare" before a pack, then "Write debrief".
+        let job = try #require(store.jobs.all.first { $0.state == .submitted && $0.applicationID != nil })
+        let id = try #require(job.applicationID)
+        let prep = InterviewPrepModel.shared(for: store)
+        await prep.load(applicationID: id, force: true)
+        if prep.pack(id) == nil {
+            #expect(prominentCount(store: store, width: 760, height: 1200) { InterviewPrepPane(job: job, model: prep) } == 1, "Prep, no pack")
+        }
+        await prep.generate(applicationID: id, force: true)
+        prep.notes[id] = "Spoke with Priya."
+        await prep.debrief(applicationID: id)
+        #expect(prominentCount(store: store, width: 760, height: 2400) { InterviewPrepPane(job: job, model: prep) } == 1, "Prep with a pack")
+        // Job detail of an applied job still has at most one primary (the prep tab isn't the default).
+        #expect(prominentCount(store: store) { JobDetailView(jobID: job.id) } <= 1, "Job detail (applied)")
+
+        // The LinkedIn import sheet: one primary in every state.
+        let cold = ColdEmailModel(store: store)
+        let done = LinkedInImportResult(imported: 3, merged: 0, skipped: 0,
+                                        matchedCompanies: [.init(companyId: 1, name: "Stripe", why: "You applied", connections: 1)],
+                                        referralSuggestions: 1)
+        for state: LinkedInImportState in [.idle, .importing, .failed("Bad file"), .done(done),
+                                           .done(LinkedInImportResult(imported: 1, merged: 0, skipped: 0, matchedCompanies: [], referralSuggestions: 0))] {
+            cold.linkedInImport = state
+            #expect(prominentCount(store: store, width: 520, height: 560) { LinkedInImportSheet(model: cold) } == 1, "LinkedIn import \(state)")
+        }
+
+        // Settings ▸ Outreach with the writing voice loaded: still no primary.
+        let voice = VoiceProfileModel.shared(for: store)
+        await voice.load()
+        #expect(voice.phase == .loaded)
+        #expect(prominentCount(store: store, width: 680, height: 1900) {
+            ScrollView { VStack { OutreachSettingsTab(model: SettingsModel(store: store)) } }
+        } == 0, "Settings ▸ Outreach with Writing voice has no primary")
         await store.stop()
     }
 

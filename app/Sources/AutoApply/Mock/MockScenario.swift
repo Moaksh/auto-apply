@@ -115,6 +115,8 @@ enum MockScenario: String, CaseIterable, Sendable, Identifiable {
         case .stress, .firstRunEmpty, .onboarding: break
         default: MockOutreach.seed(&data, now: now)
         }
+        // Requirement evidence on most scores (some keep the older shape without it).
+        MockCareer.seedScoreEvidence(&data)
 
         let submittedToday = data.jobs.filter { $0.submittedAt.map { Calendar.current.isDate($0, inSameDayAs: now) } ?? false }.count
         state.caps.dailyUsed = max(state.caps.dailyUsed, submittedToday)
