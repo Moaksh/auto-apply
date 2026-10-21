@@ -107,6 +107,14 @@ OWN_TOOLS = (
     "request_submit", "report_submission_result", "report_form_questions",
     "start_account", "check_email", "finish_account",
 )
+#: The agent describing an unusable browser (a locked Chrome profile, ...) rather than the site.
+BROWSER_DOWN_RX = re.compile(
+    r"\b(chrome|browser|profile)\b[^.]{0,60}\b(locked|in use|already (running|open|in use)|unavailable|not available|"
+    r"could ?n[o']t (start|launch|open))\b|\banother (running )?(browser |chrome )?instance\b|\bbrowser unavailable\b",
+    re.I,
+)
+#: FillResult.error prefix for a session that never got a working browser (the job is re-queued).
+BROWSER_UNAVAILABLE = "browser_unavailable"
 #: Fields the account step may fill (sign-up / sign-in / reset forms): nothing from the application.
 ACCOUNT_FIELD_RX = re.compile(
     r"e-?mail|user ?name|user ?id|login|password|passcode|pass word|confirm|first name|last name|given name|family name"
@@ -669,6 +677,8 @@ class AgentToolbox:
         self.account_started: float | None = None
         self.account_failed = False
         self.account_nudges = 0
+        #: the agent reported that the browser couldn't start (profile locked, ...): retry, don't park
+        self.browser_down: str | None = None
         #: screenshots older than this session do not count (the Review-time prefill.png
         #: already sits in the same directory when a fresh submit session starts)
         self.started_at = time.time()
@@ -696,6 +706,25 @@ class AgentToolbox:
 
     def _allow_upload(self, path: str) -> None:
         self.gate.allowed_upload_paths.add(str(Path(path).expanduser().resolve()))
+
+    def _upload_path(self, path: str) -> str:
+        """The copy of ``path`` the browser may upload. Recent ``@playwright/mcp`` versions only
+        upload files under their output dir, so the resume / cover letter is staged there (same
+        file name, which is what the site shows) and that copy is what the agent is given."""
+        import shutil
+
+        src = Path(path).expanduser()
+        self._allow_upload(str(src))
+        try:
+            dest = self.output_dir / "uploads" / src.name
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            if not dest.exists() or dest.stat().st_mtime < src.stat().st_mtime or dest.stat().st_size != src.stat().st_size:
+                shutil.copy2(src, dest)
+        except OSError as e:  # the original still works with an unrestricted browser tool
+            log.warning("could not stage %s for upload: %s", src, e)
+            return str(src)
+        self._allow_upload(str(dest))
+        return str(dest.resolve())
 
     def _park(self, q: FormQuestion, reason: QuestionReason | str, **kw: Any) -> None:
         kind = resolve_kind(q.label, reason, kw.pop("kind", None))
@@ -757,9 +786,9 @@ class AgentToolbox:
         self.resolved[norm] = r
         payload: dict[str, Any] = {"status": "answered", "answer": r.answer, "origin": r.origin.value, "confidence": r.confidence}
         if r.action == "upload_resume":
-            self._allow_upload(r.answer)
             self.resume_path = r.answer
-            payload["instruction"] = "Upload this file with browser_file_upload."
+            payload["file_path"] = self._upload_path(r.answer)
+            payload["instruction"] = "Upload file_path with browser_file_upload."
         elif r.action == "cover_letter":
             payload["instruction"] = "Call write_cover_letter and upload the returned file (or paste its text)."
         elif r.action == "skip":
@@ -767,6 +796,11 @@ class AgentToolbox:
         return _ok(payload)
 
     async def ask_user(self, args: dict[str, Any]) -> dict[str, Any]:
+        if BROWSER_DOWN_RX.search(str(args.get("question") or "")):
+            # The browser / its profile is busy: AutoApply's problem, retried later — never a user task.
+            self.browser_down = str(args.get("question"))[:300]
+            return _ok("That is an internal browser problem, not a task for the user; AutoApply retries this job "
+                       "later. Stop now.")
         opts = [str(o) for o in args.get("options") or [] if str(o).strip()]
         q = FormQuestion(
             key=normalize_question(args["question"])[:80] or "q", label=str(args["question"]).strip(),
@@ -872,7 +906,7 @@ class AgentToolbox:
     async def pick_resume(self, args: dict[str, Any]) -> dict[str, Any]:
         if self.ctx.resume is not None:
             v = self.ctx.resume
-            return _ok({"file_path": v.file_path, "label": v.label, "reasons": ["chosen for this application"]})
+            return _ok({"file_path": self._upload_path(v.file_path), "label": v.label, "reasons": ["chosen for this application"]})
         pick = pick_resume(self.ctx.conn, self.ctx.job)
         if pick is None:
             self._park(FormQuestion(key="resume", label="Resume", field_type=FieldType.FILE, required=True), QuestionReason.UNKNOWN)
@@ -881,11 +915,12 @@ class AgentToolbox:
         self.resume_path = pick.variant.file_path
         self.resume_variant_id = pick.variant.id
         db.update_application(self.ctx.conn, self.ctx.application.id, resume_variant_id=pick.variant.id, resume_pick_score=pick.score)
-        return _ok({"file_path": pick.variant.file_path, "label": pick.variant.label, "reasons": pick.reasons})
+        return _ok({"file_path": self._upload_path(pick.variant.file_path), "label": pick.variant.label, "reasons": pick.reasons})
 
     async def write_cover_letter(self, args: dict[str, Any]) -> dict[str, Any]:
         if self.cover_letter_path and Path(self.cover_letter_path).exists():
-            return _ok({"file_path": self.cover_letter_path, "text": Path(self.cover_letter_path).read_text(encoding="utf-8")})
+            return _ok({"file_path": self._upload_path(self.cover_letter_path),
+                        "text": Path(self.cover_letter_path).read_text(encoding="utf-8")})
         job = self.ctx.job
         company = db.get_company(self.ctx.conn, job.company_id)
         out_dir = self.cover_letters_dir or get_paths(create=True).cover_letters
@@ -903,7 +938,7 @@ class AgentToolbox:
         db.update_application(self.ctx.conn, self.ctx.application.id, cover_letter_path=self.cover_letter_path)
         for sid in letter.story_ids:
             db.record_story_use(self.ctx.conn, sid)
-        return _ok({"file_path": self.cover_letter_path, "text": letter.text})
+        return _ok({"file_path": self._upload_path(self.cover_letter_path), "text": letter.text})
 
     async def report_captcha(self, args: dict[str, Any]) -> dict[str, Any]:
         self.captcha = str(args.get("detail") or "CAPTCHA on the application page")
@@ -1231,6 +1266,28 @@ _PROFILE_SKIP = {"Cache", "Code Cache", "GPUCache", "DawnCache", "DawnGraphiteCa
                  "SingletonLock", "SingletonSocket", "SingletonCookie", "lockfile", "RunningChromeVersion"}
 
 
+def _profile_in_use(profile: Path) -> bool:
+    """A live Chrome on this Mac holds ``profile`` (its ``SingletonLock`` -> "<host>-<pid>")."""
+    import os
+    import socket
+
+    lock = profile / "SingletonLock"
+    try:
+        target = os.readlink(lock)
+    except OSError:
+        return False
+    host, _, pid = target.rpartition("-")
+    if not pid.isdigit() or (host and host != socket.gethostname()):
+        return False
+    try:
+        os.kill(int(pid), 0)
+    except ProcessLookupError:
+        return False  # stale lock: Chrome clears it on start
+    except PermissionError:
+        return True
+    return True
+
+
 def _seed_profile(base: Path, target: Path) -> None:
     """Give a worker's own Chrome profile the main profile's logins (cookies, local storage), so
     agents 2..N aren't signed out everywhere. Re-copied when the main profile's cookies are newer
@@ -1342,7 +1399,7 @@ class AgenticAdapter:
         client = self.client_factory(self._options(ctx, toolbox, max_turns=self.harvest_max_turns), toolbox)
         outcome = await self._run(ctx, toolbox, prompt, client=client, keep_open=True)
         try:
-            if self._harvest_settled(toolbox) is None and not outcome.crashed:
+            if self._harvest_settled(toolbox) is None and not outcome.crashed and toolbox.browser_down is None:
                 log.info("harvest: agent stopped without reporting the questions (%s); asking once more",
                          outcome.error or "no report")
                 retry = (
@@ -1359,6 +1416,8 @@ class AgenticAdapter:
         settled = self._harvest_settled(toolbox)
         if settled is not None:
             return settled
+        if toolbox.browser_down is not None:
+            raise RuntimeError(f"{BROWSER_UNAVAILABLE}: {toolbox.browser_down}")
         fallback = questions_from_snapshot(toolbox.gate.last_form_snapshot)
         if fallback:
             log.info("harvest: agent did not report; read %d questions from the page snapshot", len(fallback))
@@ -1400,7 +1459,8 @@ class AgenticAdapter:
             if toolbox.unresolved:
                 return FillResult(ok=False, unresolved=list(toolbox.unresolved.values()), screenshot_path=toolbox.screenshot_path)
             if not toolbox.submit_ready:
-                err = outcome.error or (toolbox.submit_refusals[-1] if toolbox.submit_refusals else "agent finished without completing the form")
+                err = (f"{BROWSER_UNAVAILABLE}: {toolbox.browser_down}" if toolbox.browser_down is not None else
+                       outcome.error or (toolbox.submit_refusals[-1] if toolbox.submit_refusals else "agent finished without completing the form"))
                 return FillResult(ok=False, error=err, screenshot_path=toolbox.screenshot_path)
             if toolbox.screenshot_path:
                 db.update_application(ctx.conn, ctx.application.id, screenshot_path=toolbox.screenshot_path)
@@ -1498,11 +1558,18 @@ class AgenticAdapter:
         the main profile, slot N uses ``<profile>-N`` next to it (kept between runs)."""
         base = self.chrome_profile_dir or get_paths(create=True).chrome_profile
         slot = _slot()
-        if slot == 1:
-            return base
-        p = base.with_name(f"{base.name}-{slot}")
-        p.mkdir(mode=0o700, parents=True, exist_ok=True)
-        _seed_profile(base, p)
+        p = base if slot == 1 else base.with_name(f"{base.name}-{slot}")
+        if p != base:
+            p.mkdir(mode=0o700, parents=True, exist_ok=True)
+            _seed_profile(base, p)
+        if _profile_in_use(p):
+            # Another Chrome holds it (the agent's visible window, discovery, "Open in agent Chrome"):
+            # this worker uses its own spare profile (seeded with the same logins) instead of failing.
+            alt = base.with_name(f"{base.name}-alt{slot}")
+            alt.mkdir(mode=0o700, parents=True, exist_ok=True)
+            _seed_profile(base, alt)
+            log.info("Chrome profile %s is in use; worker %d uses %s", p.name, slot, alt.name)
+            return alt
         return p
 
     def playwright_server_config(self, ctx: ApplyContext) -> dict[str, Any]:

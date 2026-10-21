@@ -307,3 +307,16 @@ struct BoardQueueAndManualTests {
         #expect(model.pendingManualApply == nil)
     }
 }
+
+@MainActor
+@Suite("Apply queued only")
+struct ApplyQueuedTests {
+    @Test func applyQueuedRunsOnlyTheApplyStep() async {
+        let (store, daemon) = C2.store(jobs: [C2.job(id: 1, state: .queued), C2.job(id: 2, state: .queued),
+                                              C2.job(id: 3, state: .filling), C2.job(id: 4, state: .needsYou)])
+        #expect(store.queuedCount == 2)
+        await store.perform(.applyQueued)
+        #expect(daemon.sent.contains { if case .runNow(let p) = $0 { p.kind == .apply } else { false } })
+        #expect(AppAction.paletteActions.contains(.applyQueued))
+    }
+}

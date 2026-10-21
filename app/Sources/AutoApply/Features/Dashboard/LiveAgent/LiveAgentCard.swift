@@ -135,10 +135,20 @@ struct LiveAgentCard: View {
     private func heroButton(_ state: HeroState) -> some View {
         switch state {
         case .idle, .capReached:
-            Button { Task { await store.runNow() } } label: { Label("Run now", systemImage: "play.fill") }
-                .buttonStyle(.glassProminent)
-                .disabled(!store.isConnected)
-                .help("Run now (\(AppShortcut.runNow.displayString))")
+            HStack(spacing: Space.s) {
+                if store.queuedCount > 0 {
+                    Button { Task { await store.applyQueued() } } label: {
+                        Label("Apply \(store.queuedCount) queued", systemImage: "paperplane.fill")
+                    }
+                    .buttonStyle(.glass)
+                    .disabled(!store.isConnected)
+                    .help("Fill and submit just the queued jobs, no new search (\(AppShortcut.applyQueued.displayString))")
+                }
+                Button { Task { await store.runNow() } } label: { Label("Run now", systemImage: "play.fill") }
+                    .buttonStyle(.glassProminent)
+                    .disabled(!store.isConnected)
+                    .help("Run now: search, score and apply (\(AppShortcut.runNow.displayString))")
+            }
         case .discovering, .scoring, .prepping, .filling:
             Button {
                 Haptics.levelChange()

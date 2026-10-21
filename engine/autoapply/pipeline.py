@@ -31,6 +31,7 @@ import os
 import contextvars
 import inspect
 import logging
+import re
 import sqlite3
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -87,6 +88,14 @@ from autoapply.question_kind import resolve_kind
 log = logging.getLogger("autoapply.pipeline")
 #: Jobs already sent back once from an "Account required" Needs-You item (meta).
 ACCOUNT_RETRIED_META = "account_wall_retried_jobs"
+#: Jobs already sent back once from a Needs-You item that was an AutoApply glitch (meta).
+GLITCH_RETRIED_META = "glitch_retried_jobs"
+#: The agent asking the user to work around a refused resume / cover-letter upload.
+UPLOAD_GLITCH_RX = re.compile(
+    r"upload tool|only allows files|can'?t read the (resume|cv|cover letter)|resumes? folder|"
+    r"(resume|cv|file) upload (was |is )?(blocked|refused|not allowed)|allow access to the",
+    re.I,
+)
 
 USER_AGENT = "AutoApply/0.1 (personal job search assistant; read-only)"
 
@@ -891,9 +900,39 @@ class Pipeline:
         await self._log(LogLevel.INFO, f"Retrying {len(outcomes)} job site(s) that wanted an account: the agent creates it now")
         return len(outcomes)
 
+    async def retry_app_glitches(self) -> int:
+        """Needs-You "tasks" that were really AutoApply's own problems (the browser's profile was
+        locked, the browser tool refused to upload the resume) go back to the agent, once per job."""
+        from autoapply.apply.agentic import BROWSER_DOWN_RX
+
+        try:
+            done: set[int] = set(db.get_meta(self.conn, GLITCH_RETRIED_META, None) or [])
+            todo = [c for c in db.list_open_clusters(self.conn)
+                    if c.kind == "action" and not set(c.job_ids) <= done
+                    and (BROWSER_DOWN_RX.search(c.canonical_question) or UPLOAD_GLITCH_RX.search(c.canonical_question))]
+            if not todo:
+                return 0
+            from autoapply import prep as _prep
+
+            outcomes = []
+            for c in todo:
+                outcomes.append(_prep.answer_cluster(self.conn, c.cluster_id, "done", save_to_memory=False, save_to_profile=False))
+                done.update(c.job_ids)
+            db.set_meta(self.conn, GLITCH_RETRIED_META, sorted(done))
+        except Exception:  # noqa: BLE001 - never block a run on this
+            log.warning("retrying app glitches failed", exc_info=True)
+            return 0
+        for o in outcomes:
+            await self.emit("question_resolved", o.to_payload())
+            for t in o.transitions:
+                await self.emit("application_state", t.to_payload())
+        await self._log(LogLevel.INFO, f"Retrying {len(outcomes)} Needs-You item(s) caused by a browser problem AutoApply has fixed")
+        return len(outcomes)
+
     async def auto_resolve_inbox(self) -> int:
         """Clear Needs-You questions that stored facts now answer; parked jobs go back to the queue."""
         await self.retry_account_walls()
+        await self.retry_app_glitches()
         try:
             from autoapply import prep as _prep
 
@@ -1207,6 +1246,12 @@ class Pipeline:
             await self.park(app.id, job, fill.unresolved)
             await self._transition(app.id, AppState.NEEDS_YOU, reason="unresolved_questions", expected_from=AppState.FILLING)
             return AppState.NEEDS_YOU
+        if not fill.ok and (fill.error or "").startswith("browser_unavailable"):
+            # The browser never started (its profile was busy): not the job's fault, try it again later.
+            await self._transition(app.id, AppState.QUEUED, reason="browser_unavailable", expected_from=AppState.FILLING)
+            await self._log(LogLevel.WARNING, f"{job.title} · {company.name}: the browser was busy; it stays queued",
+                            job_id=job.id, application_id=app.id)
+            return AppState.QUEUED
         if not fill.ok:
             await self._transition(app.id, AppState.FAILED, reason=fill.error or "fill_failed", expected_from=AppState.FILLING)
             return AppState.FAILED

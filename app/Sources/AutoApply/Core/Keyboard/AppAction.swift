@@ -7,6 +7,8 @@ enum AppAction: Hashable, Sendable, Identifiable {
     case togglePause
     case runNow
     case runPrep
+    /// Only the apply step: fill the jobs already queued (incl. ones you just answered), no search.
+    case applyQueued
     case nextQuestion
     case addJobByLink
     case go(SidebarItem)
@@ -31,7 +33,7 @@ enum AppAction: Hashable, Sendable, Identifiable {
 
     /// Actions listed in the ⌘K palette's ACTIONS / NAVIGATE sections.
     static var paletteActions: [AppAction] {
-        [.approveOpenJob, .addJobByLink, .togglePause, .runNow, .runPrep, .nextQuestion, .setMode(.auto), .setMode(.review),
+        [.approveOpenJob, .addJobByLink, .togglePause, .runNow, .applyQueued, .runPrep, .nextQuestion, .setMode(.auto), .setMode(.review),
          .openAgentChrome, .openDataFolder, .toggleInspector, .openSettings]
             + SidebarItem.allCases.map { .go($0) }
     }
@@ -43,6 +45,7 @@ enum AppAction: Hashable, Sendable, Identifiable {
         case .togglePause: .togglePause
         case .runNow: .runNow
         case .runPrep: .runPrep
+        case .applyQueued: .applyQueued
         case .nextQuestion: .nextQuestion
         case .addJobByLink: .addJobByLink
         case .go(let item): .go(item)
@@ -62,6 +65,7 @@ enum AppAction: Hashable, Sendable, Identifiable {
         case .togglePause: store.isPaused ? "Resume agent" : "Pause agent"
         case .runNow: "Run discovery now"
         case .runPrep: "Run Prep pass"
+        case .applyQueued: "Apply queued jobs (no new search)"
         case .nextQuestion: "Answer next question"
         case .addJobByLink: "Add job by link"
         case .go(let item): "Go to \(item.title)"
@@ -99,6 +103,7 @@ enum AppAction: Hashable, Sendable, Identifiable {
         case .togglePause: store.isPaused ? "play.fill" : "pause.fill"
         case .runNow: "play.fill"
         case .runPrep: "tray.and.arrow.down"
+        case .applyQueued: "paperplane.fill"
         case .nextQuestion: "hand.raised.fill"
         case .addJobByLink: "link.badge.plus"
         case .go(let item): item.symbol
@@ -123,6 +128,7 @@ extension AppStore {
         case .togglePause: await togglePause()
         case .runNow: await runNow(.full)
         case .runPrep: await runPrepPass()
+        case .applyQueued: await applyQueued()
         case .nextQuestion:
             router.go(.needsYou)
         case .addJobByLink: router.requestAddJob()

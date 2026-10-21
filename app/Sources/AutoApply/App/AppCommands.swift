@@ -40,6 +40,7 @@ struct AppCommands: Commands {
             }
             .keyboardShortcut(.togglePause)
             Button(AppShortcut.runNow.title) { Task { await store.runNow() } }.keyboardShortcut(.runNow)
+            Button(AppShortcut.applyQueued.title) { Task { await store.applyQueued() } }.keyboardShortcut(.applyQueued)
             Button(AppShortcut.runPrep.title) { Task { await store.runPrepPass() } }.keyboardShortcut(.runPrep)
             Button(AppShortcut.nextQuestion.title) { Task { await store.perform(.nextQuestion) } }.keyboardShortcut(.nextQuestion)
             Divider()

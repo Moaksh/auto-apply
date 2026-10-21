@@ -81,6 +81,13 @@ extension AppStore {
 
     func runPrepPass() async { await runNow(.prep) }
 
+    /// Fill and submit only the jobs already queued (answered Needs-You jobs come back here), without
+    /// a new search or scoring pass.
+    func applyQueued() async { await runNow(.apply) }
+
+    /// Jobs waiting in the queue for the agent (not yet being worked on).
+    var queuedCount: Int { jobs.all.reduce(0) { $0 + ($1.state == .queued ? 1 : 0) } }
+
     /// Returns true once the daemon acks; on failure the local mode is rolled back.
     @discardableResult
     func setMode(_ mode: Mode) async -> Bool {

@@ -18,6 +18,7 @@ enum AppShortcut: String, CaseIterable, Identifiable, Sendable {
     case togglePause
     case runNow
     case runPrep
+    case applyQueued
     case nextQuestion
     case addJobByLink
     // Lists / jobs
@@ -75,6 +76,7 @@ enum AppShortcut: String, CaseIterable, Identifiable, Sendable {
         case .togglePause: "p"
         case .runNow: "r"
         case .runPrep: "r"
+        case .applyQueued: "r"
         case .nextQuestion: "j"
         case .addJobByLink: "n"
         case .openSelected: .return
@@ -99,7 +101,7 @@ enum AppShortcut: String, CaseIterable, Identifiable, Sendable {
         case .commandPalette, .openSettings, .openMainWindow, .filter, .runNow, .nextQuestion, .submit, .addJobByLink,
              .moveStatusPrevious, .moveStatusNext, .selectAll:
             .command
-        case .toggleInspector: [.command, .option]
+        case .toggleInspector, .applyQueued: [.command, .option]
         case .toggleSidebar: [.command, .control]
         case .openJobWindow, .togglePause, .runPrep, .copyAll: [.command, .shift]
         case .escape, .openSelected, .quickLook, .approve, .toggleSelection, .skip, .copyFocused, .openPosting:
@@ -130,6 +132,7 @@ enum AppShortcut: String, CaseIterable, Identifiable, Sendable {
         case .togglePause: "Pause / Resume Agent"
         case .runNow: "Run Now"
         case .runPrep: "Run Prep Pass"
+        case .applyQueued: "Apply Queued Jobs"
         case .nextQuestion: "Answer Next Question"
         case .addJobByLink: "Add Job by Link…"
         case .openSelected: "Open Selected"
@@ -170,6 +173,7 @@ enum AppShortcut: String, CaseIterable, Identifiable, Sendable {
         case .togglePause: "pause.fill"
         case .runNow: "play.fill"
         case .runPrep: "tray.and.arrow.down"
+        case .applyQueued: "paperplane.fill"
         case .nextQuestion: "hand.raised.fill"
         case .addJobByLink: "link.badge.plus"
         case .openSelected: "arrow.up.forward.square"

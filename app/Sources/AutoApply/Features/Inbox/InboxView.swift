@@ -170,6 +170,20 @@ private struct InboxHeader: View {
                 .buttonStyle(.glass)
                 .disabled(store.live.activity == .prepping)
                 .help("Collect questions from queued jobs before applying")
+                if store.queuedCount > 0 {
+                    // Answered jobs go back to the queue: send them now instead of waiting for a full run.
+                    Button {
+                        Task { await store.applyQueued() }
+                    } label: {
+                        HStack(spacing: Space.xs) {
+                            Text("Apply \(store.queuedCount) queued")
+                            KeyCap(.applyQueued)
+                        }
+                    }
+                    .buttonStyle(.glassProminent)
+                    .disabled(store.isPaused || !store.isConnected || store.live.activity != .idle)
+                    .help("Fill and submit the queued jobs (including ones you just answered) without a new search")
+                }
             }
             if store.live.activity == .prepping {
                 let progress = store.live.progress

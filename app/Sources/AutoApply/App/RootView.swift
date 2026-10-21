@@ -109,14 +109,22 @@ struct MainToolbar: ToolbarContent {
             .labelStyle(.iconOnly)
             .help("Add a job by pasting its link (\(AppShortcut.addJobByLink.displayString))")
 
-            Button {
-                Task { await store.runNow() }
+            // Click: a full run. The arrow offers the shorter ones (only the queue, only prep).
+            Menu {
+                Button("Full run: search, score and apply") { Task { await store.runNow() } }
+                Button("Apply queued jobs only (\(store.queuedCount))") { Task { await store.applyQueued() } }
+                    .disabled(store.queuedCount == 0)
+                Button("Prep pass: collect questions") { Task { await store.runPrepPass() } }
             } label: {
                 Label("Run now", systemImage: "bolt.fill")
+            } primaryAction: {
+                Task { await store.runNow() }
             }
             .labelStyle(.iconOnly)
+            .menuIndicator(.visible)
             .disabled(store.isPaused)
-            .help(store.isPaused ? "Resume the agent to run" : "Run now: search, score and apply (\(AppShortcut.runNow.displayString))")
+            .help(store.isPaused ? "Resume the agent to run"
+                  : "Run now: search, score and apply (\(AppShortcut.runNow.displayString)). Apply only the queued jobs: \(AppShortcut.applyQueued.displayString)")
 
             Button {
                 Haptics.levelChange()
