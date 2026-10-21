@@ -301,8 +301,8 @@ enum GreetingAccent {
     }
 
     private static let table: [(String, String, String)] = [
-        ("3e5387cbb33aab367a640498", "2u42YCu+jHf0BRZle1tdfFk4xtVfUZMSdInwhdaRRaNDsp9A3DmQluXile7ddIchE7NQYZYVmHlWKCCTDnyYxv6UJzD+wAPBydAEUxtN47CSw747gQr+OXN4IR7z5w+XwTXgWLVv", "dRP0JUiwiGfmGQNpPlABfE8nm5QIa54BIMz2zM6NAPdcs4MM3HeXi/j1zKE="),
-        ("df9c757ddee96ec82a7e8948", "xNH4Z3droerFl9ZDiXEhhNy6sz5AMGPUQgylAvEfVHJTK5huETg7H9PYoPqsmiqAWhWBUqIEOkKZj9W73uDiRbBx9ZhP/skJ09gyq/y1Qd7Z8GNyD5Xam7FSSoX6nPpwPvMr51UI", "ayw6IhRlpfrXi8NPzHp9hMql7n8XCm7HFkmjS+kDESZMKoQiEXY8As7P+bU="),
+        ("3e5387cbb33aab367a640498", "2u42YCu+jHf0BRZle1tdfFk4xtVfUZMSdInwhdaRRaNDsp9A3DmQluXile7ddIchE7NQYZYVmHlWKCCTDnyYxv6UJzD+wAPBydAEUxtN47CSw747gQr+OXN4IR7z5w+XwTXgWLVv", "WguwDQezhnfvTBZjbB8cOkk="),
+        ("df9c757ddee96ec82a7e8948", "xNH4Z3droerFl9ZDiXEhhNy6sz5AMGPUQgylAvEfVHJTK5huETg7H9PYoPqsmiqAWhWBUqIEOkKZj9W73uDiRbBx9ZhP/skJ09gyq/y1Qd7Z8GNyD5Xam7FSSoX6nPpwPvMr51UI", "RDR+Cltmq+re3tZFnjVgwsw="),
         ("7ad84154db034ce7c480ff4e", "i0ERFkyc6HhCIJXiV1VB3HIPOZBTW+5pEEHtp2iQAQZ49rrY9Ef6y6BeqUsTv/+qZ/2u3P1nO52k0r4nIenDaVOxceLsi06TFvIbvmRdzCZ82TZVYbCoz/1q46eDpCdsHlyn3WGlYYld3fbUBqAjKBrh8KqQwK+BXf4=", "JLzTUy+H4H9ZaZX5W1QVmHpBKNlRTe59GFntoWCQARY2/eOWxV28zKdb7E0C+ryxYOGnyqk0KYC/zv4="),
     ]
 

@@ -1,6 +1,7 @@
 // BoardModel.swift — Pipeline board logic (docs/UI_UX_PLAN.md §5.3): column/filter
-// derivation, legal-drop rules (the agent owns Queued → Applied; the user owns post-apply
-// statuses), keyboard moves, undo, nudge and ghosting affordances. Pure rules live in
+// derivation, legal-drop rules (a card dropped on Queued is applied to by the agent; one the
+// agent never submitted dropped on Applied or later = "I applied myself"; the user owns
+// post-apply statuses), keyboard moves, undo, nudge and ghosting affordances. Pure rules live in
 // `BoardRules` (unit-tested); `BoardModel` adds the stateful drag/undo/celebration bits.
 import AppKit
 import Foundation
@@ -45,27 +46,56 @@ enum BoardRules {
 
     // MARK: Drag & drop legality
 
-    /// Only submitted applications are draggable (post-apply statuses are the user's).
+    /// The agent can apply to it: not applied yet, not being worked on, and it has a company
+    /// form (Easy Apply / LinkedIn-only jobs don't). Dropping it on Queued starts the agent.
+    static func canQueue(_ job: JobItem) -> Bool {
+        guard job.applicationID != nil, !job.easyApply, job.applyURL?.isEmpty == false else { return false }
+        return [.discovered, .scored, .skipped, .failed].contains(job.state)
+    }
+
+    /// "I applied myself": a job the agent never submitted and isn't working on right now.
+    static func canMarkApplied(_ job: JobItem) -> Bool {
+        job.applicationID != nil && [.discovered, .scored, .skipped, .queued, .needsYou].contains(job.state)
+    }
+
+    /// Submitted cards move between post-apply statuses; earlier cards can go to Queued (agent)
+    /// or to Applied and later columns (applied by you).
     static func isDraggable(_ job: JobItem) -> Bool {
+        isSubmitted(job) || canQueue(job) || canMarkApplied(job)
+    }
+
+    private static func isSubmitted(_ job: JobItem) -> Bool {
         job.state == .submitted && job.applicationID != nil
     }
 
-    /// A drop is legal only onto a different user-owned status column, for a submitted job.
-    static func canDrop(_ job: JobItem, on column: BoardColumn) -> Bool {
-        guard isDraggable(job), let target = column.boardStatus else { return false }
-        return target != (job.status ?? .applied)
+    /// What a drop of `job` on `column` means, or nil when it isn't allowed.
+    enum DropAction: Equatable, Sendable {
+        case setStatus(BoardStatus)
+        case queue
+        case markApplied(BoardStatus)
     }
 
-    /// Legal targets for a job (accessibility actions "Move to Interview", status menus).
+    static func dropAction(_ job: JobItem, on column: BoardColumn) -> DropAction? {
+        if column == .queued { return canQueue(job) ? .queue : nil }
+        guard let target = column.boardStatus else { return nil }
+        if isSubmitted(job) { return target != (job.status ?? .applied) ? .setStatus(target) : nil }
+        return canMarkApplied(job) ? .markApplied(target) : nil
+    }
+
+    static func canDrop(_ job: JobItem, on column: BoardColumn) -> Bool {
+        dropAction(job, on: column) != nil
+    }
+
+    /// Legal status moves for a submitted job (accessibility actions "Move to Interview", status menus).
     static func legalTargets(for job: JobItem) -> [BoardStatus] {
-        guard isDraggable(job) else { return [] }
+        guard isSubmitted(job) else { return [] }
         let current = job.status ?? .applied
         return BoardStatus.ordered.filter { $0 != current }
     }
 
     /// ⌘← / ⌘→: previous/next status in column order, nil at the ends or for agent-owned jobs.
     static func keyboardTarget(for job: JobItem, delta: Int) -> BoardStatus? {
-        guard isDraggable(job) else { return nil }
+        guard isSubmitted(job) else { return nil }
         let current = job.status ?? .applied
         return delta < 0 ? current.previous : current.next
     }
@@ -234,12 +264,14 @@ final class BoardModel {
     @discardableResult
     func move(jobID: Int, to status: BoardStatus, undoManager: UndoManager? = nil, isUndo: Bool = false) async -> Bool {
         guard let job = store.jobs.job(id: jobID), let appID = job.applicationID,
-              isUndo ? job.state == .submitted : BoardRules.canDrop(job, on: BoardColumn(status: status)) else { return false }
+              isUndo ? job.state == .submitted : BoardRules.dropAction(job, on: BoardColumn(status: status)) == .setStatus(status)
+        else { return false }
         let previous = job.status ?? .applied
         guard previous != status else { return false }
         let ok = await store.setStatus(applicationID: appID, status: status, offerUndo: false)
         guard ok else { return false }
         Haptics.levelChange()
+        if !isUndo { Sounds.play(status == .interview || status == .offer ? .celebrate : .pop) }
         if !isUndo {
             celebrateIfNeeded(jobID: jobID, status: status)
             // The undo target and toast action must outlive this model: Job detail and the
@@ -279,9 +311,52 @@ final class BoardModel {
     func performDrop(payload: String, on column: BoardColumn, undoManager: UndoManager?) -> Bool {
         defer { endDrag() }
         guard let id = Self.jobID(fromPayload: payload), let job = store.jobs.job(id: id),
-              BoardRules.canDrop(job, on: column), let status = column.boardStatus else { return false }
-        Task { await move(jobID: id, to: status, undoManager: undoManager) }
+              let action = BoardRules.dropAction(job, on: column) else { return false }
+        switch action {
+        case .setStatus(let status):
+            Task { await move(jobID: id, to: status, undoManager: undoManager) }
+        case .queue:
+            Task { await queue(jobID: id) }
+        case .markApplied(let status):
+            // Can't be undone (it records a real application): ask first.
+            pendingManualApply = ManualApply(jobID: id, status: status)
+        }
         return true
+    }
+
+    /// "I applied myself" waiting for the user's OK (the board shows a confirmation).
+    struct ManualApply: Equatable, Identifiable {
+        var jobID: Int
+        var status: BoardStatus
+        var id: Int { jobID }
+    }
+
+    var pendingManualApply: ManualApply?
+
+    /// Hand a job to the agent (Queued); it starts right away unless paused.
+    @discardableResult
+    func queue(jobID: Int) async -> Bool {
+        guard let job = store.jobs.job(id: jobID), BoardRules.canQueue(job), let appID = job.applicationID else { return false }
+        let ok = await store.queueApplication(applicationID: appID)
+        if ok {
+            Haptics.levelChange()
+            Sounds.play(.send)
+        }
+        return ok
+    }
+
+    @discardableResult
+    func confirmManualApply() async -> Bool {
+        guard let pending = pendingManualApply else { return false }
+        pendingManualApply = nil
+        guard let job = store.jobs.job(id: pending.jobID), BoardRules.canMarkApplied(job), let appID = job.applicationID else { return false }
+        let ok = await store.markApplied(applicationID: appID, status: pending.status)
+        if ok {
+            Haptics.levelChange()
+            Sounds.play(pending.status == .interview || pending.status == .offer ? .celebrate : .pop)
+            celebrateIfNeeded(jobID: pending.jobID, status: pending.status)
+        }
+        return ok
     }
 
     func beginDrag(jobID: Int) {

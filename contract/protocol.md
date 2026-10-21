@@ -104,6 +104,8 @@ An `error` without `reply_to` is an unsolicited daemon problem (login expired, C
 | `set_job_mode` | `job_id`, `mode` (`auto`\|`review`\|`null` = inherit) | `null` | per-job override |
 | `retry_application` | `application_id` | `null` | failed → queued (actor user) |
 | `resolve_unknown` | `application_id`, `submitted` (bool) | `null` | unknown_verify → submitted \| failed (actor user) |
+| `queue_application` | `application_id`, `apply_now` (default true) | `{state, started}` | board: card dropped on Queued. discovered / scored / skipped / failed → queued (reason `user_queued`, exempt from hard filters) and starts filling unless paused. `conflict` for Easy Apply / LinkedIn-only jobs (no form to fill) and from other states |
+| `mark_applied` | `application_id`, `status` (default `applied`) | `{application_id, status}` | board: "I applied myself" — a job the agent never submitted (discovered, scored, skipped, queued, needs_you) dropped on Applied or a later column: state `submitted`, mode `manual`, reason `user_applied`, board `status`; its Needs-You questions and Easy Apply row close |
 | `apply_anyway` | `application_id` | `null` | skipped → queued (actor user): override a filter / threshold skip |
 | `add_job_url` | `url`, `title?`, `company?`, `apply_now` (default true) | `{job_id, application_id, created, state, title, company, started}` | paste a job link: reads title/company from the page (JSON-LD / Rippling API / `<title>`), inserts it as source `manual`, queues it (reason `user_added_link`, exempt from hard filters) and starts filling unless paused. A link already stored is re-queued if skipped/failed. LinkedIn/Glassdoor links → `invalid_payload` |
 | `update_job_notes` | `job_id`, `notes?` (null/empty clears) | `null` | free-form notes on Job detail (`jobs.notes`) |
@@ -118,6 +120,9 @@ An `error` without `reply_to` is an unsolicited daemon problem (login expired, C
 | `get_mail_account` | `test` (bool) | `{email, connected, error}` | `test` re-checks the login |
 | `suggest_preferences` | — | `SuggestedPreferences` `{roles, seniority, locations, years_experience}` | from the stored profile; nothing is saved |
 | `clear_mail_account` | — | `{email: null, connected: false}` | removes the Keychain item |
+| `list_site_accounts` | — | `{accounts: [{host, email, company?, status, created_at, updated_at, job_id?}], enabled}` | job-site accounts the agent created (`preferences.create_accounts` + a connected mailbox = `enabled`); status `creating` \| `resetting` \| `active` \| `unconfirmed`. Never includes passwords |
+| `reveal_site_account_password` | `host` | `{host, password}` | reads the macOS Keychain (service `AutoApply Accounts`); `not_found` if none |
+| `delete_site_account` | `host` | `null` | forgets the saved login (Keychain + index); the account on the site itself stays |
 | `reset_source_cap` | `source`: `linkedin`\|`glassdoor` | `{used: 0, limit}` | Settings: zero today's browsing-session counter; emits `cap_reached` (used 0) so the UI updates |
 | `accept_company_suggestion` | `suggestion_id` | `{company_id}` | Settings ▸ Sources ▸ Suggested companies "Add": watches the company (its ATS board when known, else its career page as `careers_url`); suggestion → `accepted` |
 | `dismiss_company_suggestion` | `suggestion_id` | `null` | "Dismiss": suggestion → `dismissed`; the company is never suggested or auto-watched again. A company the agent watched by itself (`auto`) is unwatched |

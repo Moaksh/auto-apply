@@ -703,6 +703,21 @@ extension DeleteAnswerPayload {
     }
 }
 
+struct DeleteSiteAccountPayload: Codable, Sendable, Hashable {
+    var host: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case host
+    }
+}
+
+extension DeleteSiteAccountPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        host = try c.decode(String.self, forKey: .host)
+    }
+}
+
 struct DeleteStoryPayload: Codable, Sendable, Hashable {
     var id: Int
 
@@ -1007,6 +1022,14 @@ extension JobSummary {
     }
 }
 
+struct ListSiteAccountsPayload: Codable, Sendable, Hashable {
+}
+
+extension ListSiteAccountsPayload {
+    init(from decoder: any Decoder) throws {
+    }
+}
+
 struct LogPayload: Codable, Sendable, Hashable {
     var level: LogLevel = .info
     var message: String
@@ -1034,6 +1057,25 @@ extension LogPayload {
         jobId = try c.decodeIfPresent(Int.self, forKey: .jobId)
         applicationId = try c.decodeIfPresent(Int.self, forKey: .applicationId)
         at = try c.decode(Date.self, forKey: .at)
+    }
+}
+
+/// Board: "I applied myself" — a job the agent never submitted, dropped on Applied or a later column.
+struct MarkAppliedPayload: Codable, Sendable, Hashable {
+    var applicationId: Int
+    var status: BoardStatus = .applied
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case applicationId = "application_id"
+        case status
+    }
+}
+
+extension MarkAppliedPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        applicationId = try c.decode(Int.self, forKey: .applicationId)
+        status = try c.decodeIfPresent(BoardStatus.self, forKey: .status) ?? .applied
     }
 }
 
@@ -1346,6 +1388,7 @@ struct Preferences: Codable, Sendable, Hashable {
     var searchesPerSession: Int = 3
     var jobsPerSession: Int = 30
     var parallelApplications: Int = 3
+    var createAccounts: Bool = true
     var sourcesEnabled: [String: Bool] = ["greenhouse": true, "lever": true, "ashby": true, "careers": true, "linkedin": false, "glassdoor": false, "google": true]
     var careerPageUrls: [String] = []
     var alwaysAskPatterns: [String] = []
@@ -1377,6 +1420,7 @@ struct Preferences: Codable, Sendable, Hashable {
         case searchesPerSession = "searches_per_session"
         case jobsPerSession = "jobs_per_session"
         case parallelApplications = "parallel_applications"
+        case createAccounts = "create_accounts"
         case sourcesEnabled = "sources_enabled"
         case careerPageUrls = "career_page_urls"
         case alwaysAskPatterns = "always_ask_patterns"
@@ -1412,6 +1456,7 @@ extension Preferences {
         searchesPerSession = try c.decodeIfPresent(Int.self, forKey: .searchesPerSession) ?? 3
         jobsPerSession = try c.decodeIfPresent(Int.self, forKey: .jobsPerSession) ?? 30
         parallelApplications = try c.decodeIfPresent(Int.self, forKey: .parallelApplications) ?? 3
+        createAccounts = try c.decodeIfPresent(Bool.self, forKey: .createAccounts) ?? true
         sourcesEnabled = try c.decodeIfPresent([String: Bool].self, forKey: .sourcesEnabled) ?? ["greenhouse": true, "lever": true, "ashby": true, "careers": true, "linkedin": false, "glassdoor": false, "google": true]
         careerPageUrls = try c.decodeIfPresent([String].self, forKey: .careerPageUrls) ?? []
         alwaysAskPatterns = try c.decodeIfPresent([String].self, forKey: .alwaysAskPatterns) ?? []
@@ -1603,6 +1648,25 @@ extension QuestionResolvedPayload {
     }
 }
 
+/// Board: a card dropped on Queued. discovered / scored / skipped / failed -> queued (actor user).
+struct QueueApplicationPayload: Codable, Sendable, Hashable {
+    var applicationId: Int
+    var applyNow: Bool = true
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case applicationId = "application_id"
+        case applyNow = "apply_now"
+    }
+}
+
+extension QueueApplicationPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        applicationId = try c.decode(Int.self, forKey: .applicationId)
+        applyNow = try c.decodeIfPresent(Bool.self, forKey: .applyNow) ?? true
+    }
+}
+
 struct RejectPayload: Codable, Sendable, Hashable {
     var applicationId: Int
     var reason: String
@@ -1678,6 +1742,21 @@ extension RetryApplicationPayload {
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         applicationId = try c.decode(Int.self, forKey: .applicationId)
+    }
+}
+
+struct RevealSiteAccountPasswordPayload: Codable, Sendable, Hashable {
+    var host: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case host
+    }
+}
+
+extension RevealSiteAccountPasswordPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        host = try c.decode(String.self, forKey: .host)
     }
 }
 
@@ -2415,6 +2494,8 @@ enum Command: Sendable, Hashable {
     case retryApplication(RetryApplicationPayload)
     case resolveUnknown(ResolveUnknownPayload)
     case applyAnyway(ApplyAnywayPayload)
+    case queueApplication(QueueApplicationPayload)
+    case markApplied(MarkAppliedPayload)
     case addJobUrl(AddJobUrlPayload)
     case updateJobNotes(UpdateJobNotesPayload)
     case setApplicationResume(SetApplicationResumePayload)
@@ -2433,6 +2514,9 @@ enum Command: Sendable, Hashable {
     case getMailAccount(GetMailAccountPayload)
     case suggestPreferences(SuggestPreferencesPayload)
     case clearMailAccount(ClearMailAccountPayload)
+    case listSiteAccounts(ListSiteAccountsPayload)
+    case revealSiteAccountPassword(RevealSiteAccountPasswordPayload)
+    case deleteSiteAccount(DeleteSiteAccountPayload)
     case onboardingSetStep(OnboardingSetStepPayload)
     case onboardingComplete(OnboardingCompletePayload)
 
@@ -2463,6 +2547,8 @@ enum Command: Sendable, Hashable {
         case .retryApplication: "retry_application"
         case .resolveUnknown: "resolve_unknown"
         case .applyAnyway: "apply_anyway"
+        case .queueApplication: "queue_application"
+        case .markApplied: "mark_applied"
         case .addJobUrl: "add_job_url"
         case .updateJobNotes: "update_job_notes"
         case .setApplicationResume: "set_application_resume"
@@ -2481,6 +2567,9 @@ enum Command: Sendable, Hashable {
         case .getMailAccount: "get_mail_account"
         case .suggestPreferences: "suggest_preferences"
         case .clearMailAccount: "clear_mail_account"
+        case .listSiteAccounts: "list_site_accounts"
+        case .revealSiteAccountPassword: "reveal_site_account_password"
+        case .deleteSiteAccount: "delete_site_account"
         case .onboardingSetStep: "onboarding_set_step"
         case .onboardingComplete: "onboarding_complete"
         }
@@ -2511,6 +2600,8 @@ enum Command: Sendable, Hashable {
         "retry_application",
         "resolve_unknown",
         "apply_anyway",
+        "queue_application",
+        "mark_applied",
         "add_job_url",
         "update_job_notes",
         "set_application_resume",
@@ -2529,6 +2620,9 @@ enum Command: Sendable, Hashable {
         "get_mail_account",
         "suggest_preferences",
         "clear_mail_account",
+        "list_site_accounts",
+        "reveal_site_account_password",
+        "delete_site_account",
         "onboarding_set_step",
         "onboarding_complete",
     ]
@@ -2650,6 +2744,8 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case "retry_application": command = .retryApplication(try c.decode(RetryApplicationPayload.self, forKey: .payload))
         case "resolve_unknown": command = .resolveUnknown(try c.decode(ResolveUnknownPayload.self, forKey: .payload))
         case "apply_anyway": command = .applyAnyway(try c.decode(ApplyAnywayPayload.self, forKey: .payload))
+        case "queue_application": command = .queueApplication(try c.decode(QueueApplicationPayload.self, forKey: .payload))
+        case "mark_applied": command = .markApplied(try c.decode(MarkAppliedPayload.self, forKey: .payload))
         case "add_job_url": command = .addJobUrl(try c.decode(AddJobUrlPayload.self, forKey: .payload))
         case "update_job_notes": command = .updateJobNotes(try c.decode(UpdateJobNotesPayload.self, forKey: .payload))
         case "set_application_resume": command = .setApplicationResume(try c.decode(SetApplicationResumePayload.self, forKey: .payload))
@@ -2668,6 +2764,9 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case "get_mail_account": command = .getMailAccount(try c.decode(GetMailAccountPayload.self, forKey: .payload))
         case "suggest_preferences": command = .suggestPreferences(try c.decode(SuggestPreferencesPayload.self, forKey: .payload))
         case "clear_mail_account": command = .clearMailAccount(try c.decode(ClearMailAccountPayload.self, forKey: .payload))
+        case "list_site_accounts": command = .listSiteAccounts(try c.decode(ListSiteAccountsPayload.self, forKey: .payload))
+        case "reveal_site_account_password": command = .revealSiteAccountPassword(try c.decode(RevealSiteAccountPasswordPayload.self, forKey: .payload))
+        case "delete_site_account": command = .deleteSiteAccount(try c.decode(DeleteSiteAccountPayload.self, forKey: .payload))
         case "onboarding_set_step": command = .onboardingSetStep(try c.decode(OnboardingSetStepPayload.self, forKey: .payload))
         case "onboarding_complete": command = .onboardingComplete(try c.decode(OnboardingCompletePayload.self, forKey: .payload))
         default:
@@ -2705,6 +2804,8 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case .retryApplication(let p): try c.encode(p, forKey: .payload)
         case .resolveUnknown(let p): try c.encode(p, forKey: .payload)
         case .applyAnyway(let p): try c.encode(p, forKey: .payload)
+        case .queueApplication(let p): try c.encode(p, forKey: .payload)
+        case .markApplied(let p): try c.encode(p, forKey: .payload)
         case .addJobUrl(let p): try c.encode(p, forKey: .payload)
         case .updateJobNotes(let p): try c.encode(p, forKey: .payload)
         case .setApplicationResume(let p): try c.encode(p, forKey: .payload)
@@ -2723,6 +2824,9 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case .getMailAccount(let p): try c.encode(p, forKey: .payload)
         case .suggestPreferences(let p): try c.encode(p, forKey: .payload)
         case .clearMailAccount(let p): try c.encode(p, forKey: .payload)
+        case .listSiteAccounts(let p): try c.encode(p, forKey: .payload)
+        case .revealSiteAccountPassword(let p): try c.encode(p, forKey: .payload)
+        case .deleteSiteAccount(let p): try c.encode(p, forKey: .payload)
         case .onboardingSetStep(let p): try c.encode(p, forKey: .payload)
         case .onboardingComplete(let p): try c.encode(p, forKey: .payload)
         }

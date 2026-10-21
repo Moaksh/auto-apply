@@ -1,7 +1,8 @@
 // KanbanColumn.swift — one Pipeline column: header with rolling count, a lazily scrolled card
 // stack, and drop logic. Only legal targets accept a drop: while dragging, illegal columns dim
 // to 40% and the cursor shows "forbidden"; legal ones get a 1.5pt accent dashed outline and an
-// insertion slot that opens at the top.
+// insertion slot that opens at the top and says what the drop does (the agent applies / applied
+// by you / move).
 import SwiftUI
 
 struct KanbanColumn: View {
@@ -40,6 +41,13 @@ struct KanbanColumn: View {
                         RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
                             .strokeBorder(Palette.accent.opacity(0.6), style: StrokeStyle(lineWidth: 1.5, dash: [4, 3]))
                             .frame(height: 64)
+                            .overlay {
+                                if let hint = dropHint {
+                                    Label(hint.text, systemImage: hint.symbol)
+                                        .font(Typography.callout)
+                                        .foregroundStyle(Palette.accent)
+                                }
+                            }
                             .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
                     }
                     if column == .skipped && skipReasonFilter == nil {
@@ -165,6 +173,19 @@ struct KanbanColumn: View {
                 }
             }
         }
+        if BoardRules.canQueue(job) || BoardRules.canMarkApplied(job) { Divider() }
+        if BoardRules.canQueue(job) {
+            Button("Apply with the Agent") { Task { await model.queue(jobID: job.id) } }
+        }
+        if BoardRules.canMarkApplied(job) {
+            Menu("I Applied Myself") {
+                ForEach(BoardStatus.ordered, id: \.self) { status in
+                    Button(status == .applied ? "Applied" : "Applied · \(status.label)") {
+                        model.pendingManualApply = BoardModel.ManualApply(jobID: job.id, status: status)
+                    }
+                }
+            }
+        }
     }
 
     private var skipReasonList: some View {
@@ -189,9 +210,19 @@ struct KanbanColumn: View {
         }
     }
 
+    /// What dropping the dragged card here does.
+    private var dropHint: (text: String, symbol: String)? {
+        guard let job = model.draggingJob, let action = BoardRules.dropAction(job, on: column) else { return nil }
+        return switch action {
+        case .queue: ("The agent applies", "paperplane.fill")
+        case .markApplied: ("Applied by you", "hand.raised.fill")
+        case .setStatus(let status): ("Move to \(status.label)", StatusKind(status: status).symbol)
+        }
+    }
+
     private var emptyText: String {
         switch column {
-        case .queued: "Nothing queued"
+        case .queued: "Drag a job here and the agent applies to it"
         case .needsYou: "Nothing waiting on you"
         case .applied: "Drop applications here"
         default: isDragging ? "Drop here" : "Empty"
@@ -199,7 +230,8 @@ struct KanbanColumn: View {
     }
 }
 
-/// Starts a drag for submitted cards (others aren't draggable: the agent owns them).
+/// Starts a drag for cards the user may move (submitted ones between statuses; earlier ones to
+/// Queued or to "applied by you"). Cards the agent is working on aren't draggable.
 private struct DragSource: ViewModifier {
     var job: JobItem
     var model: BoardModel

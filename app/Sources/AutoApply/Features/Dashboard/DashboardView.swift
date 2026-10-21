@@ -25,6 +25,10 @@ struct DashboardView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: Space.gutter) {
                 DashboardHeader()
+                    .padding(.horizontal, Space.xl)
+                    .padding(.top, Space.xl + Space.s)
+                    .padding(.bottom, Space.xl)
+                    .brandHeroBand(isActive: isWindowVisible)
                     .entrance(index: 0, appeared: appeared, reduced: reduced)
                 IssueBannerView()
                 LiveAgentCard(layout: layout, isWindowVisible: isWindowVisible)
@@ -112,6 +116,7 @@ struct DashboardView: View {
 }
 
 /// W1 — date eyebrow, time-of-day greeting (computed once per session), next run, mode.
+/// Sits on the live brand gradient band (`brandHeroBand`), so it always renders on dark.
 private struct DashboardHeader: View {
     @Environment(AppStore.self) private var store
     @State private var greeting: String?
@@ -122,7 +127,7 @@ private struct DashboardHeader: View {
                 Text(DashboardFormat.dateEyebrow(Date())).eyebrowStyle()
                 HStack(alignment: .firstTextBaseline, spacing: Space.s) {
                     Text(greeting ?? DashboardFormat.greeting(at: Date(), name: store.library.firstName))
-                        .font(Typography.title1)
+                        .heroDisplayStyle()
                     let p = store.library.profile
                     if let lines = GreetingAccent.lines(fullName: p.fullName, firstName: p.firstName, lastName: p.lastName) {
                         AccentMark(text: lines.header, seenKey: "dashboard.accent.seen")
@@ -199,7 +204,7 @@ struct AccentMark: View {
         Button { open.toggle() } label: {
             Text("✦")
                 .font(Typography.callout)
-                .foregroundStyle(Palette.accent.opacity(glow ? 1 : 0.45))
+                .foregroundStyle(Palette.coral.opacity(glow ? 1 : 0.6))
                 .scaleEffect(glow ? 1.35 : 1)
         }
         .buttonStyle(.plain)

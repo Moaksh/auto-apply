@@ -218,3 +218,111 @@ async def poll_code(conn: Any, *, company: str, sent_after: datetime, length: in
             return code
         await asyncio.sleep(every_s)
     return None
+
+
+# ---- account emails (sign-up confirmation / password reset) -----------------------------
+
+#: Words a confirm / activate / reset link (or its anchor text) carries.
+_ACTION_LINK_RX = re.compile(r"verif|confirm|activat|validat|reset|password|passwd|register|registration|sign[-_ ]?up|"
+                             r"token|magic|login|log[-_ ]?in|otp", re.I)
+_SKIP_LINK_RX = re.compile(r"unsubscribe|privacy|terms|help|support|facebook|twitter|linkedin\.com|instagram|youtube|"
+                           r"\.(png|jpe?g|gif|svg|css)(\?|$)|mailto:", re.I)
+_HREF_RX = re.compile(r"""<a\b[^>]*?href\s*=\s*["']([^"']+)["'][^>]*>(.*?)</a>""", re.I | re.S)
+_URL_RX = re.compile(r"https?://[^\s<>\"')\]]+", re.I)
+
+
+def _html_parts(msg: Message) -> list[str]:
+    out: list[str] = []
+    for part in msg.walk() if msg.is_multipart() else [msg]:
+        if part.get_content_type() != "text/html":
+            continue
+        try:
+            out.append((part.get_payload(decode=True) or b"").decode(part.get_content_charset() or "utf-8", errors="replace"))
+        except Exception:  # noqa: BLE001
+            continue
+    return out
+
+
+def extract_action_link(msg: Message, text: str) -> str | None:
+    """The confirm / activate / reset link of an account email: an http(s) link whose URL or
+    anchor text reads like one (never unsubscribe / social / image links)."""
+    import html as _html
+
+    candidates: list[tuple[str, str]] = []
+    for body in _html_parts(msg):
+        for href, anchor in _HREF_RX.findall(body):
+            candidates.append((_html.unescape(href.strip()), re.sub(r"<[^>]+>", " ", anchor)))
+    candidates += [(u.rstrip(".,;"), "") for u in _URL_RX.findall(text)]
+    for url, anchor in candidates:
+        if not url.lower().startswith(("http://", "https://")) or _SKIP_LINK_RX.search(url):
+            continue
+        if _ACTION_LINK_RX.search(url) or _ACTION_LINK_RX.search(anchor):
+            return url
+    return None
+
+
+def _matches(hay: str, sender: str, terms: list[str]) -> bool:
+    low = f"{sender}\n{hay}".lower()
+    return any(t and t.lower() in low for t in terms)
+
+
+def find_account_mail_once(address: str, password: str, *, terms: list[str], sent_after: datetime, want: str,
+                           length: int | None = None) -> str | None:
+    """Newest message since ``sent_after`` that mentions one of ``terms`` (the site / company,
+    in the sender, subject or body) and carries what is wanted: a ``code`` or a ``link``."""
+    m = _login(address, password)
+    try:
+        m.select("INBOX", readonly=True)
+        since = (sent_after - timedelta(days=1)).strftime("%d-%b-%Y")
+        typ, data = m.search(None, f'(SINCE "{since}")')
+        ids = (data[0] or b"").split()[-30:] if typ == "OK" else []
+        for mid in reversed(ids):
+            typ, msg_data = m.fetch(mid, "(RFC822)")
+            if typ != "OK" or not msg_data or not isinstance(msg_data[0], tuple):
+                continue
+            msg = email.message_from_bytes(msg_data[0][1])
+            try:
+                when = parsedate_to_datetime(msg.get("Date"))
+                when = when if when.tzinfo else when.replace(tzinfo=UTC)
+            except Exception:  # noqa: BLE001
+                continue
+            if when < sent_after - timedelta(seconds=90):
+                continue
+            subject = str(make_header(decode_header(msg.get("Subject", ""))))
+            sender = str(make_header(decode_header(msg.get("From", ""))))
+            body = _text(msg)
+            hay = f"{subject}\n{body}"
+            if not _matches(hay, sender, terms):
+                continue
+            found = extract_action_link(msg, body) if want == "link" else (extract_code(hay, length) if "code" in hay.lower() else None)
+            if found:
+                return found
+        return None
+    finally:
+        _logout(m)
+
+
+async def poll_account_mail(conn: Any, *, terms: list[str], sent_after: datetime, want: str, length: int | None = None,
+                            timeout_s: float = 120.0, every_s: float = 8.0) -> str | None:
+    """Poll the connected mailbox for a sign-up / reset email (None: no mailbox or nothing in time)."""
+    acc = account(conn)
+    if not acc or not acc.get("enabled", True):
+        return None
+    password = await asyncio.to_thread(keychain_get, acc["email"])
+    if not password:
+        return None
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            found = await asyncio.to_thread(find_account_mail_once, acc["email"], password, terms=terms,
+                                            sent_after=sent_after, want=want, length=length)
+        except MailError as e:
+            log.warning("mailbox check failed: %s", e)
+            return None
+        except Exception:  # noqa: BLE001
+            log.warning("mailbox check failed", exc_info=True)
+            return None
+        if found:
+            return found
+        await asyncio.sleep(every_s)
+    return None

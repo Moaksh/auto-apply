@@ -85,6 +85,8 @@ from autoapply.paths import Paths
 from autoapply.question_kind import resolve_kind
 
 log = logging.getLogger("autoapply.pipeline")
+#: Jobs already sent back once from an "Account required" Needs-You item (meta).
+ACCOUNT_RETRIED_META = "account_wall_retried_jobs"
 
 USER_AGENT = "AutoApply/0.1 (personal job search assistant; read-only)"
 
@@ -858,8 +860,40 @@ class Pipeline:
             job = db.get_job(self.conn, app.job_id)
             await self._skip_if_stale(app, job, db.get_company(self.conn, job.company_id), prefs)
 
+    async def retry_account_walls(self) -> int:
+        """With account creation on, "Account required" items go back to the agent, which now signs
+        up by itself. Each job is retried this way once: a site it still can't get into stays with you."""
+        from autoapply import site_accounts
+        from autoapply.question_kind import ACCOUNT
+
+        try:
+            if not site_accounts.enabled(self.conn):
+                return 0
+            done: set[int] = set(db.get_meta(self.conn, ACCOUNT_RETRIED_META, None) or [])
+            todo = [c for c in db.list_open_clusters(self.conn)
+                    if c.kind == "action" and c.action_type == ACCOUNT and not set(c.job_ids) <= done]
+            if not todo:
+                return 0
+            from autoapply import prep as _prep
+
+            outcomes = []
+            for c in todo:
+                outcomes.append(_prep.answer_cluster(self.conn, c.cluster_id, "done", save_to_memory=False, save_to_profile=False))
+                done.update(c.job_ids)
+            db.set_meta(self.conn, ACCOUNT_RETRIED_META, sorted(done))
+        except Exception:  # noqa: BLE001 - never block a run on this
+            log.warning("retrying account walls failed", exc_info=True)
+            return 0
+        for o in outcomes:
+            await self.emit("question_resolved", o.to_payload())
+            for t in o.transitions:
+                await self.emit("application_state", t.to_payload())
+        await self._log(LogLevel.INFO, f"Retrying {len(outcomes)} job site(s) that wanted an account: the agent creates it now")
+        return len(outcomes)
+
     async def auto_resolve_inbox(self) -> int:
         """Clear Needs-You questions that stored facts now answer; parked jobs go back to the queue."""
+        await self.retry_account_walls()
         try:
             from autoapply import prep as _prep
 

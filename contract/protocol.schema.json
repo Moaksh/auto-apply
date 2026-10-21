@@ -29,6 +29,8 @@
     "retry_application",
     "resolve_unknown",
     "apply_anyway",
+    "queue_application",
+    "mark_applied",
     "add_job_url",
     "update_job_notes",
     "set_application_resume",
@@ -47,6 +49,9 @@
     "get_mail_account",
     "suggest_preferences",
     "clear_mail_account",
+    "list_site_accounts",
+    "reveal_site_account_password",
+    "delete_site_account",
     "onboarding_set_step",
     "onboarding_complete"
   ],
@@ -874,6 +879,21 @@
       "title": "DeleteAnswerPayload",
       "type": "object"
     },
+    "DeleteSiteAccountPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "minLength": 1,
+          "title": "Host",
+          "type": "string"
+        }
+      },
+      "required": [
+        "host"
+      ],
+      "title": "DeleteSiteAccountPayload",
+      "type": "object"
+    },
     "DeleteStoryPayload": {
       "additionalProperties": false,
       "properties": {
@@ -1447,6 +1467,12 @@
       "title": "JobSummary",
       "type": "object"
     },
+    "ListSiteAccountsPayload": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "ListSiteAccountsPayload",
+      "type": "object"
+    },
     "LogLevel": {
       "enum": [
         "debug",
@@ -1515,6 +1541,25 @@
         "at"
       ],
       "title": "LogPayload",
+      "type": "object"
+    },
+    "MarkAppliedPayload": {
+      "additionalProperties": false,
+      "description": "Board: \"I applied myself\" — a job the agent never submitted, dropped on Applied or a later column.",
+      "properties": {
+        "application_id": {
+          "title": "Application Id",
+          "type": "integer"
+        },
+        "status": {
+          "$ref": "#/$defs/BoardStatus",
+          "default": "applied"
+        }
+      },
+      "required": [
+        "application_id"
+      ],
+      "title": "MarkAppliedPayload",
       "type": "object"
     },
     "MarkEasyApplyDonePayload": {
@@ -2338,6 +2383,12 @@
           "title": "Parallel Applications",
           "type": "integer"
         },
+        "create_accounts": {
+          "default": true,
+          "description": "Let the agent create (or reset the password of) an account on job sites that require one, using the connected mailbox for verification emails. Passwords live in the macOS Keychain.",
+          "title": "Create Accounts",
+          "type": "boolean"
+        },
         "sources_enabled": {
           "additionalProperties": {
             "type": "boolean"
@@ -2733,6 +2784,19 @@
           "default": null,
           "description": "Applications prepped / filled at the same time (one agent + browser each).",
           "title": "Parallel Applications"
+        },
+        "create_accounts": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Let the agent create (or reset the password of) an account on job sites that require one, using the connected mailbox for verification emails. Passwords live in the macOS Keychain.",
+          "title": "Create Accounts"
         },
         "sources_enabled": {
           "anyOf": [
@@ -3389,6 +3453,27 @@
       "title": "QuestionResolvedPayload",
       "type": "object"
     },
+    "QueueApplicationPayload": {
+      "additionalProperties": false,
+      "description": "Board: a card dropped on Queued. discovered / scored / skipped / failed -> queued (actor user).",
+      "properties": {
+        "application_id": {
+          "title": "Application Id",
+          "type": "integer"
+        },
+        "apply_now": {
+          "default": true,
+          "description": "Start filling it right away (unless paused).",
+          "title": "Apply Now",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "application_id"
+      ],
+      "title": "QueueApplicationPayload",
+      "type": "object"
+    },
     "RejectPayload": {
       "additionalProperties": false,
       "properties": {
@@ -3473,6 +3558,22 @@
         "application_id"
       ],
       "title": "RetryApplicationPayload",
+      "type": "object"
+    },
+    "RevealSiteAccountPasswordPayload": {
+      "additionalProperties": false,
+      "properties": {
+        "host": {
+          "description": "Site host as listed by list_site_accounts.",
+          "minLength": 1,
+          "title": "Host",
+          "type": "string"
+        }
+      },
+      "required": [
+        "host"
+      ],
+      "title": "RevealSiteAccountPasswordPayload",
       "type": "object"
     },
     "RunFinishedPayload": {
@@ -5103,6 +5204,58 @@
       ],
       "additionalProperties": false
     },
+    "CommandQueueApplication": {
+      "type": "object",
+      "title": "Command: queue_application",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "queue_application"
+        },
+        "payload": {
+          "$ref": "#/$defs/QueueApplicationPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandMarkApplied": {
+      "type": "object",
+      "title": "Command: mark_applied",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "mark_applied"
+        },
+        "payload": {
+          "$ref": "#/$defs/MarkAppliedPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
     "CommandAddJobUrl": {
       "type": "object",
       "title": "Command: add_job_url",
@@ -5561,6 +5714,84 @@
         },
         "payload": {
           "$ref": "#/$defs/ClearMailAccountPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandListSiteAccounts": {
+      "type": "object",
+      "title": "Command: list_site_accounts",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "list_site_accounts"
+        },
+        "payload": {
+          "$ref": "#/$defs/ListSiteAccountsPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandRevealSiteAccountPassword": {
+      "type": "object",
+      "title": "Command: reveal_site_account_password",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "reveal_site_account_password"
+        },
+        "payload": {
+          "$ref": "#/$defs/RevealSiteAccountPasswordPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandDeleteSiteAccount": {
+      "type": "object",
+      "title": "Command: delete_site_account",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "delete_site_account"
+        },
+        "payload": {
+          "$ref": "#/$defs/DeleteSiteAccountPayload"
         }
       },
       "required": [
@@ -6209,6 +6440,12 @@
           "$ref": "#/$defs/CommandApplyAnyway"
         },
         {
+          "$ref": "#/$defs/CommandQueueApplication"
+        },
+        {
+          "$ref": "#/$defs/CommandMarkApplied"
+        },
+        {
           "$ref": "#/$defs/CommandAddJobUrl"
         },
         {
@@ -6261,6 +6498,15 @@
         },
         {
           "$ref": "#/$defs/CommandClearMailAccount"
+        },
+        {
+          "$ref": "#/$defs/CommandListSiteAccounts"
+        },
+        {
+          "$ref": "#/$defs/CommandRevealSiteAccountPassword"
+        },
+        {
+          "$ref": "#/$defs/CommandDeleteSiteAccount"
         },
         {
           "$ref": "#/$defs/CommandOnboardingSetStep"

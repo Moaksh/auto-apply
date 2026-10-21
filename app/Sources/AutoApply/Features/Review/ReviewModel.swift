@@ -280,6 +280,7 @@ final class ReviewModel {
         let ok = await store.approve(applicationIDs: appIDs)
         for id in jobIDs { departing.removeValue(forKey: id) }
         if ok {
+            Sounds.play(.send)
             store.toasts.show(appIDs.count == 1 ? "Approved · submitting" : "Approved \(appIDs.count) · submitting",
                               symbol: "paperplane.fill", style: .success)
         }

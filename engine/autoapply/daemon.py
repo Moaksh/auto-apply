@@ -1105,6 +1105,8 @@ class Daemon:
         prefs = db.update_preferences(self.conn, patch)
         if "schedule" in patch and self.scheduler is not None:
             self.scheduler.update_schedule(prefs.schedule)
+        if patch.get("create_accounts") and self.pipeline is not None:
+            self._spawn(self.pipeline.retry_account_walls(), name="retry-account-walls")
         return {"preferences": prefs.model_dump(mode="json")}
 
     async def _cmd_update_never_guess(self, p: Any) -> dict[str, Any]:
@@ -1175,6 +1177,48 @@ class Daemon:
 
     async def _cmd_apply_anyway(self, p: Any) -> None:
         await self._transition(p.application_id, AppState.QUEUED, reason="user_apply_anyway", expected_from=AppState.SKIPPED)
+
+    async def _cmd_queue_application(self, p: Any) -> dict[str, Any]:
+        """Board: a card dropped on Queued. The agent applies to it (now, unless paused); ``user_*``
+        reasons keep it queued past the hard filters, like "Apply anyway"."""
+        assert self.pipeline is not None
+        app = db.get_application(self.conn, p.application_id)
+        job = db.get_job(self.conn, app.job_id)
+        if job.easy_apply or not job.apply_url:
+            raise CommandError(ErrorCode.CONFLICT, "this job has no company application form the agent can fill "
+                               "(Easy Apply / LinkedIn-only): apply yourself, then drop it on Applied",
+                               application_id=app.id, job_id=job.id)
+        reason = "user_queued"
+        if app.state is AppState.DISCOVERED:
+            await self._transition(app.id, AppState.SCORED, reason=reason)
+            await self._transition(app.id, AppState.QUEUED, reason=reason)
+        elif app.state in (AppState.SCORED, AppState.SKIPPED, AppState.FAILED):
+            await self._transition(app.id, AppState.QUEUED, reason=reason)
+        elif app.state is not AppState.QUEUED:
+            raise CommandError(ErrorCode.CONFLICT, f"cannot queue an application that is {app.state.value}",
+                               details={"state": app.state.value}, application_id=app.id, job_id=job.id)
+        app = db.get_application(self.conn, app.id)
+        starting = bool(p.apply_now) and app.state is AppState.QUEUED and not self.is_paused()
+        if starting:
+            self._spawn(self.pipeline.apply_detached(app.id), name=f"apply-queued-{app.id}")
+        return {"state": app.state.value, "started": starting}
+
+    async def _cmd_mark_applied(self, p: Any) -> dict[str, Any]:
+        """Board: "I applied myself" for a job the agent never submitted (any column up to Needs You)."""
+        before = db.get_application(self.conn, p.application_id)
+        try:
+            app = db.mark_manually_applied(self.conn, before.job_id, reason="user_applied", status=p.status)
+        except db.IllegalTransition as e:
+            raise CommandError(ErrorCode.CONFLICT, f"cannot mark an application that is {before.state.value} as applied",
+                               details={"state": before.state.value}, application_id=before.id, job_id=before.job_id) from e
+        if before.state is AppState.NEEDS_YOU:
+            db.remove_job_from_questions(self.conn, before.job_id)
+        db.close_easy_apply(self.conn, before.job_id)  # it leaves the Easy Apply list too
+        await self.emit("application_state", ApplicationStatePayload(
+            application_id=app.id, job_id=app.job_id, from_state=before.state, to_state=AppState.SUBMITTED,
+            reason="user_applied", actor=Actor.USER, at=app.state_updated_at,
+        ))
+        return {"application_id": app.id, "status": app.status.value if app.status else "applied"}
 
     async def _cmd_add_job_url(self, p: Any) -> dict[str, Any]:
         """Add a job from a pasted link and queue it as the user's choice (``user_added_link``
@@ -1375,6 +1419,8 @@ class Daemon:
             await asyncio.to_thread(imap_codes.keychain_delete, old["email"])
         db.set_meta(self.conn, imap_codes.META_KEY, {"email": address, "enabled": True, "connected_at": utcnow().isoformat()})
         db.log_event(self.conn, "user", f"connected mailbox {address} for security codes", actor=Actor.USER)
+        if self.pipeline is not None:
+            self._spawn(self.pipeline.retry_account_walls(), name="retry-account-walls")
         return {"email": address, "connected": True, "error": None}
 
     async def _cmd_get_mail_account(self, p: Any) -> dict[str, Any]:
@@ -1402,6 +1448,29 @@ class Daemon:
             await asyncio.to_thread(imap_codes.keychain_delete, acc["email"])
         db.set_meta(self.conn, imap_codes.META_KEY, None)
         return {"email": None, "connected": False, "error": None}
+
+    async def _cmd_list_site_accounts(self, p: Any) -> dict[str, Any]:
+        """Settings > Guardrails > Job-site accounts: every account the agent made (no passwords)."""
+        from autoapply import site_accounts
+
+        return {"accounts": site_accounts.list_accounts(self.conn), "enabled": site_accounts.enabled(self.conn)}
+
+    async def _cmd_reveal_site_account_password(self, p: Any) -> dict[str, Any]:
+        """Read one site's password from the Keychain for the user (never logged)."""
+        from autoapply import site_accounts
+
+        password = await asyncio.to_thread(site_accounts.reveal, self.conn, p.host)
+        if password is None:
+            raise db.NotFound(f"no saved password for {p.host}")
+        return {"host": p.host, "password": password}
+
+    async def _cmd_delete_site_account(self, p: Any) -> None:
+        """Forget a site account: its Keychain items and index row (the account on the site stays)."""
+        from autoapply import site_accounts
+
+        if not await asyncio.to_thread(site_accounts.delete, self.conn, p.host):
+            raise db.NotFound(f"no saved account for {p.host}")
+        db.log_event(self.conn, "user", f"removed the saved login for {p.host}", actor=Actor.USER)
 
     async def _cmd_reset_source_cap(self, p: Any) -> dict[str, Any]:
         """Settings > "Reset today's reads": zero the day's browsing-session counter for one source."""

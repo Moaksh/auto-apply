@@ -2,21 +2,40 @@
 // ThinkingDots.
 import SwiftUI
 
-/// Symbol + title + body + optional action.
+/// Symbol + title + body + optional action. `prominent` empty states (a whole screen with
+/// nothing in it yet) sit on the live brand field as a 22pt media card; small ones stay plain.
 struct EmptyState: View {
     var symbol: String
     var title: String
     var message: String?
     var actionTitle: String?
+    var prominent: Bool = false
     var action: (() -> Void)?
 
     var body: some View {
+        if prominent {
+            content
+                .padding(.horizontal, Space.xxxl)
+                .padding(.vertical, Space.xxl + Space.s)
+                .frame(maxWidth: 560)
+                .brandHeroBand()
+                .padding(Space.xl)
+        } else {
+            content.padding(Space.xxl)
+        }
+    }
+
+    private var content: some View {
         VStack(spacing: Space.m) {
             Image(systemName: symbol)
                 .font(.system(size: 40, weight: .regular))
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(Palette.textTertiary)
-            Text(title).font(Typography.title2)
+                .foregroundStyle(prominent ? Palette.Brand.signal : Palette.textTertiary)
+            if prominent {
+                Text(title).font(Typography.title1).tracking(-0.6).multilineTextAlignment(.center)
+            } else {
+                Text(title).font(Typography.title2)
+            }
             if let message {
                 Text(message)
                     .font(Typography.body)
@@ -26,9 +45,9 @@ struct EmptyState: View {
             }
             if let actionTitle, let action {
                 Button(actionTitle, action: action).buttonStyle(.glassProminent)
+                    .padding(.top, prominent ? Space.s : 0)
             }
         }
-        .padding(Space.xxl)
         .accessibilityElement(children: .combine)
     }
 }
@@ -121,6 +140,7 @@ struct ThinkingDots: View {
 #Preview("States") {
     VStack {
         EmptyState(symbol: "tray", title: "All caught up.", message: "14 jobs resumed. The agent's back at it.", actionTitle: "Run Prep pass") {}
+        EmptyState(symbol: "checkmark.rectangle.stack", title: "Nothing to review", message: "Filled applications wait here.", prominent: true)
         SkeletonBlock().frame(width: 240)
         ErrorState(title: "Can't reach autoapplyd", message: "Last seen 14:02", actionTitle: "Restart daemon", action: {})
         ThinkingDots(isActive: true)

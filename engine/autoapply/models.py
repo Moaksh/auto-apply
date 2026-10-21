@@ -839,6 +839,20 @@ class AddJobUrlPayload(_P):
     apply_now: bool = Field(default=True, description="Start filling right away (else it waits for the next run).")
 
 
+class QueueApplicationPayload(_P):
+    """Board: a card dropped on Queued. discovered / scored / skipped / failed -> queued (actor user)."""
+
+    application_id: int
+    apply_now: bool = Field(default=True, description="Start filling it right away (unless paused).")
+
+
+class MarkAppliedPayload(_P):
+    """Board: "I applied myself" — a job the agent never submitted, dropped on Applied or a later column."""
+
+    application_id: int
+    status: BoardStatus = BoardStatus.APPLIED
+
+
 class ApplyAnywayPayload(_P):
     """User override of a hard-filter / below-threshold skip: skipped -> queued (actor user)."""
 
@@ -909,6 +923,18 @@ class ClearMailAccountPayload(_P):
     pass
 
 
+class ListSiteAccountsPayload(_P):
+    pass
+
+
+class RevealSiteAccountPasswordPayload(_P):
+    host: str = Field(min_length=1, description="Site host as listed by list_site_accounts.")
+
+
+class DeleteSiteAccountPayload(_P):
+    host: str = Field(min_length=1)
+
+
 class SuggestPreferencesPayload(_P):
     pass
 
@@ -958,6 +984,8 @@ COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "retry_application": RetryApplicationPayload,
     "resolve_unknown": ResolveUnknownPayload,
     "apply_anyway": ApplyAnywayPayload,
+    "queue_application": QueueApplicationPayload,
+    "mark_applied": MarkAppliedPayload,
     "add_job_url": AddJobUrlPayload,
     "update_job_notes": UpdateJobNotesPayload,
     "set_application_resume": SetApplicationResumePayload,
@@ -976,6 +1004,9 @@ COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "get_mail_account": GetMailAccountPayload,
     "suggest_preferences": SuggestPreferencesPayload,
     "clear_mail_account": ClearMailAccountPayload,
+    "list_site_accounts": ListSiteAccountsPayload,
+    "reveal_site_account_password": RevealSiteAccountPasswordPayload,
+    "delete_site_account": DeleteSiteAccountPayload,
     "onboarding_set_step": OnboardingSetStepPayload,
     "onboarding_complete": OnboardingCompletePayload,
 }

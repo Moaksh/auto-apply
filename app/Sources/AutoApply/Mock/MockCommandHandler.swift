@@ -251,6 +251,36 @@ enum MockCommandHandler {
             }
             return Handled(reply: ack()) { $0.transition(applicationID: p.applicationId, to: .queued, reason: "user_apply_anyway", actor: .user) }
 
+        case .queueApplication(let p):
+            let job = world.repository.read { $0.jobs.first { $0.applicationID == p.applicationId } }
+            guard let job, BoardRules.canQueue(job) else {
+                return Handled(reply: error(.conflict, "application \(p.applicationId) can't be queued", applicationID: p.applicationId))
+            }
+            struct Reply: Encodable { var state = "queued"; var started: Bool }
+            return Handled(reply: ack(encoding: Reply(started: p.applyNow))) {
+                $0.transition(applicationID: p.applicationId, to: .queued, reason: "user_queued", actor: .user)
+            }
+
+        case .markApplied(let p):
+            let ok: Bool = world.repository.update { data in
+                guard let i = data.jobIndex(applicationID: p.applicationId), BoardRules.canMarkApplied(data.jobs[i]) else { return false }
+                let now = Date()
+                data.jobs[i].state = .submitted
+                data.jobs[i].mode = .manual
+                data.jobs[i].stateReason = "user_applied"
+                data.jobs[i].submittedAt = now
+                data.jobs[i].status = p.status
+                data.jobs[i].statusUpdatedAt = now
+                data.log("state", "marked as applied by you", actor: .user, jobID: data.jobs[i].id, applicationID: p.applicationId)
+                return true
+            }
+            guard ok else {
+                return Handled(reply: error(.conflict, "application \(p.applicationId) can't be marked applied", applicationID: p.applicationId))
+            }
+            struct Reply: Encodable { var applicationId: Int; var status: String
+                enum CodingKeys: String, CodingKey { case applicationId = "application_id", status } }
+            return Handled(reply: ack(encoding: Reply(applicationId: p.applicationId, status: p.status.rawValue)))
+
         case .addJobUrl(let p):
             if let problem = AddJobLink.problem(p.url) { return Handled(reply: error(.invalidPayload, problem)) }
             let url = AddJobLink.url(p.url)?.absoluteString ?? p.url
@@ -397,6 +427,16 @@ enum MockCommandHandler {
             return Handled(reply: ack(encoding: AppStore.MailAccountStatus(email: nil, connected: false, error: nil)))
         case .clearMailAccount:
             return Handled(reply: ack(encoding: AppStore.MailAccountStatus(email: nil, connected: false, error: nil)))
+        case .listSiteAccounts:
+            return Handled(reply: ack(encoding: AppStore.SiteAccountList(accounts: [
+                AppStore.SiteAccount(host: "acme.wd5.myworkdayjobs.com", email: "jane@gmail.com", company: "Acme", status: "active",
+                                     createdAt: "2026-10-20T10:00:00Z", updatedAt: "2026-10-20T10:01:00Z"),
+            ], enabled: true)))
+        case .revealSiteAccountPassword:
+            struct Reply: Encodable { var host = "acme.wd5.myworkdayjobs.com"; var password = "mock-Pa55word!" }
+            return Handled(reply: ack(encoding: Reply()))
+        case .deleteSiteAccount:
+            return Handled(reply: ack())
 
         case .checkSourceLogin(let p):
             let source: SourceName = p.source == .linkedin ? .linkedin : .glassdoor

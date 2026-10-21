@@ -215,25 +215,15 @@ struct IgnitionView: View {
     }
 }
 
-/// Near-black canvas brightening into the accent-tinted mesh gradient (static once settled).
+/// Near-black canvas brightening into the live brand field (deep green → ink → navy, a hint of
+/// coral). Drifts slowly once lit; static under Reduce Motion.
 private struct IgnitionBackground: View {
     var brightness: Double
 
     var body: some View {
-        ZStack {
-            Palette.ignitionGround
-            MeshGradient(width: 3, height: 3, points: [
-                [0, 0], [0.5, 0], [1, 0],
-                [0, 0.5], [0.55, 0.45], [1, 0.5],
-                [0, 1], [0.5, 1], [1, 1],
-            ], colors: [
-                Color(hex: 0x1A1B4B), Color(hex: 0x23256B), Color(hex: 0x14152E),
-                Color(hex: 0x101124), Color(hex: 0x2E3290), Color(hex: 0x15163A),
-                Color(hex: 0x0B0B12), Color(hex: 0x12132B), Color(hex: 0x0B0B12),
-            ])
-            .opacity(brightness)
-        }
-        .ignoresSafeArea()
+        BrandGradientField(brightness: brightness)
+            .background(Palette.ignitionGround)
+            .ignoresSafeArea()
     }
 }
 
@@ -250,7 +240,7 @@ enum IgnitionTrail {
 
     static func draw(in ctx: inout GraphicsContext, size: CGSize, state s: IgnitionState) {
         guard s.dotOpacity > 0.01 else { return }
-        let accent = Palette.signalIndigo
+        let accent = Palette.Brand.signal
         // Trail: 40 particles behind the head, each fading with age.
         for i in 0..<particleCount {
             let t = s.dotProgress - Double(i) * 0.012
@@ -292,7 +282,7 @@ struct PaperPlaneMark: View {
         ZStack {
             TrajectoryCheck()
                 .trim(from: 0, to: checkProgress)
-                .stroke(Palette.signalIndigo.opacity(0.9), style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [0.1, 6]))
+                .stroke(Palette.Brand.signal.opacity(0.9), style: StrokeStyle(lineWidth: 2, lineCap: .round, dash: [0.1, 6]))
             PaperPlaneShape()
                 .fill(.white.opacity(0.10 * glassOpacity))
                 .overlay {
@@ -306,8 +296,8 @@ struct PaperPlaneMark: View {
                 }
             PaperPlaneShape()
                 .trim(from: 0, to: trimEnd)
-                .stroke(Palette.signalIndigo, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
-                .shadow(color: Palette.signalIndigo.opacity(0.6), radius: 8)
+                .stroke(Palette.Brand.signal, style: StrokeStyle(lineWidth: 2.5, lineCap: .round, lineJoin: .round))
+                .shadow(color: Palette.Brand.signal.opacity(0.6), radius: 8)
         }
         .accessibilityHidden(true)
     }

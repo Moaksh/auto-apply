@@ -95,7 +95,7 @@ from autoapply.models import (
 )
 
 #: Must equal MAX(version) seeded by contract/schema.sql.
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 
 #: Forward migrations: version -> SQL to go from (version-1) to version. Append-only.
 #: Version 1 is the baseline created by contract/schema.sql itself.
@@ -138,6 +138,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_company_suggestions_name ON company_suggest
 CREATE INDEX IF NOT EXISTS ix_company_suggestions_status ON company_suggestions(status);
 """,
     8: "python:_migrate_v8",
+    9: "python:_migrate_v9",
 }
 
 
@@ -210,6 +211,22 @@ def _migrate_v8(conn: sqlite3.Connection) -> None:
             )
         reclassify_open_questions(conn)
         conn.execute("INSERT INTO schema_version(version) VALUES (8)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+def _migrate_v9(conn: sqlite3.Connection) -> None:
+    """v9: preferences.create_accounts (the agent may create job-site accounts). Idempotent."""
+    conn.execute("BEGIN")
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(preferences)")}
+        if "create_accounts" not in cols:
+            conn.execute(
+                "ALTER TABLE preferences ADD COLUMN create_accounts INTEGER NOT NULL DEFAULT 1 CHECK (create_accounts IN (0, 1))"
+            )
+        conn.execute("INSERT INTO schema_version(version) VALUES (9)")
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")
@@ -597,7 +614,7 @@ _PREF_JSON = {
     "exclude_keywords", "per_ats_mode", "per_company_mode", "schedule", "nudge_days",
     "sources_enabled", "career_page_urls", "always_ask_patterns",
 }
-_PREF_BOOL = {"hide_without_salary"}
+_PREF_BOOL = {"hide_without_salary", "create_accounts"}
 
 
 def get_preferences(conn: sqlite3.Connection) -> Preferences:
@@ -1524,26 +1541,29 @@ def set_status(
     )
 
 
-def mark_manually_applied(conn: sqlite3.Connection, job_id: int) -> Application:
-    """Record that the USER applied manually (LinkedIn Easy Apply). Sets state ``submitted``
-    with mode ``manual`` and board status ``applied``. Bypasses the agent edges on purpose."""
+def mark_manually_applied(conn: sqlite3.Connection, job_id: int, *, reason: str = "manual_easy_apply",
+                          status: BoardStatus | str = BoardStatus.APPLIED) -> Application:
+    """Record that the USER applied manually (LinkedIn Easy Apply, or by themselves from the
+    board). Sets state ``submitted`` with mode ``manual`` and board ``status`` (default
+    ``applied``). Bypasses the agent edges on purpose."""
     with transaction(conn):
         app = get_application_by_job(conn, job_id)
         if app.state not in MANUAL_SUBMIT_FROM:
             raise IllegalTransition(app.id, app.state, AppState.SUBMITTED, Actor.USER, "manual apply not allowed from this state")
         ts = now_ts()
         conn.execute(
-            "UPDATE applications SET state = 'submitted', state_reason = 'manual_easy_apply', state_updated_at = ?, mode = 'manual', "
-            "submitted_at = ?, status = 'applied', status_updated_at = ?, updated_at = ? WHERE id = ?",
-            (ts, ts, ts, ts, app.id),
+            "UPDATE applications SET state = 'submitted', state_reason = ?, state_updated_at = ?, mode = 'manual', "
+            "submitted_at = ?, status = ?, status_updated_at = ?, updated_at = ? WHERE id = ?",
+            (reason, ts, ts, BoardStatus(status).value, ts, ts, app.id),
         )
         conn.execute(
             "UPDATE companies SET last_applied_at = ?, updated_at = ? WHERE id = (SELECT company_id FROM jobs WHERE id = ?)",
             (ts, ts, job_id),
         )
         log_event(
-            conn, "state", f"{app.state.value} → submitted (manual Easy Apply)", actor=Actor.USER, job_id=job_id,
-            application_id=app.id, payload={"from": app.state.value, "to": "submitted", "reason": "manual_easy_apply"},
+            conn, "state", f"{app.state.value} → submitted ({'manual Easy Apply' if reason == 'manual_easy_apply' else 'applied by you'})",
+            actor=Actor.USER, job_id=job_id, application_id=app.id,
+            payload={"from": app.state.value, "to": "submitted", "reason": reason},
         )
     return get_application(conn, app.id)
 
@@ -1975,6 +1995,14 @@ def mark_easy_apply_opened(conn: sqlite3.Connection, job_id: int) -> EasyApplyIt
 
 def dismiss_easy_apply(conn: sqlite3.Connection, job_id: int) -> EasyApplyItem:
     return _easy_apply_flag(conn, job_id, "dismissed")
+
+
+def close_easy_apply(conn: sqlite3.Connection, job_id: int) -> None:
+    """Flag the job's Easy Apply row (if any) done, without touching the application."""
+    ts = now_ts()
+    with transaction(conn):
+        conn.execute("UPDATE easy_apply SET done = 1, opened = 1, done_at = COALESCE(done_at, ?), updated_at = ? WHERE job_id = ?",
+                     (ts, ts, job_id))
 
 
 def mark_easy_apply_done(conn: sqlite3.Connection, job_id: int) -> Application:

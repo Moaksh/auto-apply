@@ -174,9 +174,9 @@ final class PaletteModel {
             items.append(PaletteItem(id: "addjob", section: .actions, kind: .addJobLink(text), title: "Add this job",
                                      subtitle: host, symbol: "link.badge.plus", trailing: AppShortcut.addJobByLink.displayString, score: 20_000))
         }
-        if let egg = EasterEggs.phrase(for: text) {
+        if let egg = EasterEggs.paletteRow(for: text) {
             items.append(PaletteItem(id: "egg.\(egg.trigger)", section: .actions, kind: .easterEgg(egg.trigger), title: egg.title,
-                                     subtitle: "Psst…", symbol: egg.symbol, trailing: nil, score: 10_000))
+                                     subtitle: egg.subtitle, symbol: egg.symbol, trailing: nil, score: 10_000))
         }
         // Group by section (fixed order), best first within a section, capped.
         var out: [PaletteItem] = []
@@ -312,7 +312,7 @@ final class PaletteModel {
             router.requestAddJob(url: url)
             return true
         case .easterEgg(let trigger):
-            if let egg = EasterEggs.phrases.first(where: { $0.trigger == trigger }) { EasterEggs.play(egg, toasts: store.toasts) }
+            EasterEggs.play(trigger: trigger)
         }
         router.isPalettePresented = false
         return true

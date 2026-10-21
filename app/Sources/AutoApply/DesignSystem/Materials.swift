@@ -13,7 +13,7 @@ extension View {
         modifier(GlassSurface(shape: Capsule(), tint: tint, interactive: interactive))
     }
 
-    /// Solid content surface: card background, hairline, and depth level 2 (§1.4).
+    /// Solid content surface: card background + hairline. Flat by design — no drop shadow.
     func surfaceCard(cornerRadius: CGFloat = Radius.card, raised: Bool = false) -> some View {
         modifier(SurfaceCard(cornerRadius: cornerRadius, raised: raised))
     }
@@ -76,6 +76,5 @@ struct SurfaceCard: ViewModifier {
                         .allowsHitTesting(false)
                 }
             }
-            .shadow(color: colorScheme == .dark ? .clear : .black.opacity(0.04), radius: 1, y: 1)
     }
 }

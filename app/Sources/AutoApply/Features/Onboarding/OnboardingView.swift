@@ -64,7 +64,9 @@ private struct OnboardingContent: View {
             }
             .padding(Space.xl)
             .frame(width: 230, alignment: .leading)
-            .background(.ultraThinMaterial)
+            .frame(maxHeight: .infinity)
+            // The rail is a brand media panel: the same live field Ignition settled into.
+            .brandHeroBand(cornerRadius: 0)
 
             VStack(spacing: 0) {
                 ZStack {

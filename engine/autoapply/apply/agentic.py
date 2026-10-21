@@ -69,7 +69,9 @@ from autoapply.llm.provider import AgentSDKProvider, TokenUsage
 from autoapply.models import AgentStepPayload, ApplicationAnswer, FormQuestion, Job, choice_field_type, now_ts
 from autoapply.paths import get_paths
 from autoapply.question_kind import classify as classify_kind
-from autoapply.question_kind import resolve_kind
+from autoapply.question_kind import ACCOUNT as ACTION_ACCOUNT
+from autoapply.question_kind import VERIFICATION as ACTION_VERIFICATION
+from autoapply.question_kind import action_type, resolve_kind
 from autoapply.workers import current_slot
 
 log = logging.getLogger(__name__)
@@ -103,6 +105,13 @@ FORBIDDEN_BROWSER_TOOLS = (
 OWN_TOOLS = (
     "get_profile", "lookup_answer", "ask_user", "pick_resume", "write_cover_letter", "report_captcha",
     "request_submit", "report_submission_result", "report_form_questions",
+    "start_account", "check_email", "finish_account",
+)
+#: Fields the account step may fill (sign-up / sign-in / reset forms): nothing from the application.
+ACCOUNT_FIELD_RX = re.compile(
+    r"e-?mail|user ?name|user ?id|login|password|passcode|pass word|confirm|first name|last name|given name|family name"
+    r"|surname|full name|\bname\b|phone|mobile|country|code|otp|pin\b",
+    re.I,
 )
 
 #: Controls whose activation submits an application.
@@ -263,6 +272,10 @@ class ToolGate:
     denials: list[tuple[str, str]] = field(default_factory=list)
     #: harvest phase: no data entry at all (navigation / reading / non-submit clicks only)
     read_only: bool = False
+    #: signing up / in / resetting a password (start_account .. finish_account): only account
+    #: fields may be typed, nothing is recorded as an application answer, and the account
+    #: form's own button ("Submit", "Create account", "Verify") may be clicked
+    account_mode: bool = False
     #: the latest page snapshot that contained form fields (harvest fallback)
     last_form_snapshot: str = ""
     _decided: dict[str, GateDecision] = field(default_factory=dict, repr=False)
@@ -332,6 +345,10 @@ class ToolGate:
             return GateDecision(True)
         if short not in GATED_BROWSER_TOOLS:
             return self._deny(tool_name, f"{short} is not allowed.")
+        if self.account_mode:
+            account = self._check_account_step(tool_name, short, inp)
+            if account is not None:
+                return account
         if self.read_only and short in {"browser_type", "browser_fill_form", "browser_select_option", "browser_file_upload", "browser_press_key"}:
             return self._deny(tool_name, "Only list the questions now: do not enter any data.")
         if short == "browser_navigate":
@@ -403,6 +420,42 @@ class ToolGate:
             self.data_entered = self.data_entered or bool(paths)
             return GateDecision(True)
         return GateDecision(True)  # browser_handle_dialog
+
+    def _check_account_step(self, tool_name: str, short: str, inp: dict[str, Any]) -> GateDecision | None:
+        """The account step's own policy; None = fall through to the normal rules."""
+        def is_account_field(ref: str, desc: str) -> bool:
+            return bool(ACCOUNT_FIELD_RX.search(self._label_of(ref, desc)) or ACCOUNT_FIELD_RX.search(desc))
+
+        outside = ("During the account step only fill the sign-up / sign-in fields (email, password, name, phone, "
+                   "code). Call finish_account first, then fill the application.")
+        if short == "browser_type":
+            if inp.get("submit"):
+                return self._deny(tool_name, "type(submit=true) is not allowed; click the form's button instead.")
+            ref, desc = str(inp.get("ref") or ""), str(inp.get("element") or "")
+            if not is_account_field(ref, desc):
+                return self._deny(tool_name, outside)
+            self.last_ref_role = self.refs.get(ref, ("", ""))[0] or None
+            self.last_action = "type"
+            return GateDecision(True)  # never recorded: account values are not application answers
+        if short == "browser_fill_form":
+            if any(not is_account_field(str(f.get("ref") or ""), str(f.get("name") or "")) for f in inp.get("fields") or []):
+                return self._deny(tool_name, outside)
+            if any(str(f.get("type", "")).lower() in {"button", "submit"} for f in inp.get("fields") or []):
+                return self._deny(tool_name, "fill_form cannot press buttons.")
+            self.last_ref_role = None
+            self.last_action = "type"
+            return GateDecision(True)
+        if short == "browser_select_option":
+            self.last_ref_role = self.refs.get(str(inp.get("ref") or ""), ("", ""))[0] or None
+            self.last_action = "type"
+            return GateDecision(True)
+        if short == "browser_file_upload":
+            return self._deny(tool_name, "No uploads during the account step.")
+        if short == "browser_click":
+            self.last_ref_role = self.refs.get(str(inp.get("ref") or ""), ("", ""))[0] or None
+            self.last_action = "click"
+            return GateDecision(True)  # the sign-up / sign-in / verify button
+        return None
 
     def _check_key(self, tool_name: str, key: str) -> GateDecision:
         """Keyboard activation can submit a form as surely as a click: Enter only right after
@@ -553,6 +606,33 @@ _QUESTIONS_SCHEMA = {
     "required": ["questions"],
 }
 _EMPTY_SCHEMA: dict[str, Any] = {"type": "object", "properties": {}}
+_START_ACCOUNT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "purpose": {"type": "string", "enum": ["create", "sign_in", "reset"],
+                    "description": "'create' = sign up (returns a saved login instead when one exists), 'sign_in' = "
+                                   "use the saved login, 'reset' = the email is already registered: new password via "
+                                   "'Forgot password'."},
+        "site_url": {"type": "string", "description": "URL of the page you are on (the account belongs to its site)."},
+    },
+    "required": ["purpose", "site_url"],
+}
+_CHECK_EMAIL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "want": {"type": "string", "enum": ["code", "link"]},
+        "length": {"type": "integer", "description": "Code length when the page says it (e.g. 6)."},
+    },
+    "required": ["want"],
+}
+_FINISH_ACCOUNT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "outcome": {"type": "string", "enum": ["created", "signed_in", "reset", "failed"]},
+        "detail": {"type": "string", "description": "For 'failed': what stopped you (shown to the user)."},
+    },
+    "required": ["outcome"],
+}
 _CAPTCHA_SCHEMA = {"type": "object", "properties": {"detail": {"type": "string"}}}
 
 
@@ -583,6 +663,12 @@ class AgentToolbox:
         self.cover_letter_path: str | None = None
         self.screenshot_path: str | None = None
         self.usage = TokenUsage()
+        #: the agent may create / reset job-site accounts this session (preference on + mailbox)
+        self.accounts_on = _accounts_enabled(ctx)
+        self.account_host: str | None = None
+        self.account_started: float | None = None
+        self.account_failed = False
+        self.account_nudges = 0
         #: screenshots older than this session do not count (the Review-time prefill.png
         #: already sits in the same directory when a fresh submit session starts)
         self.started_at = time.time()
@@ -633,6 +719,14 @@ class AgentToolbox:
             options=[str(o) for o in args.get("options") or []], max_length=args.get("max_length"),
         )
         norm = normalize_question(q.label)
+        if self.accounts_on and action_type(q.label) in {ACTION_ACCOUNT, ACTION_VERIFICATION} and not self.account_failed:
+            return _ok({"status": "account_step", "instruction": (
+                "This is part of signing up / signing in, not a question to answer. Use the email and password from "
+                "start_account (and a code from check_email). Never put them in lookup_answer or request_submit."
+                if self.gate.account_mode else
+                "This site needs an account. Call start_account (purpose 'create', or 'sign_in' if you are on a "
+                "sign-in page) and use the email and password it returns."
+            )})
         if classify_kind(q.label) is QuestionKind.ACTION:
             # Passwords, "retype email", sign-in and verification steps are never answered by the
             # agent (nor stored in memory): the user does them in the agent's Chrome, then retries.
@@ -680,12 +774,100 @@ class AgentToolbox:
         )
         reason = QuestionReason(args.get("reason") or "unknown")
         kind = resolve_kind(q.label, reason, args.get("kind"))
+        if (kind is QuestionKind.ACTION and self.accounts_on and not self.account_failed and self.account_nudges < 2
+                and action_type(q.label, reason) in {ACTION_ACCOUNT, ACTION_VERIFICATION}):
+            self.account_nudges += 1
+            return _ok("Creating accounts is turned on: do not ask the user. Call start_account (purpose 'create', "
+                       "'sign_in' or 'reset') and continue; use check_email for emailed codes or links. Only if that "
+                       "fails, call finish_account(outcome='failed').")
         if kind is QuestionKind.ACTION:
             self._park(q, reason, kind=kind)
             return _ok("Sent to the user as a task to do (not a field to fill). Do not fill anything for it and do not "
                        "create accounts. Stop now.")
         self._park(q, reason, never_guess_key=classify_never_guess(q), kind=kind)
         return _ok("Sent to the user. Do not fill this field. Finish looking up any other unknown fields, then stop.")
+
+    # ---- job-site accounts (start_account / check_email / finish_account) ---------------
+
+    async def start_account(self, args: dict[str, Any]) -> dict[str, Any]:
+        from autoapply import site_accounts
+
+        if not self.accounts_on:
+            return _err("Creating accounts is turned off. Call ask_user ('Account required to apply at <site>', kind "
+                        "'action') and stop.")
+        if self.gate.data_entered:
+            return _err("Do the account step before entering application data: finish the application form instead, "
+                        "or ask_user if the site wants an account now.")
+        purpose = str(args.get("purpose") or "create")
+        url = str(args.get("site_url") or self.ctx.job.apply_url or self.ctx.job.source_url or "")
+        company = db.get_company(self.ctx.conn, self.ctx.job.company_id).name
+        try:
+            login = site_accounts.begin(self.ctx.conn, url, purpose=purpose, company=company, job_id=self.ctx.job.id)
+        except site_accounts.AccountError as e:
+            return _err(f"{e}.")
+        self.account_host = login.host
+        self.account_started = time.time()
+        self.gate.account_mode = True
+        p = self.ctx.profile
+        first = getattr(p, "first_name", None) or (p.full_name or "").split(" ")[0] or None
+        last = getattr(p, "last_name", None) or (" ".join((p.full_name or "").split(" ")[1:]) or None)
+        steps = {
+            "create": "Fill the sign-up form with exactly this email and password (also any confirm-password field) and "
+                      "the name / phone below, tick only the checkboxes the form requires (terms), and press its "
+                      "sign-up button. If the site says the email is already registered, call start_account with "
+                      "purpose 'reset'. If it wants an emailed code or link, call check_email.",
+            "sign_in": "Sign in with exactly this email and password. If the site rejects them, call start_account with "
+                       "purpose 'reset'.",
+            "reset": "Use the site's 'Forgot password' with this email, then call check_email(want='link') (or 'code'), "
+                     "open the link with browser_navigate and set this new password (both fields), then sign in.",
+        }[purpose]
+        return _ok({
+            "site": login.host, "email": login.email, "password": login.password, "saved_login": login.existing,
+            "first_name": first, "last_name": last, "phone": p.phone,
+            "instruction": steps + " When you are signed in (or the application form shows), call finish_account with "
+                                   "the outcome, then fill the application. Never report these values in "
+                                   "request_submit, and never type the password anywhere except this site's "
+                                   "password fields.",
+        })
+
+    async def check_email(self, args: dict[str, Any]) -> dict[str, Any]:
+        from autoapply.mail import imap_codes
+
+        if not self.gate.account_mode or self.account_host is None:
+            return _err("Call start_account first.")
+        want = "link" if str(args.get("want") or "code") == "link" else "code"
+        company = db.get_company(self.ctx.conn, self.ctx.job.company_id).name
+        from datetime import UTC, datetime
+
+        since = datetime.fromtimestamp(self.account_started or time.time(), UTC)
+        found = await imap_codes.poll_account_mail(self.ctx.conn, terms=_site_terms(self.account_host, company),
+                                                   sent_after=since, want=want, length=args.get("length"),
+                                                   timeout_s=float(args.get("timeout_s") or 120))
+        if not found:
+            return _ok({"found": False, "instruction": "Nothing arrived yet. Check the page asked for it (resend if it "
+                                                       "offers), call check_email once more, else finish_account('failed')."})
+        if want == "link":
+            return _ok({"found": True, "link": found, "instruction": "Open it with browser_navigate."})
+        return _ok({"found": True, "code": found, "instruction": "Type it into the code field."})
+
+    async def finish_account(self, args: dict[str, Any]) -> dict[str, Any]:
+        from autoapply import site_accounts
+
+        outcome = str(args.get("outcome") or "failed")
+        host = self.account_host
+        self.gate.account_mode = False
+        self.account_host = None
+        if host is not None:
+            site_accounts.finish(self.ctx.conn, host, outcome)
+        if outcome == "failed":
+            self.account_failed = True
+            why = str(args.get("detail") or "").strip()
+            self._park(FormQuestion(key="account", label=f"Account required to apply at {host or 'this site'}"
+                                    + (f": {why}" if why else ""), field_type=FieldType.TEXT), QuestionReason.UNKNOWN,
+                       kind=QuestionKind.ACTION)
+            return _ok("Sent to the user as a task (the saved password is in Settings > Guardrails > Job-site "
+                       "accounts). Stop now.")
+        return _ok("Account step done. Continue with the application form as usual.")
 
     async def pick_resume(self, args: dict[str, Any]) -> dict[str, Any]:
         if self.ctx.resume is not None:
@@ -942,6 +1124,12 @@ class AgentToolbox:
             ("report_submission_result", "Report whether a confirmation ('thank you', 'application received') appeared.", _RESULT_SCHEMA, self.report_submission_result),
             ("report_form_questions", "Report every question on the application form (label, type, required, options).", _QUESTIONS_SCHEMA, self.report_form_questions),
         ]
+        if self.accounts_on:
+            spec += [
+                ("start_account", "The site wants an account: get the email + password to sign up / sign in / reset with.", _START_ACCOUNT_SCHEMA, self.start_account),
+                ("check_email", "Wait for the site's email (code or confirm / reset link) in the user's mailbox.", _CHECK_EMAIL_SCHEMA, self.check_email),
+                ("finish_account", "End the account step: created / signed_in / reset, or failed (goes to the user).", _FINISH_ACCOUNT_SCHEMA, self.finish_account),
+            ]
         return [SdkMcpTool(name=n, description=d, input_schema=s, handler=h) for n, d, s, h in spec]
 
     def handler(self, name: str) -> Callable[[dict[str, Any]], Any]:
@@ -970,8 +1158,8 @@ Rules (non-negotiable):
   screenshot (browser_take_screenshot, fullPage=true, filename 'prefill.png') and call request_submit with EVERY
   field you filled and the exact value entered (values you type but do not report block the submission).
 - If you see a CAPTCHA or "verify you are human" check, call report_captcha and stop.
-- Never log in to or visit LinkedIn or Glassdoor. Never create accounts or set passwords: if the site requires an
-  account, call ask_user with question 'Account required to apply at <site>' and kind 'action', and stop.
+- Never log in to or visit LinkedIn or Glassdoor.
+{account_rule}
 - ask_user has two kinds. kind 'question' is for a value to write into a form field (work authorization, years of
   experience, an essay prompt). kind 'action' is for anything that is a STEP for the user to perform rather than an
   answer: account or login required, password / confirm-password / retype-email fields of an account form, CAPTCHA
@@ -979,6 +1167,43 @@ Rules (non-negotiable):
   ('Account required to apply at <site>', 'Verify your email at <site>'). Never ask the user to type a password.
 - Multi-page forms: use 'Next'/'Continue'/'Save and continue' buttons to move between pages.
 - Prefer browser_snapshot over screenshots to read the page (cheaper)."""
+
+_ACCOUNT_RULE_OFF = """- Never create accounts or set passwords: if the site requires an account, call ask_user with question
+  'Account required to apply at <site>' and kind 'action', and stop."""
+_ACCOUNT_RULE_ON = """- If the site requires an account or sign-in (including Workday's 'Create Account' / 'Sign In'), do it yourself
+  BEFORE entering any application data: call start_account (purpose 'create'; 'sign_in' on a sign-in page; 'reset'
+  when the email is already registered), use exactly the email and password it returns, get emailed codes or links
+  with check_email, then call finish_account. Never invent or reuse other passwords, never sign in with Google /
+  LinkedIn / other single sign-on, and never report account values in request_submit. CAPTCHAs still go to
+  report_captcha. Only if the account step fails, call finish_account(outcome='failed') and stop."""
+
+
+def system_prompt(accounts_on: bool) -> str:
+    return SYSTEM_PROMPT.replace("{account_rule}", _ACCOUNT_RULE_ON if accounts_on else _ACCOUNT_RULE_OFF)
+
+
+def _accounts_enabled(ctx: ApplyContext) -> bool:
+    from autoapply import site_accounts
+
+    try:
+        return site_accounts.enabled(ctx.conn)
+    except Exception:  # noqa: BLE001 - a missing table / meta must never break applying
+        log.debug("could not read the account setting", exc_info=True)
+        return False
+
+
+_GENERIC_HOST_LABELS = {"www", "jobs", "careers", "career", "apply", "join", "hire", "recruiting", "talent", "boards",
+                        "job-boards", "app", "my", "com", "co", "io", "net", "org", "in"}
+
+
+def _site_terms(host: str, company: str) -> list[str]:
+    """What an account email from ``host`` mentions: the company and the site's brand labels
+    ("acme.wd5.myworkdayjobs.com" -> acme, myworkdayjobs, workday)."""
+    labels = [lbl for lbl in host.split(".") if lbl and lbl not in _GENERIC_HOST_LABELS and not re.fullmatch(r"wd\d+", lbl)]
+    terms = [company, host, *labels]
+    if "myworkdayjobs" in host:
+        terms.append("workday")
+    return [t for t in dict.fromkeys(t.strip() for t in terms if t) if len(t) >= 3]
 
 
 def _job_header(job: Job, company: str) -> str:
@@ -1102,9 +1327,13 @@ class AgenticAdapter:
             "Then stop.\n"
             "You MUST finish with exactly one of these calls:\n"
             "- report_form_questions (the form's fields);\n"
-            "- ask_user with question 'Account required to apply at <site>' and kind 'action' if applying needs an "
-            "account or login (also when the form starts with password / retype-email fields);\n"
-            "- ask_user with question 'No online application form at <site>: <what the posting says to do instead>' "
+            + ("- if applying needs an account or login, do the account step first (start_account, check_email, "
+               "finish_account; typing into the account form is allowed), then list the application form's questions; "
+               "only if it fails, finish_account(outcome='failed');\n"
+               if toolbox.accounts_on else
+               "- ask_user with question 'Account required to apply at <site>' and kind 'action' if applying needs an "
+               "account or login (also when the form starts with password / retype-email fields);\n")
+            + "- ask_user with question 'No online application form at <site>: <what the posting says to do instead>' "
             "and kind 'action' if there is no form to fill (e.g. apply by email or an external Google Form);\n"
             "- report_captcha for a CAPTCHA / human check.\n"
             "Do not spend long exploring: if the form is not reachable in a few steps, use ask_user as above.\n\n"
@@ -1294,7 +1523,7 @@ class AgenticAdapter:
 
         server = create_sdk_mcp_server(TOOL_SERVER, tools=toolbox.sdk_tools())
         kwargs: dict[str, Any] = {
-            "system_prompt": SYSTEM_PROMPT,
+            "system_prompt": system_prompt(toolbox.accounts_on),
             "mcp_servers": {BROWSER_SERVER: self.playwright_server_config(ctx), TOOL_SERVER: server},
             "strict_mcp_config": True,
             "tools": [],  # no built-in Claude Code tools (Bash, Read, ...)

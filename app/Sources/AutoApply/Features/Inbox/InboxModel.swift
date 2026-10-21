@@ -232,8 +232,9 @@ enum InboxActionCopy {
     static func explanation(_ cluster: QuestionCluster) -> String {
         switch cluster.action {
         case .account:
-            return "This application site wants an account before it shows the form. The agent never creates accounts "
-                + "or types passwords for you, so it stopped here."
+            return "This application site wants an account before it shows the form, and the agent couldn't get one by "
+                + "itself (account creation is off, no email is connected, or the site blocked it). Its saved password, "
+                + "if any, is in Settings ▸ Guardrails ▸ Job-site accounts."
         case .captcha:
             return "A CAPTCHA or bot check appeared on the form. Only a person can get past it, so the agent stopped."
         case .verification:
@@ -551,6 +552,9 @@ final class InboxModel {
         if wasLast || clusters.isEmpty {
             inboxZeroTrigger += 1
             Haptics.levelChange()
+            Sounds.play(.celebrate)
+        } else {
+            Sounds.play(.pop)
         }
         let jobsText = C3Format.plural(cluster.jobCount, "job")
         let message = answer == nil ? "Skipped · \(jobsText)" : cluster.isAction ? "Retrying · \(jobsText)" : "Answered · \(jobsText) resumed"

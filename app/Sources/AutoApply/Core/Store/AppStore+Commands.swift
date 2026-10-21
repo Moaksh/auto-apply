@@ -275,6 +275,49 @@ extension AppStore {
         return true
     }
 
+    /// Board: a card dropped on Queued (discovered / scored / skipped / failed → queued). The agent
+    /// starts on it right away unless paused. Returns true on ack.
+    @discardableResult
+    func queueApplication(applicationID: Int) async -> Bool {
+        struct Reply: Decodable { var started: Bool }
+        let previous = jobs.job(applicationID: applicationID)
+        let result = await perform(
+            .queueApplication(QueueApplicationPayload(applicationId: applicationID, applyNow: true)),
+            optimistic: { [jobs] in jobs.mutate(applicationID: applicationID) { $0.state = .queued; $0.stateReason = "user_queued" } },
+            rollback: { [jobs] in
+                jobs.mutate(applicationID: applicationID) { $0.state = previous?.state ?? .discovered; $0.stateReason = previous?.stateReason }
+            })
+        guard case .success(let reply) = result else { return false }
+        var started = false
+        if case .ack(let ack) = reply.event { started = (try? JSONValue.object(ack.result ?? [:]).decode(Reply.self))?.started ?? false }
+        toasts.show(started ? "Queued · the agent is applying now" : "Queued · the agent applies when it resumes",
+                    symbol: "paperplane.fill", style: .success)
+        return true
+    }
+
+    /// Board: "I applied myself" — a job the agent never submitted, dropped on Applied or a later
+    /// column. It becomes a manual application with that board status. Returns true on ack.
+    @discardableResult
+    func markApplied(applicationID: Int, status: BoardStatus) async -> Bool {
+        let previous = jobs.job(applicationID: applicationID)
+        let result = await perform(
+            .markApplied(MarkAppliedPayload(applicationId: applicationID, status: status)),
+            optimistic: { [jobs] in
+                jobs.mutate(applicationID: applicationID) {
+                    $0.state = .submitted; $0.stateReason = "user_applied"; $0.status = status; $0.statusUpdatedAt = Date()
+                }
+            },
+            rollback: { [jobs] in
+                jobs.mutate(applicationID: applicationID) {
+                    $0.state = previous?.state ?? .discovered; $0.stateReason = previous?.stateReason; $0.status = previous?.status
+                }
+            })
+        guard case .success = result else { return false }
+        toasts.show(status == .applied ? "Marked as applied by you" : "Marked as applied · moved to \(status.label)",
+                    symbol: StatusKind(status: status).symbol, style: .success)
+        return true
+    }
+
     struct AddedJob: Decodable, Sendable, Equatable {
         var jobId: Int
         var applicationId: Int
@@ -444,6 +487,44 @@ extension AppStore {
 
     func clearMailAccount() async -> MailAccountStatus? {
         await performResult(.clearMailAccount(ClearMailAccountPayload()), as: MailAccountStatus.self, timeout: .seconds(15))
+    }
+
+    /// A job-site account the agent created (Settings ▸ Guardrails). Passwords stay in the Keychain;
+    /// `revealSiteAccountPassword` reads one on demand.
+    struct SiteAccount: Codable, Equatable, Sendable, Identifiable {
+        var host: String
+        var email: String?
+        var company: String?
+        var status: String?
+        var createdAt: String?
+        var updatedAt: String?
+        var id: String { host }
+
+        enum CodingKeys: String, CodingKey {
+            case host, email, company, status
+            case createdAt = "created_at"
+            case updatedAt = "updated_at"
+        }
+    }
+
+    struct SiteAccountList: Codable, Equatable, Sendable {
+        var accounts: [SiteAccount]
+        var enabled: Bool
+    }
+
+    func listSiteAccounts() async -> SiteAccountList? {
+        await performResult(.listSiteAccounts(ListSiteAccountsPayload()), as: SiteAccountList.self, timeout: .seconds(10), silent: true)
+    }
+
+    func revealSiteAccountPassword(host: String) async -> String? {
+        struct Reply: Decodable { var password: String }
+        return await performResult(.revealSiteAccountPassword(RevealSiteAccountPasswordPayload(host: host)), as: Reply.self,
+                                   timeout: .seconds(15))?.password
+    }
+
+    func deleteSiteAccount(host: String) async -> Bool {
+        if case .success = await perform(.deleteSiteAccount(DeleteSiteAccountPayload(host: host)), timeout: .seconds(15)) { return true }
+        return false
     }
 
     /// Settings: zero today's LinkedIn/Glassdoor browsing-session counter. The daemon answers with a

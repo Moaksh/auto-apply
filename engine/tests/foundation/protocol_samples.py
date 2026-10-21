@@ -116,6 +116,11 @@ def samples() -> list[Envelope]:
     c("get_mail_account", {"test": False})
     c("suggest_preferences", {})
     c("clear_mail_account", {})
+    c("list_site_accounts", {})
+    c("reveal_site_account_password", {"host": "acme.wd5.myworkdayjobs.com"})
+    c("delete_site_account", {"host": "acme.wd5.myworkdayjobs.com"})
+    c("queue_application", {"application_id": 7, "apply_now": True})
+    c("mark_applied", {"application_id": 7, "status": "interview"})
     c("onboarding_set_step", {"step": 3})
     c("onboarding_complete", {"run_prep": True})
 

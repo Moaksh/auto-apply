@@ -33,18 +33,31 @@ struct BoardRulesTests {
         #expect(ids(PipelineFilter(searchText: "nope")) == [])
     }
 
-    @Test func onlySubmittedJobsDropOnOtherUserColumns() {
+    @Test func dropRulesByState() {
         let applied = C2.job(id: 1, state: .submitted, status: nil)
         let queued = C2.job(id: 2, state: .queued)
         let needsYou = C2.job(id: 3, state: .needsYou)
+        let filling = C2.job(id: 4, state: .filling)
+        var skipped = C2.job(id: 5, state: .skipped)
+        skipped.applyURL = "https://boards.greenhouse.io/stripe/jobs/1"
+        var easy = C2.job(id: 6, state: .scored)
+        easy.easyApply = true
+        // submitted: moves between post-apply statuses only
         #expect(BoardRules.isDraggable(applied))
-        #expect(!BoardRules.isDraggable(queued) && !BoardRules.isDraggable(needsYou))
         #expect(BoardRules.canDrop(applied, on: .interview))
         #expect(!BoardRules.canDrop(applied, on: .applied), "nil status counts as Applied")
-        #expect(!BoardRules.canDrop(applied, on: .queued), "agent-owned column")
-        #expect(!BoardRules.canDrop(applied, on: .needsYou))
-        #expect(!BoardRules.canDrop(queued, on: .applied), "the agent owns Queued → Applied")
+        #expect(!BoardRules.canDrop(applied, on: .queued) && !BoardRules.canDrop(applied, on: .needsYou))
         #expect(BoardRules.legalTargets(for: applied) == [.assessment, .interview, .offer, .rejected, .ghosted])
+        // not applied yet: Queued = the agent applies (needs a company form); Applied and later = applied by you
+        #expect(BoardRules.dropAction(skipped, on: .queued) == .queue)
+        #expect(BoardRules.dropAction(skipped, on: .ghosted) == .markApplied(.ghosted))
+        #expect(BoardRules.dropAction(easy, on: .queued) == nil, "Easy Apply has no form for the agent")
+        #expect(BoardRules.dropAction(easy, on: .applied) == .markApplied(.applied))
+        #expect(BoardRules.dropAction(queued, on: .interview) == .markApplied(.interview))
+        #expect(BoardRules.dropAction(needsYou, on: .applied) == .markApplied(.applied))
+        #expect(!BoardRules.canDrop(queued, on: .queued) && !BoardRules.canDrop(needsYou, on: .queued))
+        // the agent is working on it: hands off
+        #expect(!BoardRules.isDraggable(filling))
         #expect(BoardRules.legalTargets(for: queued).isEmpty)
     }
 
@@ -201,11 +214,13 @@ struct BoardModelTests {
     }
 
     @Test func illegalMovesNeverReachTheDaemon() async {
-        let (model, _, daemon) = makeModel(jobs: [C2.job(id: 1, state: .queued), C2.job(id: 2, state: .submitted, status: .offer)])
+        let (model, _, daemon) = makeModel(jobs: [C2.job(id: 1, state: .filling), C2.job(id: 2, state: .submitted, status: .offer),
+                                                   C2.job(id: 3, state: .queued)])
         #expect(await model.move(jobID: 1, to: .interview) == false)
+        #expect(await model.move(jobID: 3, to: .interview) == false, "not applied yet: that's \"applied by you\", not a status move")
         #expect(await model.move(jobID: 2, to: .offer) == false, "same column")
         #expect(await model.move(jobID: 99, to: .offer) == false)
-        #expect(model.performDrop(payload: BoardModel.payload(for: 1), on: .applied, undoManager: nil) == false)
+        #expect(model.performDrop(payload: BoardModel.payload(for: 1), on: .applied, undoManager: nil) == false, "the agent is filling it")
         #expect(model.performDrop(payload: "garbage", on: .interview, undoManager: nil) == false)
         #expect(daemon.sent.isEmpty)
     }
@@ -262,5 +277,33 @@ struct BoardModelTests {
         #expect(store.toasts.current == nil, "first visit only stamps")
         model.announceGhostedSinceLastVisit(now: Samples.now.addingTimeInterval(60))
         #expect(store.toasts.current?.message == "Moved 1 to Ghosted · 21 days without reply")
+    }
+}
+
+@MainActor
+@Suite("Board · queue & applied by you")
+struct BoardQueueAndManualTests {
+    @Test func dropOnQueuedHandsTheJobToTheAgent() async {
+        var job = C2.job(id: 7, state: .skipped)
+        job.applyURL = "https://boards.greenhouse.io/stripe/jobs/7"
+        let (store, daemon) = C2.store(jobs: [job])
+        let model = BoardModel(store: store)
+        model.beginDrag(jobID: 7)
+        #expect(model.performDrop(payload: BoardModel.payload(for: 7), on: .queued, undoManager: nil))
+        #expect(await waitUntil { daemon.sent.contains { if case .queueApplication(let p) = $0 { p.applicationId == 7 && p.applyNow } else { false } } })
+        #expect(store.jobs.job(id: 7)?.state == .queued)
+    }
+
+    @Test func applyingYourselfAsksFirst() async {
+        let (store, daemon) = C2.store(jobs: [C2.job(id: 8, state: .queued)])
+        let model = BoardModel(store: store)
+        model.beginDrag(jobID: 8)
+        #expect(model.performDrop(payload: BoardModel.payload(for: 8), on: .interview, undoManager: nil))
+        #expect(model.pendingManualApply == BoardModel.ManualApply(jobID: 8, status: .interview))
+        #expect(daemon.sent.isEmpty, "nothing is sent before the OK")
+        #expect(await model.confirmManualApply())
+        #expect(daemon.sent.contains { if case .markApplied(let p) = $0 { p.applicationId == 8 && p.status == .interview } else { false } })
+        #expect(store.jobs.job(id: 8)?.state == .submitted && store.jobs.job(id: 8)?.status == .interview)
+        #expect(model.pendingManualApply == nil)
     }
 }

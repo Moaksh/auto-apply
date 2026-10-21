@@ -70,6 +70,10 @@ struct MenuBarPanel: View {
                 .help(store.isPaused ? "Resume agent" : "Pause agent (kill switch)")
                 .disabled(!store.isConnected)
             }
+            .padding(Space.m)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // Header band on the live brand field (pauses with the popover's window).
+            .brandHeroBand(cornerRadius: Radius.palette - Space.xs)
 
             if store.live.isRunning || store.live.frame != nil || store.live.lastSubmittedFrame != nil {
                 LiveThumbnail(frame: store.live.frame ?? store.live.lastSubmittedFrame,

@@ -1,6 +1,6 @@
 // WindowVisibility.swift — pauses Canvas/TimelineView work when the hosting window is
 // occluded or the app is hidden (§2.7 "Charts and the Canvas pause when the window is
-// occluded"). Used by the Dashboard hero and heatmap.
+// occluded"). Used by the Dashboard hero, heatmap and `BrandGradientField`.
 import AppKit
 import SwiftUI
 

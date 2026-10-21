@@ -31,7 +31,7 @@ struct StoryBankView: View {
             if model.stories.isEmpty && model.draft == nil {
                 EmptyState(symbol: "text.book.closed", title: "Add your first story",
                            message: "Stories make “why” and “tell us about a time” answers sound like you.",
-                           actionTitle: "Import from text") { model.isImporting = true }
+                           actionTitle: "Import from text", prominent: true) { model.isImporting = true }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 HStack(spacing: 0) {

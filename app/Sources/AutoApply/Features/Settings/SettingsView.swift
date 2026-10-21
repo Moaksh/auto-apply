@@ -130,7 +130,7 @@ struct SettingsRow<Content: View>: View {
 private struct GeneralSettingsTab: View {
     @AppStorage(AppDelegate.showInDockKey) private var showInDock = true
     @AppStorage(GeneralSettings.menuBarCounterKey) private var menuBarCounter = true
-    @AppStorage(GeneralSettings.soundsKey) private var sounds = false
+    @AppStorage(GeneralSettings.soundsKey) private var sounds = true
     @AppStorage(Haptics.settingsKey) private var haptics = true
     @State private var launchAtLogin = GeneralSettings.launchAtLogin
     @State private var loginError: String?

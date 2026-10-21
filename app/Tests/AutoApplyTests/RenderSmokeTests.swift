@@ -40,6 +40,32 @@ struct RenderSmokeTests {
         return store
     }
 
+    @Test func brandFieldAndProminentEmptyStateRender() {
+        // The mesh never folds: every drifting point stays inside the unit square.
+        for t in stride(from: 0.0, through: 600, by: 7.3) {
+            let points = BrandMesh.points(at: t)
+            #expect(points.count == 9 && BrandMesh.colors(at: t).count == 9)
+            #expect(points.allSatisfy { (0...1).contains($0.x) && (0...1).contains($0.y) })
+        }
+        for scheme in [ColorScheme.light, .dark] {
+            for reduce in [true, false] {
+                let image = render("brand-field-\(reduce ? "static" : "live")", width: 720, scheme: scheme) {
+                    VStack(spacing: Space.l) {
+                        Text("Good morning.").heroDisplayStyle()
+                            .padding(Space.xl)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .brandHeroBand()
+                        EmptyState(symbol: "checkmark.rectangle.stack", title: "Nothing to review",
+                                   message: "Filled applications wait here.", actionTitle: "Open board", prominent: true) {}
+                    }
+                    .padding()
+                    .motionEnvironment(simulateReduceMotion: reduce)
+                }
+                #expect(image != nil)
+            }
+        }
+    }
+
     @Test func componentGalleryRenders() {
         for scheme in [ColorScheme.light, .dark] {
             let image = render("components", width: 720, scheme: scheme) {

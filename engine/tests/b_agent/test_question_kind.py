@@ -189,7 +189,7 @@ def test_v8_migration_classifies_already_open_rows(conn):
     # rows from before v8: everything a "question", all in one (bad) cluster
     conn.execute("DELETE FROM schema_version WHERE version = 8")
     db._migrate_v8(conn)
-    assert db.current_schema_version(conn) == 8
+    assert conn.execute("SELECT 1 FROM schema_version WHERE version = 8").fetchone() is not None
     kinds = {q.canonical_question: (q.kind, q.cluster_id) for q in db.list_questions(conn)}
     assert kinds["Years of Go?"] == (QuestionKind.QUESTION, shared)
     assert kinds["Choose Password"][0] is QuestionKind.ACTION

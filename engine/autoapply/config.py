@@ -82,6 +82,11 @@ class Preferences(BaseModel):
     parallel_applications: int = Field(
         default=3, ge=1, le=4, description="Applications prepped / filled at the same time (one agent + browser each)."
     )
+    create_accounts: bool = Field(
+        default=True,
+        description="Let the agent create (or reset the password of) an account on job sites that require one, "
+                    "using the connected mailbox for verification emails. Passwords live in the macOS Keychain.",
+    )
     sources_enabled: dict[str, bool] = Field(default_factory=_default_sources)
     career_page_urls: list[str] = Field(default_factory=list)
     always_ask_patterns: list[str] = Field(

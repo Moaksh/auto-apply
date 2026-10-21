@@ -168,6 +168,8 @@ struct GuardrailsSettingsTab: View {
         SettingsRow("Always ask about", help: "Questions matching these phrases always come to Needs You, even when the agent knows an answer.") {
             ChipField(values: $model.preferencesDraft.alwaysAskPatterns, placeholder: "+ phrase (e.g. criminal record)")
         }
+        Divider()
+        SiteAccountsSection(createAccounts: $model.preferencesDraft.createAccounts)
     }
 
     private var confidenceHelp: String {

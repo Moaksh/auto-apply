@@ -53,6 +53,17 @@ struct BoardView: View {
         }
         .background(Palette.windowBackground)
         .onAppear { model.announceGhostedSinceLastVisit() }
+        .confirmationDialog(manualApplyTitle, isPresented: Binding(
+            get: { model.pendingManualApply != nil }, set: { if !$0 { model.pendingManualApply = nil } }),
+                            titleVisibility: .visible) {
+            Button(model.pendingManualApply?.status == .applied ? "Mark as Applied"
+                   : "Mark as Applied · \(model.pendingManualApply?.status.label ?? "")") {
+                Task { await model.confirmManualApply() }
+            }
+            Button("Cancel", role: .cancel) { model.pendingManualApply = nil }
+        } message: {
+            Text("The agent won't apply to it. It's recorded as your own application, so it counts toward cooldowns, and you can keep moving it between statuses.")
+        }
         .task {
             // Ages ("3d") and nudges refresh once a minute; nothing else ticks.
             while !Task.isCancelled {
@@ -64,6 +75,11 @@ struct BoardView: View {
             // Hover events resume only after a drag session ends: clear a cancelled drag.
             if model.draggingJobID != nil { model.endDrag() }
         }
+    }
+
+    private var manualApplyTitle: String {
+        guard let job = model.pendingManualApply.flatMap({ store.jobs.job(id: $0.jobID) }) else { return "Applied yourself?" }
+        return "Did you apply to \(job.company) yourself?"
     }
 
     // MARK: Header
@@ -156,7 +172,7 @@ struct BoardView: View {
         } else if store.jobs.all.isEmpty {
             EmptyState(symbol: "rectangle.split.3x1", title: "No jobs yet",
                        message: "Jobs appear here as soon as the agent discovers them.",
-                       actionTitle: store.isConnected ? "Run now" : nil) { Task { await store.runNow() } }
+                       actionTitle: store.isConnected ? "Run now" : nil, prominent: true) { Task { await store.runNow() } }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if mode == .table {
             tableView(filter: filter)

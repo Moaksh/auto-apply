@@ -31,7 +31,8 @@ struct ReviewQueueView: View {
                 EmptyState(symbol: "checkmark.rectangle.stack", title: "Nothing to review",
                            message: store.mode == .review
                                ? "Filled applications wait here for your OK before they're submitted."
-                               : "You're in Auto mode. Jobs only land here for ATSes or jobs set to Review.")
+                               : "You're in Auto mode. Jobs only land here for ATSes or jobs set to Review.",
+                           prominent: true)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 HStack(spacing: 0) {
