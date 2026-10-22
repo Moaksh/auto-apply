@@ -16,6 +16,10 @@ final class ToastCenter {
         var duration: Duration = .milliseconds(1200)
         var actionTitle: String?
         var action: (@MainActor () -> Void)?
+        /// Draw a ring that drains over `duration` (an Undo window that's really held).
+        var countdown = false
+        /// When it went on screen (the ring's clock); set on present.
+        var presentedAt: Date?
 
         static func == (a: Toast, b: Toast) -> Bool { a.id == b.id }
     }
@@ -27,9 +31,10 @@ final class ToastCenter {
     init() {}
 
     func show(_ message: String, symbol: String? = nil, style: Toast.Style = .info,
-              duration: Duration = .milliseconds(1200), actionTitle: String? = nil,
+              duration: Duration = .milliseconds(1200), actionTitle: String? = nil, countdown: Bool = false,
               action: (@MainActor () -> Void)? = nil) {
-        enqueue(Toast(message: message, symbol: symbol, style: style, duration: duration, actionTitle: actionTitle, action: action))
+        enqueue(Toast(message: message, symbol: symbol, style: style, duration: duration, actionTitle: actionTitle, action: action,
+                      countdown: countdown))
     }
 
     func error(_ message: String) {
@@ -67,6 +72,8 @@ final class ToastCenter {
     }
 
     private func present(_ toast: Toast) {
+        var toast = toast
+        toast.presentedAt = Date()
         current = toast
         dismissTask?.cancel()
         let id = toast.id

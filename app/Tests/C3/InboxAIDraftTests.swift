@@ -1,7 +1,9 @@
-// InboxAIDraftTests.swift — the agent's stored draft starts in the editor (and the "drafted
-// something" line never shows without one), and "Draft with AI" / "Tell the agent what to
-// change…": draft, revise with instructions, Undo, errors, the not-grounded warning, which
-// questions offer it, that nothing is ever answered by it, and the mock agent end to end.
+// InboxAIDraftTests.swift — the agent's stored draft shows as ghost text over the empty editor
+// (and the "drafted something" line never shows without one), and "Draft with AI" / "Tell the
+// agent what to change…": draft (a ghost over an empty editor), revise with instructions, Undo,
+// errors, the not-grounded warning and its Tab-then-confirm, which questions offer it, that
+// nothing is ever answered by it, and the mock agent end to end. Ghost text itself (Tab, typing,
+// Esc) is covered in InboxGhostDraftTests.swift.
 import Foundation
 import Testing
 @testable import AutoApply
@@ -41,14 +43,16 @@ struct InboxAIDraftTests {
 
     // MARK: The stored draft (the bug)
 
-    @Test func storedDraftStartsInTheEditorForTypedAnswersOnly() {
+    @Test func storedDraftIsGhostTextForTypedAnswersOnly() {
+        // The editor starts empty: the stored draft is offered as ghost text, never pre-typed.
         let text = Self.longText(suggestion: "  I have worked remotely for three years.  ", confidence: 0.55)
-        #expect(AnswerDraft(cluster: text).text == "I have worked remotely for three years.")
+        #expect(AnswerDraft(cluster: text).text.isEmpty)
         #expect(AnswerDraft.prefill(for: text) == "I have worked remotely for three years.")
 
         var short = C3Fixtures.cluster("s", jobs: [1], question: "Preferred name?")
         short.suggestedAnswer = "Asha"
-        #expect(AnswerDraft(cluster: short).text == "Asha")
+        #expect(AnswerDraft(cluster: short).text.isEmpty)
+        #expect(AnswerDraft.prefill(for: short) == "Asha")
 
         // A guessed option stays one click away instead of pre-picked.
         var choice = C3Fixtures.cluster("c", jobs: [1], question: "Willing to work PST hours?", fieldType: .boolean)
@@ -69,7 +73,17 @@ struct InboxAIDraftTests {
     }
 
     @Test func answeringTheStoredDraftSendsIt() async throws {
-        let (_, daemon, model) = await setup([Self.longText(suggestion: "I have worked remotely for three years.")])
+        let (_, daemon, model) = await setup([Self.longText(suggestion: "I have worked remotely for three years.", confidence: 0.55)])
+        let cluster = try #require(model.selectedCluster)
+        let ghost = try #require(model.ghost(for: cluster))
+        #expect(ghost.text == "I have worked remotely for three years.")
+        #expect(ghost.source == .stored(confidence: 0.55) && ghost.chip == "Agent's draft · 55% sure")
+        // A ghost isn't an answer until it's taken.
+        #expect(!model.submitSelected())
+        #expect(model.validationMessage == "Press Tab to use the draft, or type your answer.")
+        #expect(model.acceptGhost(for: cluster) == .accepted)
+        #expect(model.draft(for: cluster).text == "I have worked remotely for three years.")
+        #expect(model.ghost(for: cluster) == nil)
         #expect(model.submitSelected())
         #expect(await c3WaitUntil { daemon.sent("answer_question").count == 1 })
         #expect(daemon.sent("answer_question").first?.answerPayload?.answer == "I have worked remotely for three years.")
@@ -104,13 +118,15 @@ struct InboxAIDraftTests {
         }
         let cluster = try #require(model.selectedCluster)
 
-        // Draft with AI fills the empty editor; nothing to undo yet.
+        // Draft with AI over the empty editor is a ghost (Tab takes it); nothing to undo yet.
         box.next = "At Razorpay I worked across three time zones and wrote everything down."
         await model.draftWithAI(for: cluster)
         guard case .draftAnswer(let first)? = daemon.sent("draft_answer").last else { Issue.record("no draft_answer"); return }
         #expect(first.clusterId == "async" && first.instructions == nil && first.currentAnswer == nil)
-        #expect(model.draft(for: cluster).text == box.next)
-        #expect(model.aiDraft(for: cluster).versions.isEmpty)
+        #expect(model.draft(for: cluster).text.isEmpty)
+        #expect(model.ghost(for: cluster)?.text == box.next)
+        #expect(model.ghost(for: cluster)?.chip == "Draft · from your profile and your resume")
+        #expect(model.aiDraft(for: cluster).versions.isEmpty && !model.aiDraft(for: cluster).canUndo)
         #expect(model.aiDraft(for: cluster).result?.sources == ["Profile", "Resume"])
         #expect(model.aiDraft(for: cluster).phase == .idle)
 
@@ -161,7 +177,8 @@ struct InboxAIDraftTests {
         await model.reviseWithAI(for: cluster)
         guard case .draftAnswer(let p)? = daemon.sent("draft_answer").last else { Issue.record("no draft"); return }
         #expect(p.instructions == "I led a team of 5" && p.currentAnswer == nil)
-        #expect(model.draft(for: cluster).text == "I led a team of 5 across time zones.")
+        #expect(model.draft(for: cluster).text.isEmpty)
+        #expect(model.ghost(for: cluster)?.text == "I led a team of 5 across time zones.")
     }
 
     @Test func errorsKeepTheTextAndSayWhy() async throws {
@@ -194,7 +211,17 @@ struct InboxAIDraftTests {
         }
         let cluster = try #require(model.selectedCluster)
         await model.draftWithAI(for: cluster)
+        // The ghost says so in coral and can't be taken with one Tab.
+        let ghost = try #require(model.ghost(for: cluster))
+        #expect(!ghost.grounded && ghost.unsupportedClaims == ["Google", "12"])
+        #expect(ghost.chip == "Draft · not from your facts")
+        #expect(model.acceptGhost(for: cluster) == .needsConfirmation)
+        #expect(model.draft(for: cluster).text.isEmpty && model.aiDraft(for: cluster).confirmingUngrounded)
+        #expect(GhostDraftBar.warning(ghost, confirming: true).contains("Not in your facts: Google, 12."))
+        #expect(model.acceptGhost(for: cluster) == .accepted)
         let text = model.draft(for: cluster).text
+        #expect(text == "At Google I led 12 engineers.")
+        // Taken, it keeps warning until the claims are gone from the text.
         #expect(model.aiDraft(for: cluster).unsupportedClaims(in: text) == ["Google", "12"])
         model.updateDraft(for: cluster) { $0.text = "At Google I led the platform team." }
         #expect(model.aiDraft(for: cluster).unsupportedClaims(in: model.draft(for: cluster).text) == ["Google"])
@@ -228,14 +255,16 @@ struct InboxAIDraftTests {
         await model.draftWithAI(for: why)
         let first = try #require(model.aiDraft(for: why).result)
         #expect(!first.answer.isEmpty && first.grounded && first.sources.first == "Profile")
-        #expect(model.draft(for: why).text == first.answer)
+        #expect(model.ghost(for: why)?.text == first.answer)
 
+        // A rewrite of the ghost sends the ghost and comes back as a ghost; Undo goes back to the first.
         model.updateAIDraft(for: why) { $0.instruction = "Add a metric" }
         await model.reviseWithAI(for: why)
         let revised = try #require(model.aiDraft(for: why).result)
         #expect(!revised.grounded && revised.unsupportedClaims == ["30%"])
-        #expect(model.aiDraft(for: why).unsupportedClaims(in: model.draft(for: why).text) == ["30%"])
-        #expect(model.undoAIDraft(for: why) && model.draft(for: why).text == first.answer)
+        #expect(model.ghost(for: why)?.unsupportedClaims == ["30%"])
+        #expect(model.undoAIDraft(for: why) && model.ghost(for: why)?.text == first.answer)
+        #expect(model.draft(for: why).text.isEmpty)
 
         // The mock refuses never-guess questions like the agent.
         let locked = MockScripts.cluster(MockScripts.clusterTemplates[1], jobs: Array(store.jobs.all.prefix(1)), now: Date(),

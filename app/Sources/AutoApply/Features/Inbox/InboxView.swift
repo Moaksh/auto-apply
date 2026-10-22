@@ -316,6 +316,8 @@ struct AnswerComposer: View {
         InboxPaneScroll(embedded: embedded) {
             VStack(alignment: .leading, spacing: Space.l) {
                 questionHeader
+                // Who's waiting: these monograms fly to Pipeline when the answer goes out.
+                WaitingMonogramRow(model: model, cluster: cluster)
                 if draft.perJob {
                     perJobList
                 } else {
@@ -378,8 +380,9 @@ struct AnswerComposer: View {
                         .help("What the agent couldn't find in your profile. Add it to your answer, or to your profile so future drafts include it.")
                 }
                 if AnswerDraft.prefill(for: cluster) != nil {
-                    // Typed answers: the draft is already in the editor below; say whose it is.
-                    agentDraftLabel(suggestion)
+                    // Typed answers: the draft is ghost text in the editor below (its chip says
+                    // whose it is). Once it's taken, edited or cleared, this line says so.
+                    if model.ghost(for: cluster) == nil { agentDraftLabel(suggestion) }
                 } else {
                     // Choices and yes/no: shown here, one click to use.
                     VStack(alignment: .leading, spacing: Space.xs) {
@@ -454,20 +457,23 @@ struct AnswerComposer: View {
         }
     }
 
-    /// "Agent's draft · 62% sure" above an editor that starts with the agent's stored draft.
+    /// "Agent's draft · 62% sure" once its ghost is gone: taken, edited, or cleared with Esc.
     private func agentDraftLabel(_ suggestion: String) -> some View {
-        HStack(spacing: Space.s) {
+        let empty = draft.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        return HStack(spacing: Space.s) {
             Text("Agent's draft").eyebrowStyle()
             confidenceText
             Text(draft.text == suggestion ? "It wasn't sure enough to send this. Check it before answering."
-                                          : "You've edited the agent's draft.")
+                                          : empty ? "Cleared." : "You've edited the agent's draft.")
                 .font(Typography.callout).foregroundStyle(Palette.textSecondary)
             Spacer()
             if draft.text != suggestion {
-                Button("Restore draft") { useSuggestion(suggestion) }
-                    .buttonStyle(.secondaryLink)
-                    .font(Typography.callout)
-                    .help("Put the agent's draft back in the answer box")
+                Button("Restore draft") {
+                    if empty { model.restoreGhost(for: cluster) } else { useSuggestion(suggestion) }
+                }
+                .buttonStyle(.secondaryLink)
+                .font(Typography.callout)
+                .help(empty ? "Show the agent's draft again" : "Put the agent's draft back in the answer box")
             }
         }
     }
@@ -518,8 +524,18 @@ struct AnswerComposer: View {
                     .scrollContentBackground(.hidden)
                     .padding(Space.s)
                     .frame(minHeight: 140)
+                    .overlay(alignment: .topLeading) {
+                        if let ghost = model.ghost(for: cluster) {
+                            // The text view's own inset: 5pt line-fragment padding inside our padding.
+                            GhostText(ghost: ghost)
+                                .padding(.leading, Space.s + 5)
+                                .padding(.trailing, Space.s)
+                                .padding(.vertical, Space.s)
+                        }
+                    }
                     .well()
                     .focused($editorFocused)
+                    .accessibilityHint(model.ghost(for: cluster).map { "Draft available. Press Tab to use it: \($0.text)" } ?? "")
                 HStack(spacing: Space.xs) {
                     tokenButton("{company}")
                     tokenButton("{role}")
@@ -530,12 +546,24 @@ struct AnswerComposer: View {
         case .action:
             EmptyView()  // agent blockers use ActionPane
         default:
-            TextField(placeholder, text: textBinding)
+            let ghost = model.ghost(for: cluster)
+            TextField(ghost == nil ? placeholder : "", text: textBinding)
                 .textFieldStyle(.roundedBorder)
                 .font(Typography.body)
+                .overlay(alignment: .leading) {
+                    if let ghost {
+                        GhostText(ghost: ghost, lineLimit: 1).padding(.horizontal, 5)
+                    }
+                }
                 .frame(maxWidth: kind == .number ? 200 : 460)
                 .focused($editorFocused)
                 .onSubmit { model.submitSelected(undoManager: undoManager) }
+                .accessibilityHint(ghost.map { "Draft available. Press Tab to use it: \($0.text)" } ?? "")
+        }
+        if let ghost = model.ghost(for: cluster), kind != .action {
+            GhostDraftBar(model: model, cluster: cluster, ghost: ghost)
+                .frame(maxWidth: kind == .longText ? .infinity : 460)
+                .transition(.opacity)
         }
         if model.supportsAIDraft(cluster) && !draft.perJob {
             AIDraftControls(model: model, cluster: cluster)
@@ -914,7 +942,9 @@ struct ActionPane: View {
     private var affectedJobs: some View {
         if !jobs.isEmpty {
             VStack(alignment: .leading, spacing: Space.xs) {
-                Text("\(C3Format.plural(cluster.jobCount, "job")) waiting on this").eyebrowStyle()
+                // Who's waiting: these monograms fly to Pipeline on "Done, try again".
+                WaitingMonogramRow(model: model, cluster: cluster)
+                    .padding(.bottom, Space.xxs)
                 ForEach(jobs.prefix(6)) { job in
                     Button { store.router.openJob(id: job.id) } label: {
                         HStack(spacing: Space.xs) {

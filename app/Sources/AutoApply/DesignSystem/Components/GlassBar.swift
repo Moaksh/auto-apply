@@ -31,6 +31,9 @@ struct HUDToast: View {
                 Text(toast.message).font(Typography.body)
             }
             if let actionTitle = toast.actionTitle {
+                if toast.countdown, let start = toast.presentedAt {
+                    UndoRing(start: start, duration: toast.duration)
+                }
                 Button(actionTitle, action: onAction)
                     .buttonStyle(.secondaryLink)
                     .font(Typography.bodyEmph)
@@ -47,6 +50,37 @@ struct HUDToast: View {
         case .warning: Palette.needsYou
         case .error: Palette.error
         }
+    }
+}
+
+/// The draining ring beside a toast's Undo: full when the toast appears, empty when the window
+/// closes. Steps once a second under Reduce Motion.
+struct UndoRing: View {
+    var start: Date
+    var duration: Duration
+    var size: CGFloat = 14
+    @Environment(\.motionReduced) private var reduced
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: reduced ? 1 : 1.0 / 30)) { context in
+            let left = Self.remaining(start: start, duration: duration, now: context.date)
+            ZStack {
+                Circle().stroke(Palette.hairline, lineWidth: 2)
+                Circle()
+                    .trim(from: 0, to: left)
+                    .stroke(Palette.applied, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                    .rotationEffect(.degrees(-90))
+            }
+            .frame(width: size, height: size)
+        }
+        .accessibilityHidden(true)
+    }
+
+    /// Fraction of the window still open, 1 -> 0.
+    static func remaining(start: Date, duration: Duration, now: Date) -> Double {
+        let total = Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
+        guard total > 0 else { return 0 }
+        return min(1, max(0, 1 - now.timeIntervalSince(start) / total))
     }
 }
 

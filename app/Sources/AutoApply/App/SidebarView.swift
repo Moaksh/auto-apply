@@ -29,7 +29,8 @@ struct SidebarView: View {
     @ViewBuilder
     private func rows(_ section: SidebarItem.Section) -> some View {
         ForEach(section.items) { item in
-            SidebarRow(item: item, badge: badge(for: item), arrivalCount: item == .needsYou ? store.inbox.arrivalCount : 0)
+            SidebarRow(item: item, badge: badge(for: item), arrivalCount: item == .needsYou ? store.inbox.arrivalCount : 0,
+                       cascade: item == .pipeline ? InboxModel.shared(for: store) : nil)
                 .tag(item)
         }
     }
@@ -49,14 +50,24 @@ private struct SidebarRow: View {
     var item: SidebarItem
     var badge: Int
     var arrivalCount: Int
+    /// Pipeline only: Needs You's answer cascade lands here (Features/Inbox/AnswerCascade.swift).
+    var cascade: InboxModel?
     @Environment(\.motionReduced) private var reduced
 
     var body: some View {
         Label {
-            Text(item.title)
+            HStack(spacing: Space.xs) {
+                Text(item.title)
+                if let cascade {
+                    Spacer(minLength: 0)
+                    PipelineCascadeBadge(model: cascade)
+                }
+            }
         } icon: {
             Image(systemName: item.symbol)
                 .symbolEffect(.wiggle, options: .nonRepeating, value: reduced ? 0 : arrivalCount)
+                .symbolEffect(.bounce, options: .nonRepeating, value: reduced ? 0 : cascade?.cascadePulse ?? 0)
+                .background { if cascade != nil { CascadeAnchor(key: AnswerCascade.targetKey) } }
         }
         .badge(badge)
         .badgeProminence(item == .needsYou && badge > 0 ? .increased : .standard)

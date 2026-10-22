@@ -220,7 +220,8 @@ struct RenderSmokeTests {
                     .appEnvironment(store, simulateReduceMotion: true)
             } != nil)
         }
-        #expect(inbox.draft(for: stored).text == stored.suggestedAnswer, "the stored draft starts in the editor")
+        #expect(inbox.draft(for: stored).text.isEmpty, "the editor starts empty")
+        #expect(inbox.ghost(for: stored)?.text == stored.suggestedAnswer, "the stored draft is ghost text over it")
         await store.stop()
     }
 }

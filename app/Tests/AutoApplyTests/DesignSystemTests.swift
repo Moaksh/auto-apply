@@ -453,12 +453,17 @@ struct DesignSystemTests {
         }
         #expect(composerCount() == 1, "before drafting")
         await inbox.draftWithAI(for: why)
-        #expect(!inbox.draft(for: why).text.isEmpty)
-        #expect(composerCount() == 1, "drafted")
+        #expect(inbox.ghost(for: why) != nil)
+        #expect(composerCount() == 1, "drafted (ghost text)")
         inbox.updateAIDraft(for: why) { $0.instruction = "Add a metric" }
         await inbox.reviseWithAI(for: why)
+        #expect(inbox.ghost(for: why)?.grounded == false)
+        #expect(composerCount() == 1, "not grounded (ghost)")
+        #expect(inbox.acceptGhost(for: why) == .needsConfirmation)
+        #expect(composerCount() == 1, "not grounded, confirming")
+        #expect(inbox.acceptGhost(for: why) == .accepted)
         #expect(!inbox.aiDraft(for: why).unsupportedClaims(in: inbox.draft(for: why).text).isEmpty)
-        #expect(composerCount() == 1, "not grounded")
+        #expect(composerCount() == 1, "not grounded, taken")
         inbox.updateAIDraft(for: why) { $0.phase = .drafting(revising: true) }
         #expect(composerCount() == 1, "drafting")
         inbox.updateAIDraft(for: why) { $0.phase = .failed("The agent took too long to write a draft. Try again.") }

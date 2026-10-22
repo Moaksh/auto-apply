@@ -67,13 +67,12 @@ struct AnswerDraft: Equatable, Sendable {
         let isNeverGuess = cluster.neverGuessKey != nil || cluster.reason == .neverGuess
         saveToProfile = isNeverGuess && cluster.neverGuessKey != nil
         saveToMemory = !saveToProfile && !cluster.isAction
-        // The agent's stored draft starts in the editor (labelled as its draft) for typed answers.
-        // Choice and yes/no questions keep it one click away instead: a pre-picked guess is too
-        // easy to send without reading.
-        if let suggestion = Self.prefill(for: cluster) { text = suggestion }
+        // The editor starts empty: the agent's stored draft shows as ghost text over it (Tab takes
+        // it, see `InboxModel.ghost(for:)`), never as if the user had typed it. Choice and yes/no
+        // questions keep it one click away instead: a pre-picked guess is too easy to send unread.
     }
 
-    /// The agent's stored draft when it belongs in a text editor, else nil.
+    /// The agent's stored draft when it belongs in a text editor (shown as ghost text), else nil.
     static func prefill(for cluster: QuestionCluster) -> String? {
         guard let s = cluster.suggestedAnswer?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
         switch AnswerKind(cluster: cluster) {
@@ -102,6 +101,15 @@ struct AIDraftState: Equatable, Sendable {
     var versions: [String] = []
     /// The last result (grounding, sources); nil after Undo.
     var result: DraftAnswerResult?
+    /// The last result is ghost text over an empty editor, not yet taken (Tab takes it).
+    var resultIsGhost = false
+    /// Esc cleared the ghost (the agent's stored draft or an AI draft); a new draft brings it back.
+    var ghostDismissed = false
+    /// Tab was pressed once on a ghost that isn't grounded: its warning shows, and only a second
+    /// Tab (or ⌥Tab / "Use anyway") takes it.
+    var confirmingUngrounded = false
+    /// Earlier ghost drafts replaced by a rewrite, oldest first ("Undo" pops the last).
+    var ghostVersions: [DraftAnswerResult] = []
 
     static let historyLimit = 8
     static let versionLimit = 20
@@ -110,11 +118,72 @@ struct AIDraftState: Equatable, Sendable {
 
     var errorMessage: String? { if case .failed(let m) = phase { m } else { nil } }
 
+    /// Undo has something to go back to: an editor text the agent replaced, or an earlier ghost.
+    var canUndo: Bool { !versions.isEmpty || (resultIsGhost && !ghostVersions.isEmpty) }
+
     /// Unsupported claims still present in `text` (a claim the user already removed stops warning).
+    /// A ghost that hasn't been taken warns through `GhostDraft` instead.
     func unsupportedClaims(in text: String) -> [String] {
-        guard let result, !result.grounded else { return [] }
+        guard let result, !result.grounded, !resultIsGhost else { return [] }
         return result.unsupportedClaims.filter { text.range(of: $0, options: .caseInsensitive) != nil }
     }
+}
+
+/// A draft shown as ghost text over an empty editor (docs/DESIGN_AWARD_VISION.md 1D): tinted,
+/// labelled with where it came from, taken with Tab. One that isn't grounded in the user's facts
+/// says so and needs a second Tab (or ⌥Tab) to take.
+struct GhostDraft: Equatable, Sendable {
+    enum Source: Equatable, Sendable {
+        /// The agent's stored draft from the form pass (`suggested_answer`).
+        case stored(confidence: Double?)
+        /// "Draft with AI" / a rewrite, with what it used.
+        case drafted(sources: [String])
+    }
+
+    var text: String
+    var source: Source
+    var grounded: Bool
+    var unsupportedClaims: [String]
+
+    /// The provenance chip under the ghost.
+    var chip: String {
+        switch source {
+        case .stored(let c):
+            return c.map { "Agent's draft · \(Int(($0 * 100).rounded()))% sure" } ?? "Agent's draft"
+        case .drafted(let sources):
+            guard grounded else { return "Draft · not from your facts" }
+            let named = sources.map(Self.plain).filter { !$0.isEmpty }
+            return named.isEmpty ? "Draft · from your facts" : "Draft · from " + Self.list(Array(named.prefix(3)))
+        }
+    }
+
+    /// "Profile" → "your profile"; anything else as the agent named it.
+    static func plain(_ source: String) -> String {
+        let s = source.trimmingCharacters(in: .whitespaces)
+        switch s.lowercased() {
+        case "profile", "resume", "stories", "story bank", "saved answers", "instructions": return "your " + s.lowercased()
+        default: return s
+        }
+    }
+
+    static func list(_ items: [String]) -> String {
+        switch items.count {
+        case 0: ""
+        case 1: items[0]
+        case 2: "\(items[0]) and \(items[1])"
+        default: items.dropLast().joined(separator: ", ") + " and " + items[items.count - 1]
+        }
+    }
+}
+
+/// What Tab did to a ghost draft.
+enum GhostAcceptance: Equatable, Sendable {
+    /// The ghost is now the editor's text.
+    case accepted
+    /// Not grounded: the warning shows; Tab again (or ⌥Tab) takes it.
+    case needsConfirmation
+    /// No ghost showing.
+    case nothing
 }
 
 enum AnswerValidationError: Error, Equatable, Sendable {
@@ -395,6 +464,17 @@ final class InboxModel {
     var validationMessage: String?
     /// Bumped to shake the composer on invalid input.
     private(set) var shakeTrigger = 0
+    /// "One answer, many doors": the jobs an answer just sent back to the queue, flying to the
+    /// sidebar's Pipeline row during the Undo window. Nil when nothing is in flight or held.
+    private(set) var cascade: AnswerCascade?
+    /// Bumps once when a cascade's last job lands on the Pipeline row (its badge pulses once).
+    private(set) var cascadePulse = 0
+    @ObservationIgnored private var cascadeSequence = 0
+    /// Starts the flight for a new cascade (the overlay window in the app; tests swap it). It must
+    /// land the cascade with `landCascade`, at once when there's nothing to fly.
+    @ObservationIgnored var cascadeLauncher: @MainActor (AnswerCascade, InboxModel) -> Void = { cascade, model in
+        CascadeFlight.launch(cascade, model: model)
+    }
 
     private struct Pending {
         var cluster: QuestionCluster
@@ -472,9 +552,14 @@ final class InboxModel {
 
     func updateDraft(for cluster: QuestionCluster, _ body: (inout AnswerDraft) -> Void) {
         var d = draft(for: cluster)
+        let before = d.text
         body(&d)
         drafts[cluster.clusterId] = d
         validationMessage = nil
+        // Typing replaces a ghost: a pending "Tab again to use it anyway" no longer applies.
+        if d.text != before, aiDrafts[cluster.clusterId]?.confirmingUngrounded == true {
+            aiDrafts[cluster.clusterId]?.confirmingUngrounded = false
+        }
     }
 
     /// Jobs (company + role) blocked by a cluster, for previews and the per-job list.
@@ -517,6 +602,56 @@ final class InboxModel {
         return best
     }
 
+    // MARK: Ghost drafts
+
+    /// The draft shown as ghost text over the editor: an AI draft not yet taken, else the
+    /// agent's stored draft. Only while the editor is empty (typing replaces it) and not cleared
+    /// with Esc; never for per-job answers, choices or yes/no.
+    func ghost(for cluster: QuestionCluster) -> GhostDraft? {
+        let d = draft(for: cluster)
+        guard !d.perJob, d.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let ai = aiDraft(for: cluster)
+        guard !ai.ghostDismissed else { return nil }
+        if ai.resultIsGhost, let r = ai.result, !r.answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return GhostDraft(text: r.answer, source: .drafted(sources: r.sources), grounded: r.grounded,
+                              unsupportedClaims: r.grounded ? [] : r.unsupportedClaims)
+        }
+        guard let stored = AnswerDraft.prefill(for: cluster) else { return nil }
+        return GhostDraft(text: stored, source: .stored(confidence: cluster.suggestedConfidence), grounded: true, unsupportedClaims: [])
+    }
+
+    /// Tab: take the ghost into the editor. A ghost that isn't grounded needs a second Tab (or
+    /// `force`: ⌥Tab / "Use anyway"); the first one only shows what it couldn't back.
+    @discardableResult
+    func acceptGhost(for cluster: QuestionCluster, force: Bool = false) -> GhostAcceptance {
+        guard let ghost = ghost(for: cluster) else { return .nothing }
+        if !ghost.grounded && !force && !aiDraft(for: cluster).confirmingUngrounded {
+            updateAIDraft(for: cluster) { $0.confirmingUngrounded = true }
+            return .needsConfirmation
+        }
+        updateAIDraft(for: cluster) { s in
+            s.confirmingUngrounded = false
+            // The taken draft keeps its result, so its unsupported claims keep warning in the text.
+            if case .drafted = ghost.source { s.resultIsGhost = false }
+        }
+        updateDraft(for: cluster) { $0.text = ghost.text }
+        return .accepted
+    }
+
+    /// Esc: clear the ghost. A new draft (or "Restore draft") brings it back.
+    func dismissGhost(for cluster: QuestionCluster) {
+        guard ghost(for: cluster) != nil else { return }
+        updateAIDraft(for: cluster) { s in
+            s.ghostDismissed = true
+            s.confirmingUngrounded = false
+        }
+    }
+
+    /// Show a cleared ghost again.
+    func restoreGhost(for cluster: QuestionCluster) {
+        updateAIDraft(for: cluster) { $0.ghostDismissed = false }
+    }
+
     // MARK: Draft with AI
 
     /// Typed answers only. Never-guess / always-ask facts, choice and yes/no questions and agent
@@ -537,8 +672,9 @@ final class InboxModel {
         aiDrafts[cluster.clusterId] = s
     }
 
-    /// "Draft with AI": a fresh draft from the profile, resume, stories and the job. Replaces the
-    /// editor text (the old text is kept for Undo). Never answers.
+    /// "Draft with AI": a fresh draft from the profile, resume, stories and the job. Over an empty
+    /// editor it shows as ghost text (Tab takes it); over the user's text it replaces it (the old
+    /// text is kept for Undo). Never answers.
     func draftWithAI(for cluster: QuestionCluster) async {
         await requestAIDraft(for: cluster, instructions: nil)
     }
@@ -551,10 +687,19 @@ final class InboxModel {
         await requestAIDraft(for: cluster, instructions: instruction)
     }
 
-    /// Put the editor back to the text before the agent's last change.
+    /// Put the editor back to the text before the agent's last change (or the ghost back to the
+    /// draft before the last rewrite).
     @discardableResult
     func undoAIDraft(for cluster: QuestionCluster) -> Bool {
         var s = aiDraft(for: cluster)
+        if s.resultIsGhost, let earlier = s.ghostVersions.popLast() {
+            s.result = earlier
+            s.confirmingUngrounded = false
+            s.ghostDismissed = false
+            if case .failed = s.phase { s.phase = .idle }
+            aiDrafts[cluster.clusterId] = s
+            return true
+        }
         guard let previous = s.versions.popLast() else { return false }
         s.result = nil
         if case .failed = s.phase { s.phase = .idle }
@@ -567,7 +712,9 @@ final class InboxModel {
         let id = cluster.clusterId
         guard supportsAIDraft(cluster), !aiDraft(for: cluster).isDrafting,
               store.inbox.clusters.contains(where: { $0.clusterId == id }) else { return }
-        let current = draft(for: cluster).text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let typed = draft(for: cluster).text.trimmingCharacters(in: .whitespacesAndNewlines)
+        // A rewrite of a ghost rewrites the ghost: it's what the user is looking at.
+        let current = typed.isEmpty ? (ghost(for: cluster)?.text ?? "") : typed
         let revising = instructions != nil && !current.isEmpty
         updateAIDraft(for: cluster) { $0.phase = .drafting(revising: revising) }
         let result = await store.draftAnswer(clusterID: id, instructions: instructions, currentAnswer: revising ? current : nil)
@@ -579,10 +726,20 @@ final class InboxModel {
         switch result {
         case .success(let reply):
             let before = draft(for: cluster).text
+            // Over an empty editor the draft is a ghost (Tab takes it); over the user's text it
+            // replaces it, with their text kept for Undo.
+            let asGhost = before.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             updateAIDraft(for: cluster) { s in
                 s.phase = .idle
+                if asGhost, s.resultIsGhost, let earlier = s.result, earlier.answer != reply.answer {
+                    s.ghostVersions.append(earlier)
+                    if s.ghostVersions.count > AIDraftState.versionLimit { s.ghostVersions.removeFirst() }
+                }
                 s.result = reply
-                if !before.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, before != reply.answer {
+                s.resultIsGhost = asGhost
+                s.ghostDismissed = false
+                s.confirmingUngrounded = false
+                if !asGhost, before != reply.answer {
                     s.versions.append(before)
                     if s.versions.count > AIDraftState.versionLimit { s.versions.removeFirst() }
                 }
@@ -593,7 +750,7 @@ final class InboxModel {
                     s.instruction = ""
                 }
             }
-            updateDraft(for: cluster) { $0.text = reply.answer }
+            if !asGhost { updateDraft(for: cluster) { $0.text = reply.answer } }
         case .failure(let error):
             updateAIDraft(for: cluster) { $0.phase = .failed(Self.aiDraftErrorMessage(error)) }
         }
@@ -639,6 +796,48 @@ final class InboxModel {
         select(list[next].clusterId)
     }
 
+    // MARK: The cascade
+
+    /// The jobs a cluster's monogram row shows, highest impact first (list order), and how many
+    /// more there are. The cascade flies exactly these.
+    func waitingFlyers(for cluster: QuestionCluster) -> (flyers: [AnswerCascade.Flyer], overflow: Int) {
+        var flyers: [AnswerCascade.Flyer] = []
+        if cluster.jobIds.isEmpty {
+            flyers = cluster.companies.prefix(AnswerCascade.maxFlyers).enumerated().map { AnswerCascade.Flyer(id: -1 - $0.offset, company: $0.element) }
+        } else {
+            for (i, id) in cluster.jobIds.prefix(AnswerCascade.maxFlyers).enumerated() {
+                let company = store.jobs.job(id: id)?.company ?? (i < cluster.companies.count ? cluster.companies[i] : "")
+                flyers.append(AnswerCascade.Flyer(id: id, company: company.isEmpty ? "?" : company))
+            }
+        }
+        return (flyers, max(0, cluster.jobCount - flyers.count))
+    }
+
+    /// One landing on the Pipeline row: `jobs` more are back in the queue. The last one pulses
+    /// the badge and plays the one haptic (never one per monogram).
+    func landCascade(id: Int, jobs: Int) {
+        guard var c = cascade, c.id == id, !c.isLanded else { return }
+        c.landedJobs = min(c.jobCount, c.landedJobs + max(0, jobs))
+        cascade = c
+        if c.isLanded {
+            cascadePulse += 1
+            if c.hapticOnLanding { Haptics.levelChange() }
+        }
+    }
+
+    private func startCascade(cluster: QuestionCluster, inboxZero: Bool) {
+        guard cluster.jobCount >= AnswerCascade.minimumJobs else {
+            cascade = nil
+            return
+        }
+        cascadeSequence += 1
+        let (flyers, _) = waitingFlyers(for: cluster)
+        let c = AnswerCascade(id: cascadeSequence, clusterID: cluster.clusterId, jobCount: cluster.jobCount, flyers: flyers,
+                              hapticOnLanding: !inboxZero)
+        cascade = c
+        cascadeLauncher(c, self)
+    }
+
     // MARK: Answer once
 
     /// Validate and answer the selected cluster. Returns false (and shakes) on invalid input.
@@ -652,7 +851,9 @@ final class InboxModel {
         let draft = draft(for: cluster)
         switch AnswerComposerLogic.resolve(draft, kind: kind(for: cluster), jobIDs: cluster.jobIds) {
         case .failure(let error):
-            validationMessage = error.message
+            // An empty editor under a ghost: the ghost isn't an answer until it's taken.
+            validationMessage = error == .empty && ghost(for: cluster) != nil
+                ? "Press Tab to use the draft, or type your answer." : error.message
             shakeTrigger += 1
             return false
         case .success(let resolved):
@@ -700,9 +901,16 @@ final class InboxModel {
         drafts.removeValue(forKey: id)
         aiDrafts.removeValue(forKey: id)
         validationMessage = nil
+        let inboxZero = wasLast || clusters.isEmpty
+        // The waiting jobs fly to Pipeline (read from the composer before it's replaced below).
+        if answer != nil {
+            startCascade(cluster: cluster, inboxZero: inboxZero)
+        } else {
+            cascade = nil
+        }
         // Auto-advance to the next highest-impact cluster.
         select(clusters.first?.clusterId)
-        if wasLast || clusters.isEmpty {
+        if inboxZero {
             inboxZeroTrigger += 1
             Haptics.levelChange()
             Sounds.play(.celebrate)
@@ -711,8 +919,9 @@ final class InboxModel {
         }
         let jobsText = C3Format.plural(cluster.jobCount, "job")
         let message = answer == nil ? "Skipped · \(jobsText)" : "\(cluster.isAction ? "Done" : "Answered") · \(jobsText) back in the queue"
+        // The ring on the toast drains over the same window the answer is held for.
         store.toasts.show(message, symbol: answer == nil ? "arrow.uturn.right" : "checkmark", style: .success,
-                          duration: window, actionTitle: "Undo") { [weak self] in self?.undo(clusterID: id) }
+                          duration: window, actionTitle: "Undo", countdown: true) { [weak self] in self?.undo(clusterID: id) }
         if let undoManager {
             undoManager.registerUndo(withTarget: self) { model in
                 MainActor.assumeIsolated { model.undo(clusterID: id) }
@@ -727,6 +936,7 @@ final class InboxModel {
         guard let id = clusterID ?? answered.first(where: \.isPending)?.clusterID, let p = pending.removeValue(forKey: id) else { return false }
         p.task.cancel()
         answered.removeAll { $0.clusterID == id }
+        if cascade?.clusterID == id { cascade = nil }
         if resolvedElsewhere(p) {
             // The daemon already resolved it (CLI / another window): nothing to put back.
             store.toasts.show("Already resolved elsewhere", symbol: "info.circle", style: .info)
@@ -779,6 +989,8 @@ final class InboxModel {
 
     private func commit(clusterID id: String) async {
         guard let p = pending.removeValue(forKey: id) else { return }
+        // The Undo window closed: the Pipeline badge has said its piece.
+        if cascade?.clusterID == id { cascade = nil }
         if resolvedElsewhere(p) {
             // Resolved by the daemon / CLI / another window during the window: sending now would
             // only error. Drop ours and let the remote "Answered today" row stand.

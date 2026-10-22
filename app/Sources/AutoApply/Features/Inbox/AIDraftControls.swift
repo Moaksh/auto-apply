@@ -1,7 +1,8 @@
 // AIDraftControls.swift — "Draft with AI" and conversational refinement under the answer editor
 // (protocol.md §5.5). The agent writes from the user's profile, resume, stories, saved answers
-// and the job; every result is fact-checked and anything it couldn't back is named. It only
-// fills the editor: nothing is answered until the user presses Answer. Typed answers only;
+// and the job; every result is fact-checked and anything it couldn't back is named. Over an
+// empty editor the draft is ghost text (GhostDraftView.swift: Tab takes it); over the user's text
+// it replaces it, with Undo. Nothing is answered until the user presses Answer. Typed answers only;
 // never-guess facts, choices and agent tasks don't show it.
 import SwiftUI
 
@@ -24,9 +25,10 @@ struct AIDraftControls: View {
                 }
                 .buttonStyle(.secondaryLink)
                 .disabled(ai.isDrafting)
-                .help(text.isEmpty ? "Write a draft from your profile, resume and stories. Nothing is answered until you press Answer."
+                .help(text.isEmpty ? "Write a draft from your profile, resume and stories. It shows in the box as a draft: Tab uses it. "
+                                     + "Nothing is answered until you press Answer."
                                    : "Replace the text above with a fresh draft (Undo brings yours back). Nothing is answered until you press Answer.")
-                if !ai.versions.isEmpty {
+                if ai.canUndo {
                     Button("Undo") { model.undoAIDraft(for: cluster) }
                         .buttonStyle(.secondaryLink)
                         .disabled(ai.isDrafting)
@@ -87,7 +89,8 @@ struct AIDraftControls: View {
                 .font(Typography.callout)
                 .foregroundStyle(Palette.error)
                 .fixedSize(horizontal: false, vertical: true)
-        } else if let result = ai.result, !ai.isDrafting {
+        } else if let result = ai.result, !ai.isDrafting, !ai.resultIsGhost {
+            // A ghost that hasn't been taken says where it came from in its own chip.
             let claims = ai.unsupportedClaims(in: text)
             VStack(alignment: .leading, spacing: Space.xs) {
                 if !claims.isEmpty {
