@@ -144,13 +144,39 @@ struct ColdEmailRenderTests {
             await check("add-contact", store: store, width: 480, height: 560, scheme: scheme) { AddContactSheet() }
             await check("add-referral", store: store, width: 480, height: 560, scheme: scheme) { AddReferralSheet() }
         }
-        // Sending off: the calm notice on Follow-ups and Outbox.
+        // Sending off: Up next's floating bar becomes the one-time setup.
         (store.repository as? InMemoryRepository)?.update { $0.outreach.mailAccount.sendEnabled = false }
         _ = await waitUntil { !store.outreach.sendEnabled }
-        for tab in [ColdEmailTab.followUps, .outbox] {
-            let off = ColdEmailModel(store: store)
-            off.tab = tab
-            await check("sending-off-\(tab.rawValue)", store: store, scheme: .light) { ColdEmailView(modelOverride: off) }
+        let off = ColdEmailModel(store: store)
+        off.tab = .outbox
+        await check("sending-off-outbox", store: store, scheme: .light) { ColdEmailView(modelOverride: off) }
+        await check("send-bar-setup", store: store, width: 640, height: 80, scheme: .light) { SendBar(model: off) }
+        await store.stop()
+    }
+
+    /// People ▸ Could refer you (the three-step referral checklist) and an applied job with no
+    /// note yet, rendered directly (ImageRenderer leaves ScrollView content blank).
+    @Test func peopleReferralsAndAppliedJobRender() async {
+        let store = await mockStore()
+        let model = ColdEmailModel(store: store)
+        model.showPeople(.couldRefer)
+        #expect(model.tab == .people && model.peopleFilter == .couldRefer)
+        let referrals = store.outreach.data.referrals.filter { $0.state != .dismissed }
+        #expect(!referrals.isEmpty)
+        let job = model.jobsAwaitingNote.first
+        #expect(job != nil, "the mock has applications nobody has been written to yet")
+        for scheme in Self.schemes {
+            await check("people-could-refer", store: store, width: 1040, height: 680, scheme: scheme) { ColdEmailView(modelOverride: model) }
+            for r in referrals.prefix(4) {
+                await check("referral-\(r.state.rawValue)", store: store, width: 760, height: 360, scheme: scheme) {
+                    ReferralCard(referral: r, model: model).padding(Space.l).frame(maxHeight: .infinity, alignment: .top)
+                }
+            }
+            if let job {
+                await check("applied-no-note", store: store, width: 760, height: 560, scheme: scheme) {
+                    AppliedJobPanel(job: job, model: model).padding(Space.l).frame(maxHeight: .infinity, alignment: .top)
+                }
+            }
         }
         await store.stop()
     }

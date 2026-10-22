@@ -388,7 +388,7 @@ struct CareerFeaturesTests {
         let model = ColdEmailModel(store: store)
         model.tab = .outbox
         model.beginLinkedInImport()
-        #expect(model.isLinkedInImportPresented && model.tab == .contacts && model.linkedInImport == .idle)
+        #expect(model.isLinkedInImportPresented && model.tab == .people && model.peopleFilter == .everyone && model.linkedInImport == .idle)
 
         await model.importLinkedIn(filePath: "/tmp/Connections.csv")
         guard case .importLinkedinConnections(let p)? = daemon.sent.last else { Issue.record("no import"); return }
@@ -400,7 +400,7 @@ struct CareerFeaturesTests {
         #expect(ColdEmailModel.linkedInSummary(r) == "312 new contacts · 4 updated · 2 skipped")
         #expect(ColdEmailModel.linkedInReferralLine(r) == "5 new referral suggestions at 2 companies.")
         model.showReferralsAfterImport()
-        #expect(!model.isLinkedInImportPresented && model.tab == .referrals)
+        #expect(!model.isLinkedInImportPresented && model.tab == .people && model.peopleFilter == .couldRefer)
 
         await model.importLinkedIn(filePath: "/tmp/bad.csv")
         #expect(model.linkedInImport == .failed("That doesn't look like Connections.csv"))
@@ -497,7 +497,7 @@ struct CareerFeaturesTests {
         await store.perform(.importLinkedInConnections)
         #expect(store.router.selection == .coldEmail)
         let cold = ColdEmailModel.shared(for: store)
-        #expect(cold.isLinkedInImportPresented && cold.tab == .contacts)
+        #expect(cold.isLinkedInImportPresented && cold.tab == .people)
 
         let palette = PaletteModel(store: store)
         palette.query = "writing voice"

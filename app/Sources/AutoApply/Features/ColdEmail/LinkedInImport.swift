@@ -1,4 +1,4 @@
-// LinkedInImport.swift — Cold Email ▸ Contacts ▸ "Import LinkedIn connections…" (contract
+// LinkedInImport.swift — Cold Email ▸ People ▸ "Import LinkedIn connections…" (contract
 // §5.1.1): the user downloads their own data from LinkedIn and picks Connections.csv. The file is
 // read on this Mac, contacts are never shared, and LinkedIn is never opened. Connections at
 // companies you applied to, watch or saved as prospects become referral suggestions; you send
@@ -18,7 +18,7 @@ enum LinkedInImportState: Equatable, Sendable {
 extension ColdEmailModel {
     func beginLinkedInImport() {
         linkedInImport = .idle
-        tab = .contacts
+        showPeople(.everyone)
         isLinkedInImportPresented = true
     }
 
@@ -35,7 +35,7 @@ extension ColdEmailModel {
     /// Close the sheet and show the referral suggestions it created.
     func showReferralsAfterImport() {
         isLinkedInImportPresented = false
-        tab = .referrals
+        showPeople(.couldRefer)
     }
 
     /// "312 new contacts · 4 updated · 2 skipped"

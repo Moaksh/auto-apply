@@ -1,7 +1,7 @@
-// ColdEmailComponents.swift — small pieces shared by the Cold Email tabs, Needs You ▸ Replies and
-// the job inspector: the email confidence badge, the follow-up status badge, the fact-check
-// badge, unsupported-claim highlighting, the fixed footer preview, the provenance popover and
-// the calm "sending is off" notice.
+// ColdEmailComponents.swift — small pieces shared by the Cold Email surfaces, Needs You ▸ Replies
+// and the job inspector: the email confidence badge, the follow-up status badge, the fact-check
+// badge, unsupported-claim highlighting (a dotted coral underline), the fixed footer preview, the
+// provenance popover, the send sheet's schedule ribbon and the Enable sending sheet.
 import SwiftUI
 
 extension Badge {
@@ -51,8 +51,9 @@ enum ClaimHighlighter {
         for claim in claims where !claim.isEmpty {
             var searchStart = text.startIndex
             while searchStart < text.endIndex, let range = text[searchStart...].range(of: claim, options: .caseInsensitive) {
-                text[range].backgroundColor = Palette.needsYou.opacity(0.22)
-                text[range].underlineStyle = .single
+                // A faint coral wash with a dotted coral underline: noticeable, not alarming.
+                text[range].backgroundColor = Palette.needsYou.opacity(0.10)
+                text[range].underlineStyle = Text.LineStyle(pattern: .dot, color: Palette.needsYou)
                 searchStart = range.upperBound
             }
         }
@@ -69,13 +70,16 @@ enum ClaimHighlighter {
 struct FooterPreview: View {
     var footer: String?
 
+    /// Shown until the real footer (which names where the address was found) is stored.
+    static let placeholder = "—\nI found your address on [where it was found]. If you'd rather not hear from me, reply \"no thanks\" and I won't email again."
+
     var body: some View {
         VStack(alignment: .leading, spacing: Space.xs) {
             HStack(spacing: Space.xs) {
                 Image(systemName: "lock.fill").imageScale(.small).foregroundStyle(Palette.textSecondary)
                 Text("Added to every email").eyebrowStyle()
             }
-            Text(footer.c3Trimmed ?? "—\nI found your address on [where it was found]. If you'd rather not hear from me, reply \"no thanks\" and I won't email again.")
+            Text(footer.c3Trimmed ?? Self.placeholder)
                 .font(Typography.callout)
                 .foregroundStyle(Palette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -146,42 +150,48 @@ struct ProvenanceList: View {
     }
 }
 
-/// The calm inline state while sending is off. Drafts still get written; nothing is sent.
-struct SendingOffNotice: View {
-    var model: ColdEmailModel
-    @Environment(AppStore.self) private var store
+/// The send sheet's pacing promise as a picture: the send window as a track, with one small mark
+/// per email spaced out from the start of the window. Static (no motion).
+struct ScheduleRibbon: View {
+    var count: Int
+    /// "09:30", "17:30" (falls back to 09:30–17:30).
+    var window: [String]
+    var weekdaysOnly: Bool
+
+    private var start: String { window.count == 2 ? window[0] : "09:30" }
+    private var end: String { window.count == 2 ? window[1] : "17:30" }
 
     var body: some View {
-        let account = store.outreach.mailAccount
-        HStack(alignment: .firstTextBaseline, spacing: Space.s) {
-            Image(systemName: "envelope.badge.shield.half.filled").foregroundStyle(Palette.textSecondary)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Sending is off").font(Typography.bodyEmph)
-                Text(account.isConnected
-                     ? "Drafts are written for your review, but nothing goes out until you turn sending on. Turning it on sends one test email to \(account.email ?? "you") first."
-                     : "Drafts are written for your review. To send from your own Gmail, connect your mailbox in Settings ▸ Sources, then turn sending on.")
-                    .font(Typography.callout).foregroundStyle(Palette.textSecondary)
-                    // Wraps to the width it's given, but no `.fixedSize(vertical:)`: this notice sits
-                    // above a ScrollView outside any scrolling container, and a fixed-height wrapped
-                    // text reports a huge minimum height when the split view probes a near-zero
-                    // width. That pushed the whole window's content off-screen (blank window).
-                    .lineLimit(4)
-            }
-            Spacer(minLength: Space.s)
-            if account.isConnected {
-                Button("Enable sending…") {
-                    model.resetEnableState()
-                    model.isEnableSheetPresented = true
+        VStack(alignment: .leading, spacing: Space.xs) {
+            GeometryReader { geo in
+                let w = geo.size.width
+                // A few minutes apart: marks take up to the first third of the window.
+                let span = min(w * 0.36, CGFloat(max(count - 1, 0)) * 14)
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Palette.sunken).frame(height: 6)
+                    Capsule().fill(Palette.accent.opacity(0.22)).frame(width: max(12, span + 12), height: 6)
+                    ForEach(0..<min(count, 40), id: \.self) { i in
+                        Circle()
+                            .fill(Palette.accent)
+                            .frame(width: 6, height: 6)
+                            .offset(x: count > 1 ? span * CGFloat(i) / CGFloat(count - 1) + 3 : 3)
+                    }
                 }
-                .buttonStyle(.secondaryLink)
-            } else {
-                Button("Open Settings") { SettingsNavigation.shared.open(.sources, router: store.router) }
-                    .buttonStyle(.secondaryLink)
+                .frame(maxHeight: .infinity)
             }
+            .frame(height: 12)
+            HStack {
+                Text(start)
+                Spacer()
+                Text(weekdaysOnly ? "Weekdays only" : "Any day")
+                Spacer()
+                Text(end)
+            }
+            .font(Typography.monoSmall)
+            .foregroundStyle(Palette.textTertiary)
         }
-        .padding(Space.m)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .well(cornerRadius: Radius.card)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(C3Format.plural(count, "email")) spaced a few minutes apart between \(start) and \(end)\(weekdaysOnly ? " on weekdays" : "")")
     }
 }
 

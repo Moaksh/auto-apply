@@ -147,7 +147,7 @@ struct CareerRenderTests {
             }
         }
         let contacts = ColdEmailModel(store: store)
-        contacts.tab = .contacts
+        contacts.tab = .people
         for scheme in Self.schemes {
             await check("coldemail-contacts", store: store, width: 1200, height: 700, scheme: scheme) { ColdEmailView(modelOverride: contacts) }
         }

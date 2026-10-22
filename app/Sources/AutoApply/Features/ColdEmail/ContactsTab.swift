@@ -1,64 +1,96 @@
-// ContactsTab.swift — Cold Email ▸ Contacts (plan §A.4, §B.5): everyone found or added, with the
-// email's confidence tier, where it came from (provenance popover), and when you last wrote.
-// Add contact is the tab's one primary action; Import LinkedIn connections, Import CSV, Suppress
-// and Delete are secondary.
+// ContactsTab.swift — Cold Email ▸ People (plan §A.4, §B.5, §F.1; app/COLD_EMAIL_UX.md): one
+// place for everyone found or added — with the email's confidence, where it came from
+// (provenance popover) and when you last wrote — and a "Could refer you" filter that is the
+// LinkedIn referral copilot (ReferralsTab.swift). Add contact (or Add referral on that filter) is
+// the one primary action; Import LinkedIn connections / CSV, Never email and Delete are secondary.
+// "Never email" puts the address on the do-not-contact list.
 import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-struct ContactsTab: View {
+struct PeopleView: View {
     @Bindable var model: ColdEmailModel
     @Environment(AppStore.self) private var store
     @State private var importing = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: Space.m) {
+            toolbar
+                .padding(.horizontal, Space.contentPadding)
+                .padding(.bottom, Space.m)
+            Divider()
+            switch model.peopleFilter {
+            case .everyone: everyone
+            case .couldRefer: ReferralsList(model: model)
+            }
+        }
+    }
+
+    private var toolbar: some View {
+        let referrals = store.outreach.data.referrals.filter { $0.state != .dismissed }.count
+        return HStack(spacing: Space.m) {
+            Picker("Show", selection: $model.peopleFilter) {
+                Text("Everyone \(store.outreach.data.contacts.count)").tag(PeopleFilter.everyone)
+                Text("Could refer you \(referrals)").tag(PeopleFilter.couldRefer)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            if model.peopleFilter == .everyone {
                 TextField("Search name, company, email", text: $model.contactSearch)
                     .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 320)
-                Spacer()
-                if importing { ProgressView().controlSize(.small) }
-                Button("Import LinkedIn connections…") { model.beginLinkedInImport() }
-                    .buttonStyle(.secondaryLink)
-                    .disabled(!store.isConnected)
+                    .frame(maxWidth: 260)
+            }
+            Spacer(minLength: Space.s)
+            if importing { ProgressView().controlSize(.small) }
+            Menu("Import") {
+                Button("LinkedIn connections…") { model.beginLinkedInImport() }
                     .help("From the Connections.csv you download from LinkedIn yourself. Stays on this Mac.")
-                Button("Import CSV…") { importCSV() }
-                    .buttonStyle(.secondaryLink)
-                    .disabled(importing || !store.isConnected)
+                Button("CSV file…") { importCSV() }
                     .help("Columns: name, email, company, title, linkedin_url, notes. Duplicates are merged by email.")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .disabled(importing || !store.isConnected)
+            if model.peopleFilter == .everyone {
                 Button("Add contact") { model.isAddContactPresented = true }
                     .buttonStyle(.primaryPill)
                     .disabled(!store.isConnected)
+            } else {
+                Menu("Suggest referrers") {
+                    ForEach(ReferralsList.companies(store), id: \.id) { c in
+                        Button(c.name) { Task { await store.suggestReferrers(companyID: c.id, jobID: c.jobID) } }
+                    }
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .disabled(ReferralsList.companies(store).isEmpty || !store.isConnected)
+                .help("Looks for alumni, ex-colleagues and people in your kind of role using Google results only")
+                Button("Add referral") { model.isAddReferralPresented = true }
+                    .buttonStyle(.primaryPill)
+                    .disabled(!store.isConnected)
             }
-            .padding(.horizontal, Space.contentPadding)
-            .padding(.vertical, Space.m)
-            Divider()
-            content
         }
     }
 
     @ViewBuilder
-    private var content: some View {
+    private var everyone: some View {
         let contacts = model.filteredContacts
         if store.outreach.data.contacts.isEmpty {
-            EmptyState(symbol: "person.2", title: "No contacts yet",
-                       message: "People the agent finds after you apply show up here, with where each address came from. You can add people you know, too.")
+            EmptyState(symbol: "person.2", title: "No one here yet",
+                       message: "People the agent finds after you apply show up here, with where each address came from. You can add people you know, or import your LinkedIn connections.")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if contacts.isEmpty {
             EmptyState(symbol: "magnifyingglass", title: "No matches", message: "Nobody matches “\(model.contactSearch)”.")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: Space.xxs, pinnedViews: [.sectionHeaders]) {
-                    Section {
-                        ForEach(contacts) { ContactRow(contact: $0, model: model) }
-                    } header: {
-                        ContactColumns()
-                    }
+                LazyVStack(alignment: .leading, spacing: Space.xxs) {
+                    ForEach(contacts) { ContactRow(contact: $0, model: model) }
                 }
                 .padding(.horizontal, Space.l)
-                .padding(.bottom, Space.l)
+                .padding(.vertical, Space.m)
+                .frame(maxWidth: 1100, alignment: .leading)
             }
         }
     }
@@ -77,30 +109,19 @@ struct ContactsTab: View {
     }
 }
 
-/// Column widths shared by the header and rows.
-private enum ContactColumn {
-    static let name: CGFloat = 220
-    static let company: CGFloat = 140
-    static let email: CGFloat = 300
-    static let origin: CGFloat = 130
-    static let last: CGFloat = 110
-}
+/// Initials on a quiet disc (people, not companies).
+struct PersonInitials: View {
+    var name: String
+    var size: CGFloat = 28
 
-private struct ContactColumns: View {
     var body: some View {
-        HStack(spacing: Space.m) {
-            Text("Name").frame(width: ContactColumn.name, alignment: .leading)
-            Text("Company").frame(width: ContactColumn.company, alignment: .leading)
-            Text("Email").frame(width: ContactColumn.email, alignment: .leading)
-            Text("Origin").frame(width: ContactColumn.origin, alignment: .leading)
-            Text("Last contacted").frame(width: ContactColumn.last, alignment: .leading)
-            Spacer()
-        }
-        .eyebrowStyle()
-        .padding(.horizontal, Space.m)
-        .padding(.vertical, Space.s)
-        .background(Palette.windowBackground)
-        .accessibilityAddTraits(.isHeader)
+        let initials = name.split(separator: " ").prefix(2).compactMap { $0.first.map(String.init) }.joined().uppercased()
+        Text(initials.isEmpty ? "?" : initials)
+            .font(.system(size: size * 0.38, weight: .semibold, design: .rounded))
+            .foregroundStyle(Palette.textSecondary)
+            .frame(width: size, height: size)
+            .background(Palette.sunken, in: Circle())
+            .accessibilityHidden(true)
     }
 }
 
@@ -112,24 +133,26 @@ private struct ContactRow: View {
 
     var body: some View {
         HStack(spacing: Space.m) {
+            PersonInitials(name: contact.fullName)
             VStack(alignment: .leading, spacing: 2) {
-                Text(contact.fullName).font(Typography.bodyEmph).lineLimit(1)
-                Text(contact.title ?? contact.roleCategory.label).font(Typography.callout).foregroundStyle(Palette.textSecondary).lineLimit(1)
+                HStack(spacing: Space.xs) {
+                    Text(contact.fullName).font(Typography.bodyEmph).lineLimit(1)
+                    Text("· \(contact.title ?? contact.roleCategory.label)").font(Typography.callout).foregroundStyle(Palette.textSecondary).lineLimit(1)
+                }
+                HStack(spacing: Space.xs) {
+                    Text(contact.company ?? "No company").font(Typography.callout).foregroundStyle(Palette.textSecondary).lineLimit(1)
+                    Text("·").font(Typography.callout).foregroundStyle(Palette.textTertiary)
+                    Text(contact.email ?? "No email").font(Typography.mono).foregroundStyle(contact.hasEmail ? Palette.textSecondary : Palette.textTertiary)
+                        .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
+                }
             }
-            .frame(width: ContactColumn.name, alignment: .leading)
-            Text(contact.company ?? "—").font(Typography.callout).lineLimit(1).frame(width: ContactColumn.company, alignment: .leading)
-            HStack(spacing: Space.xs) {
-                Text(contact.email ?? "No email").font(Typography.mono).foregroundStyle(contact.hasEmail ? Palette.textPrimary : Palette.textTertiary)
-                    .lineLimit(1).truncationMode(.middle).textSelection(.enabled)
-                if contact.hasEmail { Badge(EmailTier(confidence: contact.emailConfidence).label, symbol: contact.tier.symbol, tone: tone) }
-                ProvenanceButton(contact: contact)
-            }
-            .frame(width: ContactColumn.email, alignment: .leading)
-            Text(contact.origin.label).font(Typography.callout).foregroundStyle(Palette.textSecondary).lineLimit(1)
-                .frame(width: ContactColumn.origin, alignment: .leading)
-            Text(contact.lastContactedAt.map { C3Format.relative($0) } ?? "Never").font(Typography.callout).foregroundStyle(Palette.textSecondary)
-                .frame(width: ContactColumn.last, alignment: .leading)
-            Spacer(minLength: 0)
+            .layoutPriority(1)
+            Spacer(minLength: Space.s)
+            if contact.hasEmail { Badge(contact: contact) }
+            Text(contact.lastContactedAt.map { "Emailed \(C3Format.relative($0))" } ?? contact.origin.label)
+                .font(Typography.callout).foregroundStyle(Palette.textTertiary).lineLimit(1)
+                .frame(width: 140, alignment: .trailing)
+            ProvenanceButton(contact: contact)
             menu
         }
         .selectableRow(isSelected: false)
@@ -141,15 +164,6 @@ private struct ContactRow: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Their drafts are cancelled. “Never email” keeps the address on your do-not-contact list.")
-        }
-    }
-
-    private var tone: Badge.Tone {
-        switch contact.tier {
-        case .verified: .status(.applied)
-        case .likely: .accent
-        case .guess: .warning
-        case .unknown: .neutral
         }
     }
 
@@ -187,7 +201,6 @@ private struct ContactRow: View {
         .accessibilityLabel("Actions for \(contact.fullName)")
     }
 }
-
 // MARK: - Add contact
 
 /// Someone you know: a typed email is trusted (confidence 100). Sharing is off by default.

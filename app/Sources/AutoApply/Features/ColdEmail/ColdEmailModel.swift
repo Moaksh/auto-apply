@@ -1,23 +1,42 @@
-// ColdEmailModel.swift — Cold Email screen state (docs/COLD_EMAIL_PLAN.md §A, §C, §F.1, §G.6):
-// the tab, Outbox selection and the "Send N…" approval flow with conflict handling, the draft
-// editor, Enable sending (test email to yourself), prospect search, and the referral copilot's
-// copy-and-open (clipboard + the user's own browser; LinkedIn is never automated).
+// ColdEmailModel.swift — Cold Email screen state (docs/COLD_EMAIL_PLAN.md §A, §C, §F.1, §G.6;
+// app/COLD_EMAIL_UX.md): which surface is showing (Up next, with People and Companies one step
+// away), what's focused in the Up next queue, the batch selection and the "Send N…" approval
+// flow with conflict handling, the draft editor, Enable sending (test email to yourself),
+// prospect search, and the referral copilot's copy-and-open (clipboard + the user's own browser;
+// LinkedIn is never automated).
 import AppKit
 import Foundation
 import Observation
 
+/// The Cold Email surfaces. Up next is home; People and Companies are one step away.
 enum ColdEmailTab: String, CaseIterable, Identifiable, Sendable {
-    case followUps, prospects, contacts, outbox, referrals
+    /// The queue: drafts waiting for your OK, replies, applications with no note yet, scheduled, sent.
+    case outbox
+    /// Everyone found or added, with "Could refer you" as a filter (the referral copilot).
+    case people
+    /// Companies you'd like to work at (no application needed).
+    case prospects
 
     var id: String { rawValue }
 
     var title: String {
         switch self {
-        case .followUps: "Follow-ups"
-        case .prospects: "Prospects"
-        case .contacts: "Contacts"
-        case .outbox: "Outbox"
-        case .referrals: "Referrals"
+        case .outbox: "Up next"
+        case .people: "People"
+        case .prospects: "Companies"
+        }
+    }
+}
+
+/// People ▸ who to show.
+enum PeopleFilter: String, CaseIterable, Identifiable, Sendable {
+    case everyone, couldRefer
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .everyone: "Everyone"
+        case .couldRefer: "Could refer you"
         }
     }
 }
@@ -54,13 +73,20 @@ final class ColdEmailModel {
     }
 
     let store: AppStore
-    var tab: ColdEmailTab = .followUps
+    var tab: ColdEmailTab = .outbox
+    var peopleFilter: PeopleFilter = .everyone
     /// Tests / previews: force a phase instead of deriving it from the store.
     var phaseOverride: ColdEmailPhase?
 
     // Outbox
     var selectedDraftIDs: Set<Int> = []
     var focusedMessageID: Int?
+    /// An applied job with no note yet, focused in the Up next queue (exclusive with a message).
+    var focusedJobID: Int?
+    /// Up next ▸ "Sent" is folded away until asked for.
+    var showSent = false
+    /// Up next ▸ "Applied, no note yet" shows the newest five until asked for the rest.
+    var showAllApplied = false
     var isSendSheetPresented = false
     /// "Also send one gentle follow-up…": off unless the user ticks it (owner decision Q3).
     var includeFollowups = false
@@ -115,11 +141,11 @@ final class ColdEmailModel {
         return .loading
     }
 
-    /// "3 drafts ready for your review · 1 new reply"
+    /// "3 drafts waiting for your OK · 1 new reply"
     var summary: String {
         var parts: [String] = []
         let drafts = outreach.draftCount
-        parts.append(drafts == 0 ? "No drafts waiting" : "\(C3Format.plural(drafts, "draft")) ready for your review")
+        parts.append(drafts == 0 ? "No drafts waiting" : "\(C3Format.plural(drafts, "draft")) waiting for your OK")
         if outreach.unreadReplyCount > 0 { parts.append(C3Format.plural(outreach.unreadReplyCount, "new reply", "new replies")) }
         if !outreach.scheduled.isEmpty { parts.append("\(outreach.scheduled.count) scheduled") }
         return parts.joined(separator: " · ")
@@ -146,21 +172,84 @@ final class ColdEmailModel {
 
     func focus(_ messageID: Int?) {
         focusedMessageID = messageID
+        if messageID != nil { focusedJobID = nil }
         if let id = messageID, let m = outreach.message(id: id), m.isInbound, let t = outreach.thread(id: m.threadID), t.unreadReply {
             Task { await store.markReplyRead(threadID: t.id) }
         }
     }
 
-    /// Keep the editor on something sensible: the first draft, else the first scheduled email.
+    /// Keep the detail on the most useful thing: the first draft, else the newest unread reply,
+    /// else an application with no note yet, else the first scheduled email.
     func ensureFocus() {
-        if focusedMessage == nil { focusedMessageID = drafts.first?.id ?? outreach.scheduled.first?.id }
+        guard focusedMessage == nil, focusedJob == nil else { return }
+        if let id = drafts.first?.id ?? outreach.unreadReplyThreads.first.flatMap({ outreach.latestReply(threadID: $0.id)?.id }) {
+            focusedMessageID = id
+        } else if let job = jobsAwaitingNote.first {
+            focusedJobID = job.id
+        } else {
+            focusedMessageID = outreach.scheduled.first?.id
+        }
     }
 
-    /// Show a thread from another tab (Follow-ups "Open thread", the job inspector).
+    /// Show a thread from elsewhere (an application row, People, the job inspector, Needs You).
     func open(threadID: Int) {
         tab = .outbox
+        focusedJobID = nil
         let ms = outreach.messages(threadID: threadID)
         focusedMessageID = (ms.last { !$0.isInbound && $0.state == .draft } ?? ms.last)?.id
+    }
+
+    // MARK: Up next queue
+
+    /// Applied jobs with no conversation yet (no one found, finding people, or people found but
+    /// no draft): the "someone to contact about a job I applied to" list. Newest first.
+    var jobsAwaitingNote: [JobItem] {
+        store.jobs.all.filter { job in
+            guard job.state == .submitted, job.applicationID != nil else { return false }
+            switch outreach.followUpStatus(for: job) {
+            case .noContact, .scouting, .contactsFound: return true
+            default: return false
+            }
+        }
+        .sorted { ($0.submittedAt ?? $0.discoveredAt) > ($1.submittedAt ?? $1.discoveredAt) }
+    }
+
+    var focusedJob: JobItem? { focusedJobID.flatMap { store.jobs.job(id: $0) } }
+
+    func focusJob(_ jobID: Int) {
+        focusedJobID = jobID
+        focusedMessageID = nil
+    }
+
+    /// "1 of 3" for the focused draft.
+    var draftPosition: (index: Int, count: Int)? {
+        let ds = drafts
+        guard let id = focusedMessageID, let i = ds.firstIndex(where: { $0.id == id }) else { return nil }
+        return (i + 1, ds.count)
+    }
+
+    /// The draft after the focused one (wraps), for "Next draft".
+    var nextDraftID: Int? {
+        let ds = drafts
+        guard ds.count > 1, let id = focusedMessageID, let i = ds.firstIndex(where: { $0.id == id }) else { return nil }
+        return ds[(i + 1) % ds.count].id
+    }
+
+    func focusNextDraft() {
+        if let id = nextDraftID { focus(id) }
+    }
+
+    /// Nothing has happened yet: no drafts, replies, emails or applications to write about.
+    var isFirstRun: Bool {
+        let o = outreach
+        return o.drafts.isEmpty && o.scheduled.isEmpty && o.sent.isEmpty && o.replyThreads.isEmpty && o.unknownSends.isEmpty
+            && o.failedSends.isEmpty && jobsAwaitingNote.isEmpty
+    }
+
+    /// Open People, optionally on a filter.
+    func showPeople(_ filter: PeopleFilter = .everyone) {
+        peopleFilter = filter
+        tab = .people
     }
 
     // MARK: Send N…
@@ -237,6 +326,7 @@ final class ColdEmailModel {
         isSendSheetPresented = false
         approveState = .idle
         tab = .outbox
+        focusedJobID = nil
         focusedMessageID = messageID
     }
 

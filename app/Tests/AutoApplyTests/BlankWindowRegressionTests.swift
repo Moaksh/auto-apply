@@ -12,7 +12,7 @@ import Testing
 @MainActor
 @Suite("Blank window regression", .serialized)
 struct BlankWindowRegressionTests {
-    /// The trigger: submitted applications (Follow-ups shows its list) and sending off (the notice).
+    /// The trigger: submitted applications (Up next lists them; it was Follow-ups) and sending off.
     func triggerStore() async -> AppStore {
         var data = RepositoryData()
         data.jobs = [Samples.job(id: 311, state: .submitted, status: .applied, submittedAt: Samples.now),
@@ -35,7 +35,7 @@ struct BlankWindowRegressionTests {
     @Test func coldEmailFollowUpsKeepsTheSplitViewInsideTheWindow() async {
         let store = await triggerStore()
         #expect(!store.outreach.sendEnabled)
-        ColdEmailModel.shared(for: store).tab = .followUps
+        ColdEmailModel.shared(for: store).tab = .outbox
         for item in [SidebarItem.coldEmail, .dashboard, .needsYou, .pipeline] {
             let host = WindowHost(store: store)
             store.router.selection = item
@@ -59,12 +59,15 @@ struct BlankWindowRegressionTests {
     /// a width it is probed with.
     @Test func sendingOffNoticeDoesNotInflateTheScreenMinimumHeight() async {
         let store = await triggerStore()
-        let model = ColdEmailModel(store: store)
-        model.tab = .followUps
-        let controller = NSHostingController(rootView: ColdEmailView(modelOverride: model).appEnvironment(store, simulateReduceMotion: true))
-        _ = controller.view
-        let narrow = controller.sizeThatFits(in: CGSize(width: 1, height: 0))
-        #expect(narrow.height < 1000, "Cold Email reports \(narrow.height)pt tall at a 1pt width")
+        for tab in ColdEmailTab.allCases {
+            let model = ColdEmailModel(store: store)
+            model.tab = tab
+            model.ensureFocus()
+            let controller = NSHostingController(rootView: ColdEmailView(modelOverride: model).appEnvironment(store, simulateReduceMotion: true))
+            _ = controller.view
+            let narrow = controller.sizeThatFits(in: CGSize(width: 1, height: 0))
+            #expect(narrow.height < 1000, "Cold Email ▸ \(tab.title) reports \(narrow.height)pt tall at a 1pt width")
+        }
         await store.stop()
     }
 }

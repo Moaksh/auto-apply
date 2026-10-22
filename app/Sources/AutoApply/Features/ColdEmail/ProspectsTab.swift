@@ -1,4 +1,4 @@
-// ProspectsTab.swift — Cold Email ▸ Prospects (plan §A.2–A.3): companies to reach out to without
+// ProspectsTab.swift — Cold Email ▸ Companies (prospects, plan §A.2–A.3): companies to reach out to without
 // an application. Search ("Series B fintech in Bangalore") runs on Google when the browser is
 // free; results come back scored for fit. Shortlist finds people, Watch adds the company to the
 // job watchlist, Dismiss hides it for good. The detail pane shows the company summary with its

@@ -355,7 +355,16 @@ struct DesignSystemTests {
                 let count = prominentCount(store: store) { ColdEmailView(modelOverride: model) }
                 await Task.yield()
                 #expect(count <= 1, "Cold Email ▸ \(tab.title) (sending \(sendingOn ? "on" : "off")) shows \(count) primary actions")
+                // Up next with drafts waiting: exactly one — Send N… (sending on) or the one-time
+                // Turn on sending… (sending off). Never both.
+                if tab == .outbox {
+                    #expect(count == 1, "Up next with drafts (sending \(sendingOn ? "on" : "off")) shows \(count) primary actions")
+                }
             }
+            // People ▸ Could refer you: Add referral is the one primary (Add contact steps aside).
+            let people = ColdEmailModel(store: store)
+            people.showPeople(.couldRefer)
+            #expect(prominentCount(store: store) { ColdEmailView(modelOverride: people) } == 1, "People ▸ Could refer you")
         }
         let model = ColdEmailModel(store: store)
         model.selectAllDrafts()

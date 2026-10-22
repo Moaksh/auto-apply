@@ -317,6 +317,20 @@ extension ReferralState {
 
     /// Display order of the Referrals groups.
     static let displayOrder: [ReferralState] = [.connected, .toConnect, .suggested, .requested, .asked, .noResponse, .referred, .declined]
+
+    /// The referral copilot as three steps: 1 connect, 2 ask, 3 hear back. The step you're on
+    /// (1…3), or 4 once it's settled (referred / declined) or dismissed.
+    var checklistStep: Int {
+        switch self {
+        case .suggested, .toConnect, .requested, .noResponse: 1
+        case .connected: 2
+        case .asked: 3
+        case .referred, .declined, .dismissed: 4
+        }
+    }
+
+    /// Still being worked on (not referred, declined or dismissed).
+    var isOpen: Bool { checklistStep < 4 }
 }
 
 extension ProspectStatus {
