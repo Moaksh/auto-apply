@@ -18,8 +18,12 @@ struct StepTicker: View {
             Text("Steps").eyebrowStyle()
             VStack(alignment: .leading, spacing: 2) {
                 if steps.isEmpty {
-                    ForEach(Array(fallbackLines.suffix(Self.visibleLines).enumerated()), id: \.offset) { _, line in
-                        Text(line).font(Typography.mono).foregroundStyle(Palette.textSecondary).lineLimit(1)
+                    ForEach(Array(fallbackLines.suffix(Self.visibleLines).enumerated()), id: \.offset) { offset, line in
+                        let isLast = offset == min(fallbackLines.count, Self.visibleLines) - 1
+                        Text(line).font(Typography.mono)
+                            .foregroundStyle(isLast ? Palette.textPrimary : Palette.textSecondary)
+                            .lineLimit(1)
+                            .contentTransition(.interpolate)
                             .frame(height: Self.lineHeight, alignment: .leading)
                     }
                     if fallbackLines.isEmpty {
@@ -29,14 +33,18 @@ struct StepTicker: View {
                 } else {
                     ForEach(Array(steps.suffix(Self.visibleLines).enumerated()), id: \.element.id) { offset, step in
                         let isCurrent = isActive && step.id == steps.last?.id
+                        // New steps tick in from below (the list is bottom-aligned), the old top
+                        // line fades out: a smooth odometer of what the agent is doing.
                         line(step, isCurrent: isCurrent)
-                            .transition(reduced ? .opacity : .rowInsert)
+                            .transition(reduced ? .opacity : .asymmetric(insertion: .push(from: .bottom).combined(with: .opacity),
+                                                                         removal: .opacity))
                     }
                 }
             }
             .frame(height: CGFloat(Self.visibleLines) * (Self.lineHeight + 2), alignment: .bottomLeading)
             .clipped()
             .motion(Motion.snappy, value: steps.map(\.id))
+            .motion(Motion.snappy, value: fallbackLines)
             chips
         }
         .accessibilityElement(children: .combine)
@@ -53,7 +61,10 @@ struct StepTicker: View {
             } else {
                 Text("✓").foregroundStyle(Palette.applied)
             }
-            Text(text(step)).foregroundStyle(isCurrent ? Palette.textPrimary : Palette.textSecondary).lineLimit(1)
+            Text(text(step))
+                .foregroundStyle(isCurrent ? Palette.textPrimary : Palette.textSecondary)
+                .lineLimit(1)
+                .contentTransition(.interpolate)
             if step.isLowConfidence {
                 Text("not sure → asking you").foregroundStyle(Palette.needsYou).lineLimit(1)
             }

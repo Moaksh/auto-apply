@@ -1,17 +1,20 @@
 // BrandGradient.swift — the brand media field: deep green → ink → navy with a hint of coral.
-// Used only behind onboarding (the one place the app is "media"); never on ordinary screens or
-// controls.
+// Used behind onboarding and as the Dashboard hero band (the owner's deliberate exception to
+// the calm-at-rest rule, 2026-10-22); never on ordinary screens or controls.
 //
 // Calm by default: the field is a static frame. It drifts (a 3×3 `MeshGradient` on long,
-// co-prime periods, ≤ 20 fps) only when the caller says the agent is working (`isActive`), the
-// window is visible, and Reduce Motion is off.
+// co-prime periods) only when the caller asks (`isActive`), the window is visible, and Reduce
+// Motion is off. Redraws are capped at `frameRate`, never above 20 fps (the Dashboard uses 10 at
+// rest and 20 while the agent works).
 import SwiftUI
 
 struct BrandGradientField: View {
-    /// Drift only while the agent is actually working. Static otherwise.
+    /// Drift only when the caller asks (onboarding: never; Dashboard: visible and not paused).
     var isActive: Bool = false
     /// 0…1 — scales the colour against the ink ground (Ignition fades it in).
     var brightness: Double = 1
+    /// Redraw cap while drifting, clamped to 1…20 fps.
+    var frameRate: Double = 20
 
     @Environment(\.motionReduced) private var reduced
     @State private var isWindowVisible = true
@@ -20,7 +23,7 @@ struct BrandGradientField: View {
         let animate = isActive && isWindowVisible && !reduced
         ZStack {
             Palette.Brand.ink
-            TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !animate)) { timeline in
+            TimelineView(.animation(minimumInterval: 1.0 / min(20, max(1, frameRate)), paused: !animate)) { timeline in
                 let t = animate ? timeline.date.timeIntervalSinceReferenceDate : 0
                 MeshGradient(width: 3, height: 3,
                              points: BrandMesh.points(at: t),
@@ -66,11 +69,11 @@ enum BrandMesh {
 }
 
 extension View {
-    /// Content on the brand field (onboarding only), dark appearance so every token resolves to
-    /// its on-dark value. Static unless `isActive`.
-    func brandHeroBand(isActive: Bool = false, cornerRadius: CGFloat = Radius.hero) -> some View {
+    /// Content on the brand field (onboarding, the Dashboard hero), dark appearance so every
+    /// token resolves to its on-dark value. Static unless `isActive`.
+    func brandHeroBand(isActive: Bool = false, frameRate: Double = 20, cornerRadius: CGFloat = Radius.hero) -> some View {
         self
-            .background { BrandGradientField(isActive: isActive) }
+            .background { BrandGradientField(isActive: isActive, frameRate: frameRate) }
             .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
             .overlay {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)

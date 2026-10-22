@@ -1,7 +1,8 @@
 // DesignSystemTests.swift — guards for the redesign (Rams audit 2026-10-22):
 // - token contrast (text ≥ 4.5:1, status inks ≥ 3:1, text on the accent ≥ 4.5:1) in both modes;
 // - a source lint: no glass or prominent system buttons in content, no shadows, no breathing
-//   symbols, the mode switch never approves, and none of the retired jargon in UI strings;
+//   symbols, the mode switch never approves, and none of the retired jargon in UI strings
+//   (one documented exception: the Dashboard hero's glass, `dashboardHeroGlassFile`);
 // - each primary screen draws at most one prominent (primary pill) action.
 import AppKit
 import SwiftUI
@@ -95,13 +96,47 @@ struct DesignSystemTests {
         #expect(Self.sources().count > 50)
     }
 
+    /// The Dashboard hero exception (owner decision 2026-10-22: "beautiful with animations and
+    /// liveliness"). The hero band is the one place where content floats on Liquid Glass over the
+    /// living brand field. The exemption is narrow: glass is applied by ONE helper
+    /// (`heroGlass(in:)` in this file), and only Dashboard code may call it. Everything else in
+    /// the app keeps the calm rules below. The hero's continuous motion lives in the same file
+    /// and is gated by `heroMotionActive` (window visible, Reduce Motion off, ≤ 20/30 fps).
+    static let dashboardHeroGlassFile = "Features/Dashboard/Hero/HeroStyle.swift"
+
     @Test func noGlassOrSystemProminentButtonsInContent() {
         #expect(offenders(".glassProminent").isEmpty)
         #expect(offenders(".borderedProminent").isEmpty)
         #expect(offenders("buttonStyle(.glass)").isEmpty)
         #expect(offenders(".regularMaterial").isEmpty)
-        // Glass is applied in exactly one place (the control-layer helper).
-        #expect(offenders(".glassEffect(", allowedIn: ["DesignSystem/Materials.swift"]).isEmpty)
+        // Glass is applied in exactly two places: the control-layer helper, and the Dashboard
+        // hero's helper (the documented exception above).
+        #expect(offenders(".glassEffect(", allowedIn: ["DesignSystem/Materials.swift", Self.dashboardHeroGlassFile]).isEmpty)
+    }
+
+    @Test func heroGlassStaysOnTheDashboard() {
+        // `heroGlass(` may only be called from the Dashboard (the hero band and its live agent).
+        #expect(offenders("heroGlass(", allowedIn: ["Features/Dashboard/"]).isEmpty)
+        #expect(offenders("heroPanel(", allowedIn: ["Features/Dashboard/"]).isEmpty)
+        #expect(offenders("HeroBreath(", allowedIn: ["Features/Dashboard/"]).isEmpty)
+        #expect(offenders("heroMotionActive", allowedIn: ["Features/Dashboard/"]).isEmpty)
+        #expect(Self.sources().contains { $0.path == Self.dashboardHeroGlassFile }, "the lint found the hero helper")
+    }
+
+    @Test func heroMotionIsCapped() {
+        // Ambient fields ≤ 20 fps, flows ≤ 30 fps; the brand field clamps its own rate.
+        #expect(HeroFrameRate.ambientIdle <= 20 && HeroFrameRate.ambient <= 20)
+        #expect(HeroFrameRate.flow <= 30)
+        // No 60 fps timelines in the hero or the live agent.
+        let heroFiles = Self.sources().filter { $0.path.hasPrefix("Features/Dashboard/Hero/") || $0.path.hasPrefix("Features/Dashboard/LiveAgent/") }
+        let sixty = heroFiles.flatMap { file in
+            file.lines.enumerated().filter { $0.element.contains("TimelineView(.animation(") && !$0.element.contains("HeroFrameRate") }
+                .map { "\(file.path):\($0.offset + 1)" }
+        }
+        // The one exception is the 0.4 s scan line drawn once per new Chrome frame.
+        #expect(sixty.allSatisfy { $0.hasPrefix("Features/Dashboard/LiveAgent/LiveBrowserThumb.swift") }, "\(sixty)")
+        // The menu bar never runs continuous animation.
+        #expect(offenders("TimelineView(.animation", allowedIn: []).filter { $0.hasPrefix("Features/MenuBar/") }.isEmpty)
     }
 
     @Test func flatSurfacesAndCalmMotion() {

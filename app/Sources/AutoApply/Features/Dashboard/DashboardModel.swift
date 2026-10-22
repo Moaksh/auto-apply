@@ -1,5 +1,6 @@
 // DashboardModel.swift — pure presentation logic for the Dashboard (docs/UI_UX_PLAN.md §4):
-// greeting, next-run label, hero state/verb, KPI captions, count-up policy. Views stay thin
+// greeting, next-run label and countdown, hero state/verb, KPI captions, the per-day count-up
+// policy. Views stay thin
 // and every rule here is unit-tested (Tests/AutoApplyTests/C2).
 import CryptoKit
 import Foundation
@@ -95,6 +96,71 @@ enum DashboardFormat {
     static func tickerTime(_ date: Date, calendar: Calendar = .current) -> String {
         let c = calendar.dateComponents([.hour, .minute, .second], from: date)
         return String(format: "%02d:%02d:%02d", c.hour ?? 0, c.minute ?? 0, c.second ?? 0)
+    }
+}
+
+/// The hero's idle countdown and its ring.
+enum HeroCountdown {
+    /// "3h 12m", "12m", "45s", "2d 4h"; "now" inside the last few seconds.
+    static func remaining(until nextRun: Date, now: Date) -> String {
+        let s = Int(nextRun.timeIntervalSince(now).rounded(.up))
+        if s <= 5 { return "now" }
+        if s < 60 { return "\(s)s" }
+        let minutes = (s + 59) / 60
+        if minutes < 60 { return "\(minutes)m" }
+        let h = minutes / 60, m = minutes % 60
+        if h < 24 { return m == 0 ? "\(h)h" : "\(h)h \(m)m" }
+        let d = h / 24, rh = h % 24
+        return rh == 0 ? "\(d)d" : "\(d)d \(rh)h"
+    }
+
+    /// "in 3h 12m" / "starting now".
+    static func phrase(nextRun: Date, now: Date) -> String {
+        let r = remaining(until: nextRun, now: now)
+        return r == "now" ? "starting now" : "in \(r)"
+    }
+
+    /// How often the countdown needs to redraw: every second in the last two minutes, else
+    /// every 30 s (minutes are the finest unit shown).
+    static func refreshInterval(nextRun: Date?, now: Date) -> TimeInterval {
+        guard let nextRun else { return 300 }
+        return nextRun.timeIntervalSince(now) <= 120 ? 1 : 30
+    }
+
+    /// 0…1 — how far we are from the last run's end to the next run. nil without a start.
+    static func progress(from start: Date?, to nextRun: Date?, now: Date) -> Double? {
+        guard let start, let nextRun, nextRun > start else { return nil }
+        return min(1, max(0, now.timeIntervalSince(start) / nextRun.timeIntervalSince(start)))
+    }
+}
+
+/// Numbers count up from 0 on the first Dashboard appearance of each day (never under Reduce
+/// Motion).
+enum CountUpPolicy {
+    static let storageKey = "dashboard.lastCountUpDay"
+
+    static func dayStamp(_ date: Date, calendar: Calendar = .current) -> String {
+        let c = calendar.dateComponents([.year, .month, .day], from: date)
+        return String(format: "%04d-%02d-%02d", c.year ?? 0, c.month ?? 0, c.day ?? 0)
+    }
+
+    /// True when today hasn't counted up yet.
+    static func shouldCountUp(lastStamp: String?, now: Date, reduceMotion: Bool, calendar: Calendar = .current) -> Bool {
+        guard !reduceMotion else { return false }
+        return lastStamp != dayStamp(now, calendar: calendar)
+    }
+}
+
+/// Which pipeline stage glows while the agent works.
+enum HeroFocus {
+    static func stage(for state: HeroState) -> FlowStage? {
+        switch state {
+        case .discovering: .discovered
+        case .scoring: .scored
+        case .prepping: .queued
+        case .filling: .filling
+        default: nil
+        }
     }
 }
 

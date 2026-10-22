@@ -3,6 +3,11 @@
 // in ONE Canvas inside a TimelineView. Particles are not state: positions are derived from
 // (transition.start, now), so redraws are stateless. Counts are real Text views overlaid at the
 // node positions (numericText + accessibility).
+//
+// On the Dashboard's brand field (`onBrand`) it glows: while the agent works, light streams
+// along the edges the jobs travel (ambient flow), the stage in hand pulses, and real transitions
+// fly as haloed particles. Redraws are capped at 30 fps and stop when the agent is idle, the
+// window is hidden, or Reduce Motion is on (then it's a static, lit diagram).
 import SwiftUI
 
 /// Pure geometry for the flow (unit-tested). All points are in the view's coordinate space.
@@ -87,6 +92,18 @@ struct FlowGeometry: Sendable, Equatable {
         return max(0, 1 - (elapsed - travelDuration) / 0.25)
     }
 
+    /// Ambient flow along a main edge while the agent works: `perEdge` evenly spaced dots
+    /// travelling left → right once every `period` seconds, fading in and out at the ends.
+    /// Returns (progress along the edge 0…1, opacity 0…1). Pure, so tests can pin it.
+    static func ambientDots(edge: Int, at t: TimeInterval, perEdge: Int = 3, period: Double = 2.2) -> [(progress: Double, opacity: Double)] {
+        guard perEdge > 0, period > 0 else { return [] }
+        return (0..<perEdge).map { k in
+            let raw = t / period + Double(k) / Double(perEdge) + Double(edge) * 0.17
+            let p = raw - floor(raw)
+            return (p, sin(p * .pi))
+        }
+    }
+
     private func lerp(_ a: CGPoint, _ b: CGPoint, _ t: CGFloat) -> CGPoint {
         CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t)
     }
@@ -138,10 +155,15 @@ struct PipelineFlowView: View {
     var threshold: Int = 70
     var verb: String = "Idle"
     var isVisible: Bool = true
+    /// Drawn on the Dashboard's brand field: glowing rails, ambient flow, pulsing focus.
+    var onBrand: Bool = false
+    /// The stage the agent is working on (glows while running).
+    var focus: FlowStage? = nil
     var onSelectStage: (FlowStage) -> Void = { _ in }
     var jobsAtStage: (FlowStage) -> [JobItem] = { _ in [] }
 
     @Environment(\.motionReduced) private var reduced
+    @Environment(\.dashboardCountUp) private var countUp
     @State private var hoveredStage: FlowStage?
 
     private var fillingCount: Int { snapshot.activeJobID != nil && isRunning ? 1 : 0 }
@@ -163,10 +185,12 @@ struct PipelineFlowView: View {
 
     private func canvas(_ geo: FlowGeometry) -> some View {
         let animate = isRunning && isVisible && !reduced && !isSkeleton
-        return TimelineView(.animation(minimumInterval: 1 / 60, paused: !animate)) { timeline in
+        return TimelineView(.animation(minimumInterval: 1 / HeroFrameRate.flow, paused: !animate)) { timeline in
             Canvas(rendersAsynchronously: false) { ctx, _ in
+                if onBrand && !isSkeleton { drawFocusGlow(&ctx, geo, now: timeline.date, animate: animate) }
                 drawRails(&ctx, geo)
                 if isSkeleton { return }
+                if onBrand && animate { drawAmbientFlow(&ctx, geo, now: timeline.date) }
                 if !reduced { drawParticles(&ctx, geo, now: timeline.date) }
                 drawActiveOrb(&ctx, geo, now: timeline.date, animate: animate)
             }
@@ -175,15 +199,70 @@ struct PipelineFlowView: View {
         .allowsHitTesting(false)
     }
 
+    private static let glow = Palette.Brand.signal
+
+    /// Index of the furthest main stage the current run has reached (lit rail up to it).
+    private var litIndex: Int {
+        let c = snapshot.counts
+        if c.submitted > 0 { return 4 }
+        if fillingCount > 0 { return 3 }
+        if c.queued > 0 { return 2 }
+        if c.scored > 0 { return 1 }
+        return 0
+    }
+
+    /// A soft pulse of light under the stage the agent is working on.
+    private func drawFocusGlow(_ ctx: inout GraphicsContext, _ geo: FlowGeometry, now: Date, animate: Bool) {
+        guard isRunning, let focus else { return }
+        let p = geo.node(focus)
+        let phase = animate ? HeroBreathCurve.phase(at: now.timeIntervalSinceReferenceDate, period: 2) : 0.5
+        let r = 46 + CGFloat(phase) * 10
+        let rect = CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)
+        ctx.fill(Circle().path(in: rect),
+                 with: .radialGradient(Gradient(colors: [Self.glow.opacity(0.20 + 0.14 * phase), Self.glow.opacity(0)]),
+                                       center: p, startRadius: 0, endRadius: r))
+    }
+
+    /// Light travelling along the edges jobs move through this run.
+    private func drawAmbientFlow(_ ctx: inout GraphicsContext, _ geo: FlowGeometry, now: Date) {
+        let t = now.timeIntervalSinceReferenceDate
+        let lit = max(litIndex, FlowStage.main.firstIndex(of: focus ?? .discovered) ?? 0)
+        guard lit > 0 else { return }
+        ctx.blendMode = .plusLighter
+        for edge in 0..<lit {
+            let a = geo.node(FlowStage.main[edge]), b = geo.node(FlowStage.main[edge + 1])
+            for dot in FlowGeometry.ambientDots(edge: edge, at: t) {
+                let p = CGPoint(x: a.x + (b.x - a.x) * dot.progress, y: a.y + (b.y - a.y) * dot.progress)
+                let halo: CGFloat = 5, core: CGFloat = 1.6
+                ctx.fill(Circle().path(in: CGRect(x: p.x - halo, y: p.y - halo, width: halo * 2, height: halo * 2)),
+                         with: .color(Self.glow.opacity(0.16 * dot.opacity)))
+                ctx.fill(Circle().path(in: CGRect(x: p.x - core, y: p.y - core, width: core * 2, height: core * 2)),
+                         with: .color(Self.glow.opacity(0.85 * dot.opacity)))
+            }
+        }
+        ctx.blendMode = .normal
+    }
+
     private func drawRails(_ ctx: inout GraphicsContext, _ geo: FlowGeometry) {
-        let rail = Palette.hairline
-        let strong = Palette.strokeStrong
+        let rail = onBrand ? Color.white.opacity(0.10) : Palette.hairline
+        let strong = onBrand ? Color.white.opacity(0.22) : Palette.strokeStrong
         var main = Path()
         for (i, stage) in FlowStage.main.enumerated() {
             let p = geo.node(stage)
             if i == 0 { main.move(to: p) } else { main.addLine(to: p) }
         }
         ctx.stroke(main, with: .color(isSkeleton ? rail : strong), lineWidth: 1)
+        if onBrand && !isSkeleton && litIndex > 0 {
+            // The stretch of the pipeline this run has reached, lit in the brand signal.
+            let start = geo.node(.discovered), end = geo.node(FlowStage.main[litIndex])
+            var lit = Path()
+            lit.move(to: start)
+            lit.addLine(to: end)
+            let shading = GraphicsContext.Shading.linearGradient(
+                Gradient(colors: [Self.glow.opacity(0.15), Self.glow.opacity(isIdle ? 0.35 : 0.7)]),
+                startPoint: start, endPoint: end)
+            ctx.stroke(lit, with: shading, lineWidth: 1.5)
+        }
 
         for branch in [FlowStage.skipped, .needsYou] {
             var path = Path()
@@ -196,16 +275,27 @@ struct PipelineFlowView: View {
             ctx.stroke(path, with: .color(color), style: StrokeStyle(lineWidth: 1, dash: [2, 3]))
         }
 
-        for stage in FlowStage.main {
+        for (i, stage) in FlowStage.main.enumerated() {
             let p = geo.node(stage)
             let r = FlowGeometry.nodeRadius
             let rect = CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)
-            ctx.fill(Circle().path(in: rect), with: .color(Palette.surface))
-            ctx.stroke(Circle().path(in: rect), with: .color(isSkeleton ? rail : nodeColor(stage)), lineWidth: 1.25)
+            if onBrand && !isSkeleton && i <= litIndex && FlowAccessibility.count(stage, snapshot.counts, filling: fillingCount) > 0 {
+                // Reached stages are lit beads with a faint halo.
+                let color = stage == .submitted ? Palette.applied : Self.glow
+                let h = r + 5
+                ctx.fill(Circle().path(in: CGRect(x: p.x - h, y: p.y - h, width: h * 2, height: h * 2)),
+                         with: .radialGradient(Gradient(colors: [color.opacity(isIdle ? 0.18 : 0.32), color.opacity(0)]),
+                                               center: p, startRadius: 0, endRadius: h))
+                ctx.fill(Circle().path(in: rect), with: .color(color.opacity(isIdle ? 0.7 : 1)))
+            } else {
+                ctx.fill(Circle().path(in: rect), with: .color(onBrand ? Palette.Brand.ink2 : Palette.surface))
+                ctx.stroke(Circle().path(in: rect), with: .color(isSkeleton ? rail : nodeColor(stage)), lineWidth: 1.25)
+            }
         }
     }
 
     private func nodeColor(_ stage: FlowStage) -> Color {
+        if onBrand { return isIdle ? Color.white.opacity(0.35) : Color.white.opacity(0.55) }
         if isIdle { return Palette.textTertiary }
         return switch stage {
         case .filling: Palette.accent
@@ -226,7 +316,13 @@ struct PipelineFlowView: View {
             case .submitted: Palette.applied
             default: Palette.accent
             }
-            let r = FlowGeometry.particleRadius
+            let r = FlowGeometry.particleRadius * (onBrand ? 1.4 : 1)
+            if onBrand {
+                let h: CGFloat = 7
+                ctx.fill(Circle().path(in: CGRect(x: p.x - h, y: p.y - h, width: h * 2, height: h * 2)),
+                         with: .radialGradient(Gradient(colors: [color.opacity(0.45 * opacity), color.opacity(0)]),
+                                               center: p, startRadius: 0, endRadius: h))
+            }
             ctx.fill(Circle().path(in: CGRect(x: p.x - r, y: p.y - r, width: r * 2, height: r * 2)),
                      with: .color(color.opacity(0.9 * opacity)))
         }
@@ -259,7 +355,7 @@ struct PipelineFlowView: View {
         if submitted > 0 && !isSkeleton {
             Text(DashboardFormat.submittedGlyphs(submitted))
                 .font(Typography.monoSmall)
-                .foregroundStyle(isIdle ? Palette.textTertiary : Palette.applied)
+                .foregroundStyle(onBrand ? Palette.applied.opacity(isIdle ? 0.75 : 1) : (isIdle ? Palette.textTertiary : Palette.applied))
                 .lineLimit(1)
                 .fixedSize()
                 .position(x: geo.node(.submitted).x, y: geo.railY + 18)
@@ -283,10 +379,12 @@ struct PipelineFlowView: View {
                 if isSkeleton {
                     RoundedRectangle(cornerRadius: 3).fill(Palette.hairline).frame(width: 22, height: 14)
                 } else {
-                    Text("\(count)")
-                        .font(Typography.metric)
-                        .foregroundStyle(isIdle ? Palette.textTertiary : Palette.textPrimary)
-                        .numericRoll(Double(count))
+                    let shown = countUp ? 0 : count
+                    Text("\(shown)")
+                        .font(onBrand ? Typography.metric.weight(.semibold) : Typography.metric)
+                        .foregroundStyle(onBrand ? (isIdle ? Color.white.opacity(0.78) : Color.white)
+                                                 : (isIdle ? Palette.textTertiary : Palette.textPrimary))
+                        .numericRoll(Double(shown))
                 }
             }
             .contentShape(Rectangle())
