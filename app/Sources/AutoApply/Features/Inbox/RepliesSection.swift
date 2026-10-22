@@ -116,6 +116,8 @@ private struct ReplyRow: View {
         switch item {
         case .outreach(let t):
             "\(store.outreach.contact(id: t.contactID)?.fullName ?? "Someone") at \(t.company) replied"
+        case .employer(let r) where KindNo.applies(r):
+            "\(store.jobs.job(applicationID: r.applicationID)?.company ?? r.sender) replied: \(KindNo.phrase)"
         case .employer(let r):
             "\(store.jobs.job(applicationID: r.applicationID)?.company ?? r.sender) wrote: \(r.label.label.lowercased())"
         case .possiblySent(let m):
@@ -270,7 +272,7 @@ private struct EmployerReplyPane: View {
                 VStack(alignment: .leading, spacing: Space.s) {
                     HStack(spacing: Space.s) {
                         Text("\(job?.company ?? reply.sender) wrote about your application").font(Typography.title2)
-                        Badge(reply.label.label)
+                        Badge(KindNo.applies(reply) ? KindNo.badge : reply.label.label)
                     }
                     if let job { Text(job.title).font(Typography.callout).foregroundStyle(Palette.textSecondary) }
                 }
@@ -286,7 +288,9 @@ private struct EmployerReplyPane: View {
                     .padding(Space.m)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .well()
-                if reply.isPendingSuggestion, let move = reply.suggestedStatus {
+                if KindNo.applies(reply) {
+                    KindNoCard(reply: reply)
+                } else if reply.isPendingSuggestion, let move = reply.suggestedStatus {
                     HStack(spacing: Space.s) {
                         Image(systemName: StatusKind(status: move).symbol).foregroundStyle(StatusKind(status: move).color)
                         Text("Suggested: move it from \((job?.status ?? .applied).label) to \(move.label). Nothing changes unless you accept.")
@@ -297,7 +301,13 @@ private struct EmployerReplyPane: View {
             }
         } actions: {
             Group {
-                if reply.isPendingSuggestion, let move = reply.suggestedStatus {
+                if reply.isPendingSuggestion, KindNo.applies(reply) {
+                    Button("Close it") { run { _ = await store.acceptReplySuggestion(reply) } }
+                        .buttonStyle(.primaryPill)
+                        .help("Moves it to Closed in Pipeline. Nothing is sent.")
+                    Button("Keep it open") { run { _ = await store.dismissReplySuggestion(reply) } }
+                        .buttonStyle(.secondaryLink)
+                } else if reply.isPendingSuggestion, let move = reply.suggestedStatus {
                     Button("Move to \(move.label)") { run { _ = await store.acceptReplySuggestion(reply) } }
                         .buttonStyle(.primaryPill)
                     Button("Keep as is") { run { _ = await store.dismissReplySuggestion(reply) } }
@@ -356,5 +366,68 @@ private struct PossiblySentPane: View {
         } actions: {
             PossiblySentControls(message: message)
         }
+    }
+}
+
+// MARK: - A kind no
+
+/// An employer's "not moving forward": plain words, no red, and an optional thank-you note.
+enum KindNo {
+    static let phrase = "not moving forward"
+    static let badge = "Not moving forward"
+
+    /// The reply is, or suggests, a rejection.
+    static func applies(_ reply: ApplicationReplyItem) -> Bool {
+        reply.label == .rejection || reply.suggestedStatus == .rejected
+    }
+
+    /// A short thank-you that asks for feedback. Built only from facts on hand (their name, the
+    /// role, the company, your first name): no claims about you that could be wrong. Never sent for you.
+    static func thankYouNote(senderName: String?, role: String?, company: String?, firstName: String?) -> String {
+        let hello = senderName.flatMap { $0.split(separator: " ").first.map(String.init) }.map { "Hi \($0)," } ?? "Hello,"
+        let what = [role.map { "the \($0) role" }, company.map { "at \($0)" }].compactMap { $0 }.joined(separator: " ")
+        let about = what.isEmpty ? "" : " about \(what)"
+        return [
+            hello,
+            "Thank you for letting me know\(about), and for the time you spent on my application.",
+            "If you have a moment, I'd be grateful for any feedback that could help me with future applications. No worries if not.",
+            "Best wishes,\n\(firstName ?? "")",
+        ].joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// "This one's closed." with an optional thank-you / feedback note to copy into your reply.
+struct KindNoCard: View {
+    var reply: ApplicationReplyItem
+    @Environment(AppStore.self) private var store
+    @State private var copied = false
+
+    var body: some View {
+        let job = store.jobs.job(applicationID: reply.applicationID)
+        VStack(alignment: .leading, spacing: Space.s) {
+            HStack(spacing: Space.s) {
+                Image(systemName: "archivebox").foregroundStyle(Palette.textTertiary).accessibilityHidden(true)
+                Text("This one's closed. That's normal: most applications end here.")
+                    .font(Typography.body)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Text("If you like, thank them and ask for feedback. The note uses only facts you've given, and AutoApply never sends it for you.")
+                .font(Typography.callout)
+                .foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(copied ? "Copied" : "Copy a thank-you note") {
+                let note = KindNo.thankYouNote(senderName: reply.fromName, role: job?.title, company: job?.company,
+                                               firstName: store.library.firstName)
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(note, forType: .string)
+                copied = true
+            }
+            .buttonStyle(.secondaryLink)
+            .help("Copies a short thank-you that asks for feedback. Paste it into your reply in Gmail.")
+        }
+        .padding(Space.m)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .well()
+        .accessibilityElement(children: .contain)
     }
 }

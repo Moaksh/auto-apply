@@ -27,6 +27,8 @@ struct KanbanColumn: View {
     var onSelect: (Int) -> Void
     var onOpen: (Int) -> Void
     var onSkipReason: (String?) -> Void
+    /// Inside the Closed drawer: neutral header, kind title, no status hue.
+    var calm: Bool = false
 
     @Environment(\.undoManager) private var undoManager
     @Environment(\.motionReduced) private var reduced
@@ -94,15 +96,15 @@ struct KanbanColumn: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("\(column.title), \(jobs.count) jobs")
+        .accessibilityLabel("\(calm ? BoardRules.closedTitle(column) : column.title), \(jobs.count) jobs")
     }
 
     private var header: some View {
         HStack(spacing: Space.xs) {
-            Image(systemName: StatusKind(column: column).symbol)
-                .foregroundStyle(StatusKind(column: column).color)
+            Image(systemName: calm ? BoardRules.closedSymbol(column) : StatusKind(column: column).symbol)
+                .foregroundStyle(calm ? Palette.textTertiary : StatusKind(column: column).color)
                 .imageScale(.small)
-            Text(column.title).eyebrowStyle()
+            Text(calm ? BoardRules.closedTitle(column) : column.title).eyebrowStyle()
             Text("\(column == .skipped ? skipGroups.reduce(0) { $0 + $1.count } : jobs.count)")
                 .font(Typography.metricSmall)
                 .foregroundStyle(Palette.textSecondary)
@@ -156,7 +158,7 @@ struct KanbanColumn: View {
         .accessibilityAction { onOpen(job.id) }
         .accessibilityActions {
             ForEach(BoardRules.legalTargets(for: job), id: \.self) { status in
-                Button("Move to \(status.label)") {
+                Button("Move to \(BoardRules.moveLabel(status))") {
                     Task { await model.move(jobID: job.id, to: status, undoManager: undoManager) }
                 }
             }
@@ -175,7 +177,7 @@ struct KanbanColumn: View {
             Divider()
             Menu("Move to") {
                 ForEach(targets, id: \.self) { status in
-                    Button(status.label) { Task { await model.move(jobID: job.id, to: status, undoManager: undoManager) } }
+                    Button(BoardRules.moveLabel(status)) { Task { await model.move(jobID: job.id, to: status, undoManager: undoManager) } }
                 }
             }
         }
@@ -222,6 +224,8 @@ struct KanbanColumn: View {
         return switch action {
         case .queue: ("The agent applies", "paperplane.fill")
         case .markApplied: ("Applied by you", "hand.raised.fill")
+        case .setStatus(.rejected): ("Close it · they went another way", BoardRules.closedSymbol(.rejected))
+        case .setStatus(.ghosted): ("Close it · no reply", BoardRules.closedSymbol(.ghosted))
         case .setStatus(let status): ("Move to \(status.label)", StatusKind(status: status).symbol)
         }
     }
@@ -231,6 +235,7 @@ struct KanbanColumn: View {
         case .queued: "Drag a job here and the agent applies to it"
         case .needsYou: "Nothing waiting on you"
         case .applied: "Drop applications here"
+        case _ where calm: isDragging ? "Drop here" : "Nothing here"
         default: isDragging ? "Drop here" : "Empty"
         }
     }

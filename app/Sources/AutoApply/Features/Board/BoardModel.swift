@@ -44,6 +44,55 @@ enum BoardRules {
         return out
     }
 
+    // MARK: Closed drawer (a kind no)
+
+    /// Rejected and Ghosted fold into one quiet "Closed" drawer at the end of the board.
+    static let closedColumns: [BoardColumn] = [.rejected, .ghosted]
+
+    /// The columns that stay open on the board.
+    static func openColumns(_ visible: [BoardColumn]) -> [BoardColumn] {
+        visible.filter { !closedColumns.contains($0) }
+    }
+
+    /// The visible columns that live in the Closed drawer.
+    static func drawerColumns(_ visible: [BoardColumn]) -> [BoardColumn] {
+        visible.filter { closedColumns.contains($0) }
+    }
+
+    /// The drawer opens by itself when the filter asks for a closed column (e.g. a funnel click).
+    static func drawerForcedOpen(filter: PipelineFilter) -> Bool {
+        guard let only = filter.columns, !only.isEmpty else { return false }
+        return only.contains { closedColumns.contains($0) }
+    }
+
+    /// Columns the arrow keys walk: closed ones only while the drawer is open.
+    static func navigableColumns(_ visible: [BoardColumn], drawerOpen: Bool) -> [BoardColumn] {
+        drawerOpen ? visible : openColumns(visible)
+    }
+
+    /// Plain, kind names inside the drawer.
+    static func closedTitle(_ column: BoardColumn) -> String {
+        switch column {
+        case .rejected: "They went another way"
+        case .ghosted: "No reply"
+        default: column.title
+        }
+    }
+
+    /// How a move to `status` is named in menus and toasts. A rejection is never "Rejected".
+    static func moveLabel(_ status: BoardStatus) -> String {
+        switch status {
+        case .rejected: "Closed · they went another way"
+        case .ghosted: "Closed · no reply"
+        default: status.label
+        }
+    }
+
+    /// Neutral symbol for a closed column (a soft fold, not an X).
+    static func closedSymbol(_ column: BoardColumn) -> String {
+        column == .ghosted ? "moon.zzz" : "archivebox"
+    }
+
     // MARK: Drag & drop legality
 
     /// The agent can apply to it: not applied yet, not being worked on, and it has a company
@@ -272,6 +321,10 @@ final class BoardModel {
     private(set) var celebrationSerial = 0
     /// One-time "First interview. Nice." note.
     private(set) var firstInterviewNoteJobID: Int?
+    /// The Closed drawer (Rejected + Ghosted) is folded until the user opens it.
+    var closedExpanded = false
+
+    func toggleClosed() { closedExpanded.toggle() }
 
     static let firstInterviewKey = "board.firstInterviewCelebrated"
     static let lastVisitKey = "board.lastVisit"
@@ -301,7 +354,10 @@ final class BoardModel {
         let ok = await store.setStatus(applicationID: appID, status: status, offerUndo: false)
         guard ok else { return false }
         Haptics.levelChange()
-        if !isUndo { Sounds.play(status == .interview || status == .offer ? .celebrate : .pop) }
+        // A closed card goes quietly: no sound.
+        if !isUndo, !BoardRules.closedColumns.contains(BoardColumn(status: status)) {
+            Sounds.play(status == .interview || status == .offer ? .celebrate : .pop)
+        }
         if !isUndo {
             celebrateIfNeeded(jobID: jobID, status: status)
             // The undo target and toast action must outlive this model: Job detail and the
@@ -313,9 +369,11 @@ final class BoardModel {
                     _ = Task { await BoardModel.revert(store: store, jobID: jobID, to: previous) }
                 }
             }
-            undoManager?.setActionName("Move to \(status.label)")
-            store.toasts.show("Moved to \(status.label)", symbol: StatusKind(status: status).symbol, style: .success,
-                              duration: .seconds(4), actionTitle: "Undo") {
+            undoManager?.setActionName("Move to \(BoardRules.moveLabel(status))")
+            let closed = BoardRules.closedColumns.contains(BoardColumn(status: status))
+            store.toasts.show(closed ? BoardRules.moveLabel(status) : "Moved to \(status.label)",
+                              symbol: closed ? BoardRules.closedSymbol(BoardColumn(status: status)) : StatusKind(status: status).symbol,
+                              style: closed ? .info : .success, duration: .seconds(4), actionTitle: "Undo") {
                 Task { await BoardModel.revert(store: store, jobID: jobID, to: previous) }
             }
         }
@@ -435,7 +493,7 @@ final class BoardModel {
         let ghosted = BoardRules.newlyGhosted(store.jobs.all, since: last)
         guard !ghosted.isEmpty else { return }
         let days = store.preferences.ghostAfterDays
-        store.toasts.show("Moved \(ghosted.count) to Ghosted · \(days) days without reply", symbol: StatusKind.ghosted.symbol,
+        store.toasts.show("Closed \(ghosted.count) · no reply in \(days) days", symbol: StatusKind.ghosted.symbol,
                           style: .info, duration: .seconds(4))
     }
 }

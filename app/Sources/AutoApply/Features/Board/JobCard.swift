@@ -28,7 +28,8 @@ struct JobCard: View, Equatable {
     var body: some View {
         let kind = StatusKind(job: job)
         HStack(spacing: 0) {
-            StatusBar(kind: kind).padding(.vertical, Space.s)
+            // A kind no: a closed card wears the neutral grey, never a red bar.
+            StatusBar(kind: kind == .rejected ? .ghosted : kind).padding(.vertical, Space.s)
             VStack(alignment: .leading, spacing: Space.xs) {
                 HStack(spacing: Space.s) {
                     CompanyMonogram(name: job.company)
@@ -92,7 +93,7 @@ struct JobCard: View, Equatable {
                     Menu {
                         Button("Interview") { onNudgeAnswer(.interview) }
                         Button("Assessment") { onNudgeAnswer(.assessment) }
-                        Button("Rejected") { onNudgeAnswer(.rejected) }
+                        Button("They went another way") { onNudgeAnswer(.rejected) }
                     } label: {
                         Text("Heard back?").font(Typography.callout)
                     }
@@ -118,7 +119,7 @@ struct JobCard: View, Equatable {
     private var ageDays: Int { Int(now.timeIntervalSince(BoardRules.ageReference(job)) / 86_400) }
 
     private var accessibilityText: String {
-        var parts = [job.company, job.title, StatusKind(job: job).label]
+        var parts = [job.company, job.title, StatusKind(job: job) == .rejected ? "closed, they went another way" : StatusKind(job: job).label]
         if let score = job.score { parts.append("match \(score)") }
         if job.state == .skipped { parts.append("skipped: " + BoardRules.skipTag(job.skipReason ?? job.stateReason, score: job.score, threshold: threshold)) }
         parts.append(job.ats.label)

@@ -2,6 +2,9 @@
 
 Quiet by design: only events that need the user are notified (a question, a CAPTCHA,
 a form waiting for review, a failure). No notification per submission.
+
+A kind no: rejections never notify. An employer's "not moving forward" and a contact's
+"not interested" wait quietly in Needs You ▸ Replies instead of interrupting the user.
 """
 
 from __future__ import annotations
@@ -21,8 +24,12 @@ NotifyFn = Callable[[str, str], Awaitable[None]]
 DEDUPE_SECONDS = 60.0
 
 
-#: Employer-reply labels worth a notification (``application_reply``), as words.
-_REPLY_WORDS = {"interview_invite": "interview invite", "assessment": "assessment", "rejection": "rejection", "offer": "offer"}
+#: Employer-reply labels worth a notification (``application_reply``), as words. Rejection is
+#: deliberately absent: a "no" is never pushed at the user.
+_REPLY_WORDS = {"interview_invite": "interview invite", "assessment": "assessment", "offer": "offer"}
+
+#: Cold-email reply labels that never notify: auto-replies, bounces, and a polite no.
+_QUIET_OUTREACH = ("ooo", "bounce", "not_interested")
 
 
 def _esc(s: str) -> str:
@@ -74,10 +81,10 @@ class Notifier:
             await self.notify("Ready for review", "A filled application is waiting for your approval.")
         elif event_type == "application_state" and d.get("to_state") == "failed":
             await self.notify("Application failed", d.get("reason") or "See the activity log.")
-        elif event_type == "outreach_reply" and d.get("label") not in ("ooo", "bounce"):
+        elif event_type == "outreach_reply" and d.get("label") not in _QUIET_OUTREACH and d.get("suggested_status") != "rejected":
             who = (d.get("contact_name") or "Someone").split()[0]
             await self.notify(f"{who} at {d.get('company')} replied", d.get("snippet") or "Open it in Gmail.")
-        elif event_type == "application_reply" and d.get("label") in _REPLY_WORDS:
+        elif event_type == "application_reply" and d.get("label") in _REPLY_WORDS and d.get("suggested_status") != "rejected":
             # Acknowledgements and "other" stay quiet; the reply is still on the board.
             await self.notify(f"{d.get('company') or 'An employer'} replied: {_REPLY_WORDS[d['label']]}",
                               d.get("subject") or d.get("snippet") or "Open it in Gmail.")

@@ -276,7 +276,7 @@ struct BoardModelTests {
         model.announceGhostedSinceLastVisit(now: Samples.now.addingTimeInterval(-86_400))
         #expect(store.toasts.current == nil, "first visit only stamps")
         model.announceGhostedSinceLastVisit(now: Samples.now.addingTimeInterval(60))
-        #expect(store.toasts.current?.message == "Moved 1 to Ghosted · 21 days without reply")
+        #expect(store.toasts.current?.message == "Closed 1 · no reply in 21 days")
     }
 }
 

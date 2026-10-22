@@ -208,24 +208,37 @@ struct BoardView: View {
         let skipGroups = BoardRules.skipReasonGroups(filteredJobs(BoardRules.filtered(store.jobs.jobs(in: .skipped), filter: PipelineFilter(source: filter.source, minScore: filter.minScore, searchText: filter.searchText))))
         let signature = visible.map { col in (byColumn[col] ?? []).map(\.id) }
         let selected = router.focusedJobID
+        let open = BoardRules.openColumns(visible)
+        let closed = BoardRules.drawerColumns(visible)
+        let forced = BoardRules.drawerForcedOpen(filter: filter)
+        let drawerOpen = model.closedExpanded || forced
+        let navigable = BoardRules.navigableColumns(visible, drawerOpen: drawerOpen)
+        let closedCount = closed.reduce(0) { $0 + (byColumn[$1]?.count ?? 0) }
+
+        func column(_ column: BoardColumn, calm: Bool) -> some View {
+            KanbanColumn(
+                column: column, jobs: byColumn[column] ?? [], model: model,
+                threshold: store.preferences.matchThreshold, questionCounts: questionCounts,
+                resumeLabels: labels, outreachMarks: outreachMarks, replySuggestions: replySuggestions,
+                selectedJobID: selected, now: now,
+                nudgeDays: store.preferences.nudgeDays, ghostAfterDays: store.preferences.ghostAfterDays,
+                skipGroups: skipGroups, skipReasonFilter: filter.skipReason, namespace: flightNS,
+                firstName: store.library.firstName,
+                onSelect: { id in
+                    router.focusedJobID = id
+                    boardFocused = true
+                },
+                onOpen: { id in router.openJob(id: id) },
+                onSkipReason: { reason in router.pipelineFilter.skipReason = reason }, calm: calm)
+        }
 
         return ScrollView(.horizontal) {
             HStack(alignment: .top, spacing: Space.gutter) {
-                ForEach(visible) { column in
-                    KanbanColumn(
-                        column: column, jobs: byColumn[column] ?? [], model: model,
-                        threshold: store.preferences.matchThreshold, questionCounts: questionCounts,
-                        resumeLabels: labels, outreachMarks: outreachMarks, replySuggestions: replySuggestions,
-                        selectedJobID: selected, now: now,
-                        nudgeDays: store.preferences.nudgeDays, ghostAfterDays: store.preferences.ghostAfterDays,
-                        skipGroups: skipGroups, skipReasonFilter: filter.skipReason, namespace: flightNS,
-                        firstName: store.library.firstName,
-                        onSelect: { id in
-                            router.focusedJobID = id
-                            boardFocused = true
-                        },
-                        onOpen: { id in router.openJob(id: id) },
-                        onSkipReason: { reason in router.pipelineFilter.skipReason = reason })
+                ForEach(open) { c in column(c, calm: false) }
+                if !closed.isEmpty {
+                    ClosedDrawer(columns: closed, count: closedCount, model: model, expanded: drawerOpen, canFold: !forced) {
+                        ForEach(closed) { c in column(c, calm: true) }
+                    }
                 }
             }
             .padding(Space.contentPadding)
@@ -236,7 +249,7 @@ struct BoardView: View {
         .focusEffectDisabled()
         .focused($boardFocused)
         .onKeyPress(phases: .down) { press in
-            handleKey(press, visible: visible, byColumn: byColumn)
+            handleKey(press, visible: navigable, byColumn: byColumn)
         }
         .onAppear { boardFocused = true }
         .accessibilityLabel("Pipeline board")
