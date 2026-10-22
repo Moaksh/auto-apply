@@ -31,6 +31,9 @@ enum MockScenario: String, CaseIterable, Sendable, Identifiable {
     case stress
     /// Fresh install: onboarding not completed.
     case onboarding
+    /// "Explore with sample data" (onboarding): a job seeker in Bengaluru, Indian companies, and an
+    /// agent that keeps working (MockSample).
+    case sample
 
     var id: String { rawValue }
 
@@ -53,6 +56,7 @@ enum MockScenario: String, CaseIterable, Sendable, Identifiable {
         case .burstSubmit: "Burst submit"
         case .stress: "Stress (5k jobs)"
         case .onboarding: "Onboarding (fresh install)"
+        case .sample: "Sample data (explore)"
         }
     }
 
@@ -92,6 +96,9 @@ enum MockScenario: String, CaseIterable, Sendable, Identifiable {
         switch self {
         case .needsYouStorm:
             MockScripts.addJobs(&data, ids: MockScripts.stormJobIDs, state: .queued, now: now)
+        case .sample:
+            state.preferences = MockSample.preferences
+            state.usesSamplePool = true
         case .reviewMode:
             state.preferences.mode = .review
             MockScripts.addJobs(&data, ids: MockScripts.reviewJobIDs, state: .queued, now: now)
@@ -110,6 +117,8 @@ enum MockScenario: String, CaseIterable, Sendable, Identifiable {
         case .stress, .firstRunEmpty, .onboarding, .reviewMode: break
         default: MockScripts.addReviewSamples(&data, now: now)
         }
+        // Sample mode: the persona, Indian companies and cities (before outreach, which follows the jobs).
+        if self == .sample { MockSample.localize(&data, now: now) }
         // Cold outreach on the applied jobs (drafts, a reply, prospects, referrals, employer replies).
         switch self {
         case .stress, .firstRunEmpty, .onboarding: break
@@ -138,6 +147,7 @@ enum MockScenario: String, CaseIterable, Sendable, Identifiable {
         case .capReached: MockScripts.capReached()
         case .burstSubmit: MockScripts.burstSubmit()
         case .stress: MockScripts.stress()
+        case .sample: MockSample.script()
         }
     }
 }
@@ -474,7 +484,7 @@ enum MockScripts {
             await world.sleepRespectingPause(0.6)
             let id = world.nextJobID()
             ids.append(id)
-            world.discover(scriptedJob(id: id, now: Date()))
+            world.discover(world.scriptedJob(id: id))
             world.setState(.discovering, message: "Greenhouse · watchlist", progress: Progress(done: k + 1, total: 5))
         }
         world.setState(.scoring, progress: Progress(done: 0, total: 5))

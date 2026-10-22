@@ -13,9 +13,12 @@ struct AutoApplyApp: App {
         ScreenRegistry.shared.discoverFeatures()
         store.start()
         AppNotifier.shared.start(store: store)
-        Updater.shared.start(store: store)
-        // An updated app moves the daemon onto its own build (re-install, or restart in a dev checkout).
-        Task { await DaemonControl.refreshAfterUpdate() }
+        // Sample data never touches the network or the real agent (no update check, no agent restart).
+        if !SampleMode.isPersisted() {
+            Updater.shared.start(store: store)
+            // An updated app moves the daemon onto its own build (re-install, or restart in a dev checkout).
+            Task { await DaemonControl.refreshAfterUpdate() }
+        }
         _store = State(initialValue: store)
     }
 

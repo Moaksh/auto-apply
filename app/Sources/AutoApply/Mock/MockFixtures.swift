@@ -145,14 +145,20 @@ enum MockFixtures {
     }
 
     /// A realistic Q&A audit for one application.
-    static func applicationAnswers(applicationID: Int, company: String, lowConfidence: Bool = false, startID: Int) -> [ApplicationAnswerItem] {
+    /// `profile` / `neverGuess`, when given (and filled in), supply the person's own answers;
+    /// otherwise the baseline persona's.
+    static func applicationAnswers(applicationID: Int, company: String, lowConfidence: Bool = false, startID: Int,
+                                   profile: Profile? = nil, neverGuess: NeverGuess? = nil) -> [ApplicationAnswerItem] {
+        let person = profile.flatMap { ($0.fullName ?? "").isEmpty ? nil : $0 } ?? Self.profile
+        let facts = neverGuess.flatMap { $0.salaryExpectation == nil ? nil : $0 } ?? Self.neverGuess
+        let sponsorship = (facts.sponsorship ?? "").lowercased().hasPrefix("requires") ? "Yes" : "No"
         var items: [(String, String, FieldType, Double?, AnswerOrigin, String?)] = [
-            ("Full name", "Moaksh Kakkar", .text, nil, .profile, nil),
-            ("Email", "moaksh@example.com", .email, nil, .profile, nil),
-            ("Phone", "+91 98765 43210", .phone, nil, .profile, nil),
+            ("Full name", person.fullName ?? "", .text, nil, .profile, nil),
+            ("Email", person.email ?? "", .email, nil, .profile, nil),
+            ("Phone", person.phone ?? "", .phone, nil, .profile, nil),
             ("Years with Go?", "4", .number, 0.93, .cv, "resume_variants:1"),
-            ("Requires sponsorship?", "Yes", .boolean, nil, .neverGuess, nil),
-            ("Expected salary", "₹45L", .text, nil, .neverGuess, nil),
+            ("Requires sponsorship?", sponsorship, .boolean, nil, .neverGuess, nil),
+            ("Expected salary", facts.salaryExpectation ?? "", .text, nil, .neverGuess, nil),
             ("Why \(company)?", "I'm drawn to \(company) because of its focus on developer-grade infrastructure…", .textarea, 0.88, .memory, "answers:1"),
             ("Tell us about a time you scaled a system", "At Paywise, ledger writes were failing at peak…", .textarea, 0.86, .story, "stories:1"),
             ("Cover letter", "Generated · 212 words", .file, 0.9, .generated, nil),

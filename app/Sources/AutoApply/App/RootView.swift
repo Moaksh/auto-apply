@@ -115,6 +115,7 @@ struct MainToolbar: ToolbarContent {
     @State private var showModeConfirm = false
 
     var body: some ToolbarContent {
+        SampleDataToolbarItem()  // "Sample data" chip + Set up for real (Features/Onboarding/SampleMode)
         ToolbarItemGroup(placement: .primaryAction) {
             Button {
                 router.requestAddJob()

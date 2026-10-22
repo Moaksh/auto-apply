@@ -52,7 +52,8 @@ struct AppCommands: Commands {
             Divider()
             Button("Open the Agent's Chrome") { Task { await store.openAgentChrome() } }
             Button("Open Data Folder") { Task { await store.perform(.openDataFolder) } }
-            Button("Restart Agent") { Task { _ = await DaemonControl.restart() } }
+            Button("Restart Agent") { Task { if !SampleMode.isActive(store) { _ = await DaemonControl.restart() } } }
+                .disabled(SampleMode.isActive(store))
         }
 
         CommandMenu("Go") {

@@ -50,6 +50,8 @@ struct IgnitionState {
 
 struct IgnitionView: View {
     var onGetStarted: () -> Void
+    /// "Explore with sample data": the zero-install path (SampleMode). Hidden when nil.
+    var onExploreSample: (() -> Void)? = nil
     @State private var trigger = 0
     @State private var skipped = false
     @Environment(\.motionReduced) private var reduced
@@ -201,6 +203,14 @@ struct IgnitionView: View {
                         .controlSize(.large)
                         .keyboardShortcut(.defaultAction)
                         .environment(\.colorScheme, .dark)
+                        if let onExploreSample {
+                            Button(action: onExploreSample) {
+                                Text("Explore with sample data").font(Typography.body)
+                            }
+                            .buttonStyle(.secondaryLink)
+                            .environment(\.colorScheme, .dark)
+                            .help("Try every screen with a made-up job hunt. Nothing to install, and nothing leaves this Mac.")
+                        }
                         Label("Your data stays on this Mac. Job pages and form questions go to Claude to draft answers.", systemImage: "lock.fill")
                             .font(Typography.callout)
                             .foregroundStyle(.white.opacity(0.55))

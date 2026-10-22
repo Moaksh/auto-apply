@@ -286,6 +286,10 @@ private struct AgentSettingsTab: View {
             HStack(spacing: Space.s) {
                 Button("Restart agent") {
                     Task {
+                        if SampleMode.isActive(store) {
+                            store.toasts.show("Sample data is made up and lives only in memory. Set up for real to use this.", symbol: "info.circle", style: .info)
+                            return
+                        }
                         let ok = await agent.restart()
                         store.toasts.show(ok ? "Restarting the agent…" : "Couldn't restart the agent. Is it installed?",
                                           symbol: ok ? "arrow.clockwise" : StatusKind.error.symbol, style: ok ? .info : .error)

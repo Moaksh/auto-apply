@@ -40,8 +40,14 @@ private struct OnboardingContent: View {
     var body: some View {
         ZStack {
             if model.step == .ignition {
-                IgnitionView { model.begin() }
-                    .transition(.opacity)
+                IgnitionView(onGetStarted: { model.begin() }, onExploreSample: {
+                    // Zero-install path: the app on sample data, resumed on relaunch until "Set up for real".
+                    Task {
+                        await SampleMode.enter(store: model.store)
+                        onFinished()
+                    }
+                })
+                .transition(.opacity)
             } else {
                 stepsLayout
                     .transition(.opacity)

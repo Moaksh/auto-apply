@@ -164,6 +164,10 @@ extension AppStore {
         case .openSettings: router.requestSettings()
         case .openAgentChrome: await openAgentChrome()
         case .openDataFolder:
+            if SampleMode.isActive(self) {
+                toasts.show("Sample data is made up and lives only in memory. Set up for real to use this.", symbol: "info.circle", style: .info)
+                return
+            }
             let home = AppPaths.resolve().home
             try? FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
             NSWorkspace.shared.open(home)

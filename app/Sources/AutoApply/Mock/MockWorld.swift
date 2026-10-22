@@ -26,6 +26,13 @@ final class MockWorld: Sendable {
         var runCounter = 0
         /// Interview prep packs, the writing voice and the insights summary (MockCareer).
         var career = MockCareer.State()
+        /// Sample mode: jobs found on demand (Run now) come from the sample's Indian companies.
+        var usesSamplePool = false
+    }
+
+    /// A deterministic job for `id` from this world's company pool.
+    func scriptedJob(id: Int, now: Date = Date()) -> JobItem {
+        read { $0.usesSamplePool } ? MockSample.job(id: id, now: now) : MockScripts.scriptedJob(id: id, now: now)
     }
 
     static let defaultSources: [SourceStatus] = [
@@ -308,7 +315,10 @@ final class MockWorld: Sendable {
             st.nextAnswerRowID += 20
             return id
         }
-        let answers = MockFixtures.applicationAnswers(applicationID: applicationID, company: company, lowConfidence: lowConfidence, startID: startID)
+        // Answers come from whoever the dataset's person is (the sample persona in sample mode).
+        let (profile, facts) = repository.read { ($0.profile, $0.neverGuess) }
+        let answers = MockFixtures.applicationAnswers(applicationID: applicationID, company: company, lowConfidence: lowConfidence,
+                                                      startID: startID, profile: profile, neverGuess: facts)
         let shot = MockFrames.preSubmitScreenshot(company: company, answers: answers, name: MockScripts.screenshotName(applicationID, company))
             ?? "/mock/screenshots/\(applicationID)-pre.png"
         repository.update { data in
