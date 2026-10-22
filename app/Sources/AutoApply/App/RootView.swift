@@ -29,6 +29,7 @@ struct RootView: View {
                     }
             }
             .overlay(alignment: .top) { PausedHairline() }
+            .overlay(alignment: .bottom) { SessionHost() }
             // Details float over the screen instead of being a split-view column: as a column it made
             // the window's content wider than the window (cut off at the edge, toolbar collapsed into
             // ">>", and an AppKit constraint loop that crashed the app).

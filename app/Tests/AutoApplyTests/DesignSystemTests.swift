@@ -3,7 +3,8 @@
 // - a source lint: no glass or prominent system buttons in content, no shadows, no breathing
 //   symbols, the mode switch never approves, and none of the retired jargon in UI strings
 //   (one documented exception: the Dashboard hero's glass, `dashboardHeroGlassFile`);
-// - each primary screen draws at most one prominent (primary pill) action.
+// - each primary screen draws at most one prominent (primary pill) action; the floating session
+//   bar (Features/Session) is chrome with its own primary that never counts against a screen.
 import AppKit
 import SwiftUI
 import Testing
@@ -112,6 +113,13 @@ struct DesignSystemTests {
         // Glass is applied in exactly two places: the control-layer helper, and the Dashboard
         // hero's helper (the documented exception above).
         #expect(offenders(".glassEffect(", allowedIn: ["DesignSystem/Materials.swift", Self.dashboardHeroGlassFile]).isEmpty)
+    }
+
+    @Test func glassMorphsOnlyInTheSessionBar() {
+        // The session bar morphs into "Done for today" (glassEffectID). It's control-layer glass
+        // applied through `glassChrome` (GlassBar); no other feature morphs glass yet.
+        #expect(offenders("glassEffectID(", allowedIn: ["Features/Session/"]).isEmpty)
+        #expect(offenders("GlassEffectContainer", allowedIn: ["Features/Session/", "Features/Dashboard/"]).isEmpty)
     }
 
     @Test func heroGlassStaysOnTheDashboard() {
@@ -273,6 +281,28 @@ struct DesignSystemTests {
             #expect(count <= 1, "Dashboard (\(scenario.rawValue)) shows \(count) primary actions")
             await store.stop()
         }
+    }
+
+    @Test func dashboardStartIsThePrimaryWhenThereIsWork() async {
+        // "Today's ten minutes": Start is the one primary while something waits (idle mock has work).
+        let store = await makeStore(.idle)
+        #expect(!BriefingSummary(items: SessionSources.live(store: store).items).isDone)
+        #expect(prominentCount(store: store, height: 1500) { DashboardView() } == 1)
+        await store.stop()
+    }
+
+    @Test func sessionBarIsFloatingChromeWithItsOwnPrimary() async {
+        // The session bar floats over every screen: its Next is its own primary and is never
+        // counted against the screen underneath (SessionHost clears the audit).
+        let store = await makeStore(.idle)
+        let session = SessionModel()
+        session.start(SessionSources.live(store: store).items)
+        #expect(prominentCount(store: store, height: 120) { SessionBar(session: session) } == 1)
+        let shared = SessionModel.shared(for: store)
+        shared.start(SessionSources.live(store: store).items)
+        #expect(prominentCount(store: store, height: 120) { SessionHost() } == 0)
+        shared.end()
+        await store.stop()
     }
 
     @Test func firstRunDashboardOffersRunNow() async {

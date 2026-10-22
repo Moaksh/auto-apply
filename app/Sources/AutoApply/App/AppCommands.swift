@@ -76,9 +76,15 @@ struct AppCommands: Commands {
             Button(AppShortcut.moveStatusPrevious.title) { moveFocused(by: -1) }
                 .keyboardShortcut(.moveStatusPrevious)
                 .disabled(focused?.status?.previous == nil)
-            Button(AppShortcut.moveStatusNext.title) { moveFocused(by: 1) }
-                .keyboardShortcut(.moveStatusNext)
-                .disabled(focused?.state != .submitted || focused?.status?.next == nil)
+            // During a guided session ⌘→ moves to the session's next item (Features/Session).
+            if SessionModel.shared(for: store).isActive {
+                Button("Next in Session") { nextInSession() }
+                    .keyboardShortcut(.moveStatusNext)
+            } else {
+                Button(AppShortcut.moveStatusNext.title) { moveFocused(by: 1) }
+                    .keyboardShortcut(.moveStatusNext)
+                    .disabled(focused?.state != .submitted || focused?.status?.next == nil)
+            }
             Button(AppShortcut.openJobWindow.title) {
                 if let id = store.router.focusedJobID { openWindow(id: WindowID.job, value: id) }
             }
@@ -114,6 +120,15 @@ struct AppCommands: Commands {
             Button("Recompute Stats") { store.recomputeStats() }
         }
         #endif
+    }
+
+    /// ⌘→ in a session: the next item, except while typing (then it's "end of line", as usual).
+    private func nextInSession() {
+        if NSApp.keyWindow?.firstResponder is NSTextView {
+            NSApp.sendAction(#selector(NSResponder.moveToRightEndOfLine(_:)), to: nil, from: nil)
+            return
+        }
+        SessionModel.shared(for: store).next()
     }
 
     private func moveFocused(by delta: Int) {
