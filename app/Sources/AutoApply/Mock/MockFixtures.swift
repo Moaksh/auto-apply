@@ -336,8 +336,33 @@ enum MockFixtures {
             }
         }
 
+        spreadToday(&data.jobs, now: now)
         data.activity = activity(for: data.jobs, now: now, extra: extraActivity, rng: &rng)
         return data
+    }
+
+    /// A believable day so far for the Dashboard's day line: four applications sent across today
+    /// (the third one approved by you in Review), leaving the last quarter hour clear. Re-times
+    /// jobs already sent today first, then the most recent ones, so today's count only grows to 4.
+    static func spreadToday(_ jobs: inout [JobItem], now: Date, calendar: Calendar = .current) {
+        let dayStart = calendar.startOfDay(for: now)
+        let morning = calendar.date(bySettingHour: 8, minute: 30, second: 0, of: now) ?? dayStart
+        let from = now.timeIntervalSince(morning) > 3 * 3_600 ? morning : max(dayStart, now.addingTimeInterval(-3 * 3_600))
+        let span = now.timeIntervalSince(from) - 15 * 60
+        guard span > 20 * 60 else { return }
+        let sent = jobs.indices.filter { jobs[$0].state == .submitted && jobs[$0].submittedAt != nil }
+        let today = sent.filter { calendar.isDate(jobs[$0].submittedAt!, inSameDayAs: now) }
+        let recent = sent.filter { !today.contains($0) && jobs[$0].status == .applied }
+            .sorted { jobs[$0].submittedAt! > jobs[$1].submittedAt! }
+        for (k, i) in (today + recent).prefix(4).enumerated() {
+            let at = from.addingTimeInterval(span * [0.1, 0.32, 0.55, 0.8][k])
+            jobs[i].submittedAt = at
+            jobs[i].stateUpdatedAt = at
+            jobs[i].status = .applied
+            jobs[i].statusUpdatedAt = at
+            jobs[i].nudgesSent = 0
+            if k == 2 { jobs[i].mode = .review }
+        }
     }
 
     /// Activity rows derived from the jobs (plus `extra` synthetic log lines for stress).

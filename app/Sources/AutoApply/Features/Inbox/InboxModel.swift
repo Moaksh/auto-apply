@@ -348,15 +348,15 @@ enum InboxActionCopy {
     static func explanation(_ cluster: QuestionCluster) -> String {
         switch cluster.action {
         case .account:
-            return "This application site wants an account before it shows the form, and the agent couldn't get one by "
-                + "itself (account creation is off, no email is connected, or the site blocked it). Its saved password, "
+            return "This application site wants an account before it shows the form, and I couldn't get one by "
+                + "myself (account creation is off, no email is connected, or the site blocked it). Its saved password, "
                 + "if any, is in Settings ▸ Guardrails ▸ Job-site accounts."
         case .captcha:
-            return "A CAPTCHA or bot check appeared on the form. Only a person can get past it, so the agent stopped."
+            return "A CAPTCHA or bot check appeared on the form. Only a person can get past it, so I stopped."
         case .verification:
-            return "The site sent a verification code or link. The agent can't open your messages, so it stopped here."
+            return "The site sent a verification code or link. I can't open your messages, so I stopped here."
         case .other, nil:
-            return "The agent can't continue on its own. Do this step yourself, then retry, or skip these jobs."
+            return "I can't continue on my own. Do this step yourself, then retry, or skip these jobs."
         }
     }
 
@@ -759,7 +759,7 @@ final class InboxModel {
     static func aiDraftErrorMessage(_ error: DaemonClientError) -> String {
         switch error {
         case .daemon(let p): p.message
-        case .timeout: "The agent took too long to write a draft. Try again."
+        case .timeout: "I took too long to write a draft. Try again."
         case .notConnected: "Can't reach the agent. Drafts need it running."
         case .encoding, .decoding: "The agent's draft couldn't be read. Try again."
         }

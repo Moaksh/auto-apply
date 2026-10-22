@@ -130,10 +130,13 @@ enum MockOutreach {
                 let c = contact(job, name, title, role, confidence: 91, status: "published", source: "job_posting", url: job.applyURL)
                 let t = thread(job, c, state: .draft, updated: ago(1))
                 message(t, c, state: .scheduled, body: body(job, c), sendAt: now.addingTimeInterval(2 * 3_600), at: ago(1))
-            case 4: // sent, waiting
+            case 4: // sent, waiting; the approved follow-up went out today
                 let c = contact(job, name, title, role, confidence: 88, status: "delivered", source: "company_page", url: page(job))
-                let t = thread(job, c, state: .active, updated: ago(50))
+                let t = thread(job, c, state: .active, updated: ago(1.5))
                 message(t, c, state: .sent, body: body(job, c), sentAt: ago(50), at: ago(52))
+                let first = c.fullName.split(separator: " ").first.map(String.init) ?? c.fullName
+                message(t, c, state: .sent, body: "Hi \(first),\n\nA short follow-up on my note about the \(job.title) role. Happy to send anything that helps.\n\nThanks,\nAsha",
+                        sentAt: ago(1.5), seq: 1, at: ago(1.6))
             case 5: // replied, unread
                 let c = contact(job, name, title, role, confidence: 96, status: "replied", source: "company_page", url: page(job))
                 let t = thread(job, c, state: .replied, unread: true, updated: ago(3))

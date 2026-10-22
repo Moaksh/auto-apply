@@ -34,7 +34,7 @@ struct EasyApplyView: View {
             if visible.isEmpty {
                 EmptyState(symbol: "bolt.horizontal",
                            title: model.filter == .done ? "Nothing marked as applied yet" : "No Easy Apply jobs to do",
-                           message: "LinkedIn Easy Apply jobs land here with drafted answers. The agent never submits them for you.")
+                           message: "LinkedIn Easy Apply jobs land here with answers I've drafted. I never send them for you.")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 HStack(spacing: 0) {

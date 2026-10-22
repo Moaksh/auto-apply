@@ -94,13 +94,13 @@ struct AIDraftControls: View {
             let claims = ai.unsupportedClaims(in: text)
             VStack(alignment: .leading, spacing: Space.xs) {
                 if !claims.isEmpty {
-                    Label("Unsupported: \(claims.joined(separator: ", ")). Not in your profile, resume, stories or instructions. "
-                          + "Remove it, or tell the agent where it comes from.", systemImage: "exclamationmark.triangle.fill")
+                    Label("I couldn't find \(claims.joined(separator: ", ")) in your profile, resume, stories or instructions. "
+                          + "Remove it, or tell me where it comes from.", systemImage: "exclamationmark.triangle.fill")
                         .font(Typography.callout)
                         .foregroundStyle(Palette.needsYou)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Text("Written from your profile, resume and stories. Check it before answering.")
+                Text("I wrote this from your profile, resume and stories. Check it before answering.")
                     .font(Typography.callout).foregroundStyle(Palette.textSecondary)
                 if !result.sources.isEmpty {
                     Text("Used: " + result.sources.joined(separator: " · "))

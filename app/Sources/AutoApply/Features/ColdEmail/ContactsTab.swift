@@ -78,7 +78,7 @@ struct PeopleView: View {
         let contacts = model.filteredContacts
         if store.outreach.data.contacts.isEmpty {
             EmptyState(symbol: "person.2", title: "No one here yet",
-                       message: "People the agent finds after you apply show up here, with where each address came from. You can add people you know, or import your LinkedIn connections.")
+                       message: "People I find after you apply show up here, with where each address came from. You can add people you know, or import your LinkedIn connections.")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if contacts.isEmpty {
             EmptyState(symbol: "magnifyingglass", title: "No matches", message: "Nobody matches “\(model.contactSearch)”.")

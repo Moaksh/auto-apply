@@ -466,7 +466,7 @@ struct AnswerComposer: View {
         return HStack(spacing: Space.s) {
             Text("Agent's draft").eyebrowStyle()
             confidenceText
-            Text(draft.text == suggestion ? "It wasn't sure enough to send this. Check it before answering."
+            Text(draft.text == suggestion ? "I wasn't sure enough to send this. Check it before answering."
                                           : empty ? "Cleared." : "You've edited the agent's draft.")
                 .font(Typography.callout).foregroundStyle(Palette.textSecondary)
             Spacer()

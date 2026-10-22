@@ -198,7 +198,7 @@ struct ActivityLogView: View {
         } else if model.rows.isEmpty {
             EmptyState(symbol: store.activity.events.isEmpty ? AASymbol.planeTrail.rawValue : "list.bullet.rectangle",
                        title: store.activity.events.isEmpty ? "No activity yet" : "No matching events",
-                       message: store.activity.events.isEmpty ? "Everything the agent does is logged here." : "Try a different filter.")
+                       message: store.activity.events.isEmpty ? "Everything I do is logged here." : "Try a different filter.")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollViewReader { proxy in

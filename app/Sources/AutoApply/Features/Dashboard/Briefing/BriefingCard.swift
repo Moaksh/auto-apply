@@ -131,7 +131,7 @@ struct BriefingCard: View {
     }
 
     private var doneLine: String {
-        let base = "Nothing is waiting for you. The agent keeps going and asks when it needs you."
+        let base = "Nothing is waiting for you. I'll keep going and ask when I need you."
         guard !store.isPaused, let next = DashboardFormat.nextRunLabel(nextRun: store.nextRunAt, now: Date()) else { return base }
         return "\(base) \(next)."
     }

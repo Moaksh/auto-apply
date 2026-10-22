@@ -72,13 +72,14 @@ class Notifier:
         if event_type == "question_opened":
             c = d["cluster"]
             if c.get("kind") == "action" and c.get("reason") != "captcha":
-                await self.notify("Agent is blocked", f"{c.get('canonical_question') or 'A step needs you'} · do it, then retry.")
+                await self.notify("Agent is blocked", f"{c.get('canonical_question') or 'A step needs you'}. I can't do this step myself: do it, then retry.")
             elif c.get("reason") == "captcha":
-                await self.notify("CAPTCHA needs you", f"Solve it in the AutoApply browser window ({', '.join(c.get('companies') or [])}).")
+                where = ", ".join(c.get("companies") or [])
+                await self.notify("CAPTCHA needs you", f"A CAPTCHA stopped me{' at ' + where if where else ''}. Solve it in the agent's Chrome, then retry.")
             else:
                 await self.notify("Needs your input", c.get("canonical_question") or "A question needs an answer")
         elif event_type == "application_state" and d.get("to_state") == "awaiting_review":
-            await self.notify("Ready for review", "A filled application is waiting for your approval.")
+            await self.notify("Ready for review", "I filled an application and held it for your approval.")
         elif event_type == "application_state" and d.get("to_state") == "failed":
             await self.notify("Application failed", d.get("reason") or "See the activity log.")
         elif event_type == "outreach_reply" and d.get("label") not in _QUIET_OUTREACH and d.get("suggested_status") != "rejected":

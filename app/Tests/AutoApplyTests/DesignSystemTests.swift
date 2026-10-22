@@ -302,6 +302,46 @@ struct DesignSystemTests {
         #expect(hits.isEmpty, "\(hits)")
     }
 
+    /// The agent's voice: short, specific, first person, never shouting. No user-facing string
+    /// literal (`Text`, `Button`, `Label`, empty and error states, toasts) ends in "!", and no
+    /// emoji anywhere in the app's sources. Easter eggs are the one allowed exception (a moment
+    /// you went looking for).
+    static let voiceAllowlist = ["Features/EasterEggs/"]
+
+    @Test func agentVoiceNeverShouts() {
+        let shouted = try! NSRegularExpression(
+            pattern: #"(?:Text|Button|Label|EmptyState|ErrorState|toasts\.show|title:|message:)\(?\s*"((?:[^"\\]|\\.)*)!""#)
+        var hits: [String] = []
+        for file in Self.sources() where !Self.voiceAllowlist.contains(where: { file.path.hasPrefix($0) }) {
+            for (i, line) in file.lines.enumerated() where line.contains("!\"") {
+                let ns = line as NSString
+                if shouted.firstMatch(in: line, range: NSRange(location: 0, length: ns.length)) != nil {
+                    hits.append("\(file.path):\(i + 1)")
+                }
+            }
+        }
+        #expect(hits.isEmpty, "user-facing strings end in \"!\": \(hits)")
+    }
+
+    @Test func noEmojiInTheApp() {
+        // Typographic marks (✓ ✦ · →) are fine; pictographs (emoji presentation, or anything
+        // forced into it with U+FE0F) are not.
+        func isEmoji(_ line: String) -> Bool {
+            let scalars = Array(line.unicodeScalars)
+            return scalars.indices.contains { i in
+                let p = scalars[i].properties
+                return p.isEmojiPresentation || (p.isEmoji && i + 1 < scalars.count && scalars[i + 1].value == 0xFE0F)
+            }
+        }
+        var hits: [String] = []
+        for file in Self.sources() where !Self.voiceAllowlist.contains(where: { file.path.hasPrefix($0) }) {
+            for (i, line) in file.lines.enumerated() where isEmoji(line) { hits.append("\(file.path):\(i + 1)") }
+        }
+        #expect(hits.isEmpty, "emoji in the app: \(hits)")
+        // The lint itself: catches a pictograph, lets a check mark through.
+        #expect(isEmoji("Text(\"Done \u{1F389}\")") && isEmoji("\u{2764}\u{FE0F}") && !isEmoji("Text(\"✓ ✦ ·\")"))
+    }
+
     /// The glossary inside the UI strings of the outreach and career screens: Needs You (never
     /// Inbox), Agent (never daemon / autoapplyd), Application site (never ATS), Pipeline (never
     /// board / tracker), Applied (never Submitted).

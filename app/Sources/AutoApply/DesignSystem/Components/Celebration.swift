@@ -111,7 +111,7 @@ struct InboxZeroCelebration: View {
     /// Jobs only go back to the queue; they apply on the agent's next run.
     static func message(requeued: Int) -> String {
         requeued > 0
-            ? "\(requeued) job\(requeued == 1 ? " is" : "s are") back in the queue for the agent's next run."
+            ? "\(requeued) job\(requeued == 1 ? " is" : "s are") back in the queue. I'll apply on my next run."
             : "Nothing needs you right now."
     }
 }

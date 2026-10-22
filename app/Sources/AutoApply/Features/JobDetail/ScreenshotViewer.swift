@@ -121,7 +121,7 @@ struct ScreenshotViewer: View {
             toolbar
             if shots.isEmpty {
                 EmptyState(symbol: "photo.on.rectangle", title: "No screenshot yet",
-                           message: "The agent saves a full-page screenshot before it sends each application.")
+                           message: "I save a full-page screenshot before I send each application.")
                     .frame(maxWidth: .infinity, minHeight: 260)
             } else if loadFailed {
                 EmptyState(symbol: "photo.badge.exclamationmark", title: "Screenshot not available",

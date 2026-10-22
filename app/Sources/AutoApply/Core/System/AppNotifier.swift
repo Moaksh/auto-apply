@@ -95,11 +95,11 @@ final class AppNotifier: NSObject, UNUserNotificationCenterDelegate {
             postQuestion(p.cluster)
         case .applicationState(let p):
             if p.toState == .awaitingReview, isOn("REVIEW_READY") {
-                post(id: "review-\(p.applicationId)", title: "Ready for review", body: jobLabel(p.jobId, store) ?? "A filled application is waiting for you.",
+                post(id: "review-\(p.applicationId)", title: "Ready for review", body: jobLabel(p.jobId, store) ?? "I filled an application and held it for your review.",
                      route: ["route": "review", "application": String(p.applicationId), "job": String(p.jobId)],
                      category: Self.reviewCategory)
             } else if p.toState == .submitted, isOn("SUBMITTED") {
-                post(id: "sub-\(p.applicationId)", title: "Applied", body: jobLabel(p.jobId, store) ?? "Application submitted.",
+                post(id: "sub-\(p.applicationId)", title: "Applied", body: jobLabel(p.jobId, store) ?? "I sent an application.",
                      route: ["route": "job", "job": String(p.jobId)])
             } else if p.toState == .failed, isOn("ERROR") {
                 post(id: "fail-\(p.applicationId)", title: "Application failed", body: [jobLabel(p.jobId, store), p.reason].compactMap { $0 }.joined(separator: " · "),
@@ -290,7 +290,7 @@ final class AppNotifier: NSObject, UNUserNotificationCenterDelegate {
             return
         }
         guard await isClean(applicationID: appID, store: store) else {
-            post(id: "review-look-\(appID)", title: "Have a look first", body: "\(job.company) · \(job.title) has an answer worth checking.",
+            post(id: "review-look-\(appID)", title: "Have a look first", body: "I'm not sure about one answer for \(job.company) · \(job.title). Have a look before it goes.",
                  route: info)
             open(info)
             return
@@ -300,7 +300,7 @@ final class AppNotifier: NSObject, UNUserNotificationCenterDelegate {
         let held = hold.hold(jobIDs: [job.id]) { [weak self] sent in
             // The hold's own toast and send sound cover success; only a failure needs a notification.
             guard !sent else { return }
-            self?.post(id: "review-fail-\(appID)", title: "Not approved yet", body: "\(label) is still in Review.", route: info)
+            self?.post(id: "review-fail-\(appID)", title: "Not approved yet", body: "I couldn't send \(label) from here, so it's still in Review.", route: info)
         }
         guard !held.isEmpty else { open(info); return }
         // In the app the hold reads like Review's: a draining Undo toast for the same window.

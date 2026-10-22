@@ -191,7 +191,7 @@ struct BoardView: View {
         } else if store.jobs.all.isEmpty {
             // The plane draws its trail on: jobs arrive as the agent flies.
             EmptyState(symbol: AASymbol.planeTrail.rawValue, title: "No jobs yet",
-                       message: "Jobs appear here as the agent finds them. Start a run from the toolbar or with \(AppShortcut.runNow.displayString).")
+                       message: "Jobs appear here as I find them. Start a run from the toolbar or with \(AppShortcut.runNow.displayString).")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if mode == .table {
             tableView(filter: filter)

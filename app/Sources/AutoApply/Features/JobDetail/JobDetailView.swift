@@ -93,6 +93,7 @@ struct JobDetailView: View {
         VStack(spacing: 0) {
             JobDetailHeader(job: job, actions: actions,
                             needsLook: ReviewSafeguard.needsLook(answers: loader.answers, loaded: loader.answersLoaded),
+                            answerCount: loader.answersLoaded ? loader.answers.count : nil,
                             approve: { requestApprove(job) },
                             copyAll: { copyAll(job) })
                 .padding(.horizontal, Space.contentPadding)
@@ -264,7 +265,7 @@ struct JobDetailView: View {
                 Text(text).font(Typography.body).textSelection(.enabled).lineSpacing(3)
                     .frame(maxWidth: 720, alignment: .leading)
             } else {
-                Text("No description was captured for this job.").font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                Text("I couldn't capture a description for this job.").font(Typography.callout).foregroundStyle(Palette.textSecondary)
             }
         }
     }
@@ -334,31 +335,51 @@ struct JobDetailView: View {
     }
 }
 
-/// "[logo] Stripe · Backend Engineer   ● Waiting for review  Skip  (Approve & submit ⌘↵)  Open posting".
-/// The badge is a menu only for applied jobs (pipeline moves); everything else the job's state
-/// allows is a button, with at most one primary pill (it steps down while an inline question
-/// asks for its own answer).
+/// "[logo] Stripe · Backend Engineer   ● Waiting for review  Skip  (Approve & submit ⌘↵)  Open posting",
+/// and under the title the job's facts as ticket fields (MATCH 92 · POSTED Wed 21 Oct · SITE
+/// Greenhouse · …). The badge is a menu only for applied jobs (pipeline moves); everything else
+/// the job's state allows is a button, with at most one primary pill (it steps down while an
+/// inline question asks for its own answer).
 private struct JobDetailHeader: View {
     var job: JobItem
     var actions: JobDetailActions
     /// The job's Q&A needs a look (or hasn't loaded): the approve button carries the ⚠.
     var needsLook: Bool
+    /// Answers in the Q&A (nil until loaded), for ENCLOSED.
+    var answerCount: Int?
     var approve: () -> Void
     var copyAll: () -> Void
     @Environment(AppStore.self) private var store
     @Environment(\.undoManager) private var undoManager
 
     var body: some View {
+        VStack(alignment: .leading, spacing: Space.m) {
+            titleRow
+            // The job's facts, printed: aligned with the title, past the monogram.
+            TicketFieldRow(fields: ticketFields)
+                .padding(.leading, 36 + Space.m)
+        }
+    }
+
+    private var ticketFields: [(label: String, value: String, tint: Color?)] {
+        JobDetailRules.ticketFacts(for: job, answerCount: answerCount, threshold: store.preferences.matchThreshold).map { fact in
+            let tint: Color? = switch fact.tone {
+            case .plain: nil
+            case .accent: Palette.accent
+            case .needsYou: Palette.needsYou
+            }
+            return (fact.label, fact.value, tint)
+        }
+    }
+
+    private var titleRow: some View {
         HStack(alignment: .center, spacing: Space.m) {
             CompanyMonogram(name: job.company, size: 36)
                 // The card → Job detail flight lands here (JobFlight).
                 .background(CascadeAnchor(key: JobFlight.targetKey(job.id)))
                 .onAppear { JobFlight.land(jobID: job.id, company: job.company) }
-            VStack(alignment: .leading, spacing: 2) {
-                Text(job.displayName).font(Typography.title2).lineLimit(1)
-                Text(meta).font(Typography.callout).foregroundStyle(Palette.textSecondary).lineLimit(1)
-            }
-            .layoutPriority(-1)
+            Text(job.displayName).font(Typography.title2).lineLimit(1)
+                .layoutPriority(-1)
             Spacer(minLength: Space.s)
             statusMenu
             if let note = JobDetailRules.headerNote(for: job) {
@@ -430,15 +451,6 @@ private struct JobDetailHeader: View {
         case .resolveSent: Task { await actions.resolve(job: job, sent: true, store: store) }
         case .resolveNotSent: Task { await actions.resolve(job: job, sent: false, store: store) }
         }
-    }
-
-    private var meta: String {
-        var parts: [String] = []
-        if let location = job.location { parts.append(location) }
-        parts.append(job.ats.label)
-        parts.append("found via \(job.source.label)")
-        parts.append(job.discoveredAt.formatted(.dateTime.day().month(.abbreviated)))
-        return parts.joined(separator: " · ")
     }
 
     @ViewBuilder

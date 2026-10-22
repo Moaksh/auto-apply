@@ -141,6 +141,28 @@ struct RenderSmokeTests {
         await store.stop()
     }
 
+    @Test func dayLineAndTicketHeaderRender() async throws {
+        let store = await makeStore(.idle)
+        _ = await waitUntil { store.outreach.isLoaded && store.outreach.repliesLoaded }
+        let empty = await makeStore(.firstRunEmpty)
+        let applied = try #require(store.jobs.all.first { $0.state == .submitted && $0.score != nil })
+        for scheme in [ColorScheme.light, .dark] {
+            for reduce in [true, false] {
+                #expect(render("day-line\(reduce ? "" : "-motion")", width: 1000, scheme: scheme) {
+                    DayLineCard().appEnvironment(store, simulateReduceMotion: reduce).padding()
+                } != nil)
+            }
+            #expect(render("day-line-empty", width: 1000, scheme: scheme) {
+                DayLineCard().appEnvironment(empty, simulateReduceMotion: true).padding()
+            } != nil)
+            #expect(render("job-detail-tickets", width: 1100, height: 700, scheme: scheme) {
+                JobDetailView(jobID: applied.id).appEnvironment(store, simulateReduceMotion: true)
+            } != nil)
+        }
+        await store.stop()
+        await empty.stop()
+    }
+
     @Test func onboardingStepsRender() async {
         let store = await makeStore(.onboarding)
         let model = OnboardingModel(store: store, checker: FakeChecker(items: []))

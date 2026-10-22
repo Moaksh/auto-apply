@@ -55,7 +55,7 @@ struct ProspectsTab: View {
         let prospects = store.outreach.activeProspects
         if prospects.isEmpty {
             EmptyState(symbol: "building.2", title: "No prospects yet",
-                       message: "Search for companies you'd like to work at, or add one. The agent reads their site and scores the fit; nothing is sent.")
+                       message: "Search for companies you'd like to work at, or add one. I read their site and score the fit. Nothing is sent.")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {

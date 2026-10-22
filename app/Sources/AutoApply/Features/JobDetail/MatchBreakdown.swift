@@ -45,13 +45,8 @@ struct MatchBreakdown: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.s) {
-            HStack(alignment: .firstTextBaseline, spacing: Space.s) {
-                Text("Match").eyebrowStyle()
-                if let score = job.score {
-                    MetricText(score, size: .regular, color: score >= threshold ? Palette.textPrimary : Palette.needsYou)
-                }
-                Spacer()
-            }
+            // The score itself is printed in the header's MATCH field; this explains it.
+            Text("Match").eyebrowStyle()
             let factors = JobDetailRules.orderedFactors(job.scoreFactors)
             if factors.isEmpty {
                 Text(job.score == nil ? "Not scored yet." : "No factor breakdown recorded.")

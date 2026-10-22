@@ -21,8 +21,8 @@ struct JobQuestionsPane: View {
         let model = self.model
         VStack(alignment: .leading, spacing: Space.l) {
             Text(clusters.count == 1
-                 ? "The agent stopped on this question. Answer it and the job goes back in the queue."
-                 : "The agent stopped on \(clusters.count) questions. Answer them and the job goes back in the queue.")
+                 ? "I stopped on this question. Answer it and the job goes back in the queue."
+                 : "I stopped on \(clusters.count) questions. Answer them and the job goes back in the queue.")
                 .font(Typography.callout)
                 .foregroundStyle(Palette.textSecondary)
             if clusters.count > 1 {

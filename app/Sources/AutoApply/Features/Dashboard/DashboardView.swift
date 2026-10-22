@@ -1,7 +1,8 @@
 // DashboardView.swift — what the agent did and what needs you, at a glance. The living hero
 // band (date, greeting, mode and the live agent on Liquid Glass), the one global banner, then the
 // number tiles and charts. Under the hero, "Today's ten minutes" (Briefing/) lists what's waiting
-// with estimates; its Start is the Dashboard's one primary while there is work. Run lives in the
+// with estimates; its Start is the Dashboard's one primary while there is work. Under it, the day
+// line (DayLine/) runs across today: a chip per event and a coral now marker. Run lives in the
 // toolbar, ⌘K and the Agent menu (the live agent shows "Run now" only before the very first run).
 //
 // The Dashboard is the owner's deliberate exception to the app's calm-at-rest rule
@@ -35,6 +36,8 @@ struct DashboardView: View {
                     .padding(.bottom, Space.s)
                 // "Today's ten minutes": what's waiting, with estimates, and Start (the one primary).
                 BriefingCard().dashboardEntrance(index: 1)
+                // "Today so far": the day line, what happened and what's waiting, left to right.
+                DayLineCard().dashboardEntrance(index: 2)
                 DashboardBanner()
                 AdaptiveColumns(minColumnWidth: 220, maxColumns: 4) {
                     AppliedTodayCard().dashboardEntrance(index: 1)

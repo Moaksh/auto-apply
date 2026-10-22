@@ -220,7 +220,7 @@ private struct OutreachReplyPane: View {
                     .padding(Space.m)
                     .well()
                 }
-                Text("Answer them in Gmail; AutoApply never replies for you. Any follow-up to them has been stopped.")
+                Text("Answer them in Gmail. I never reply for you, and I've stopped any follow-up to them.")
                     .font(Typography.callout).foregroundStyle(Palette.textTertiary)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -411,7 +411,7 @@ struct KindNoCard: View {
                     .font(Typography.body)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text("If you like, thank them and ask for feedback. The note uses only facts you've given, and AutoApply never sends it for you.")
+            Text("If you like, thank them and ask for feedback. The note uses only facts you've given, and I never send it for you.")
                 .font(Typography.callout)
                 .foregroundStyle(Palette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)

@@ -124,7 +124,7 @@ enum JobDetailRules {
             case .approve: "Send this application as filled, after a short hold you can undo (\(AppShortcut.submit.displayString))"
             case .skip: "Don't send it; pick a reason"
             case .retry: "Queue this application to be filled again on the next run"
-            case .applyAnyway: "Undo the skip: the agent applies on its next run"
+            case .applyAnyway: "Undo the skip: I'll apply on my next run"
             case .resolveSent: "The form was sent; mark it as applied"
             case .resolveNotSent: "The form wasn't sent; mark it as failed"
             }
@@ -149,6 +149,63 @@ enum JobDetailRules {
     /// Quiet status text shown where a button would be ("Queued · next run").
     static func headerNote(for job: JobItem) -> String? {
         job.state == .queued ? "Queued · next run" : nil
+    }
+
+    // MARK: Ticket fields
+
+    /// One printed fact under the Job detail title ("MATCH 92").
+    struct TicketFact: Hashable, Sendable {
+        enum Tone: Hashable, Sendable { case plain, accent, needsYou }
+        var label: String
+        var value: String
+        var tone: Tone = .plain
+    }
+
+    /// The job's key facts as ticket fields: MATCH, POSTED, FOUND, SITE, LOCATION, SALARY and,
+    /// once an application exists, ENCLOSED ("Resume + Letter + 9 answers"). Only real fields;
+    /// a missing one is left out, never shown as "—". Status isn't here: the badge beside the
+    /// title already says it. `answerCount` is nil until the Q&A has loaded.
+    static func ticketFacts(for job: JobItem, answerCount: Int?, threshold: Int, locale: Locale = .current) -> [TicketFact] {
+        var out: [TicketFact] = []
+        if let score = job.score {
+            out.append(TicketFact(label: "Match", value: "\(score)", tone: score >= threshold ? .accent : .needsYou))
+        }
+        let day = Date.FormatStyle(locale: locale).weekday(.abbreviated).day().month(.abbreviated)
+        if let posted = job.postedAt { out.append(TicketFact(label: "Posted", value: posted.formatted(day))) }
+        out.append(TicketFact(label: "Found", value: "\(job.source.label) · \(job.discoveredAt.formatted(day))"))
+        out.append(TicketFact(label: "Site", value: job.ats.label))
+        if let location = job.location.c3Trimmed {
+            out.append(TicketFact(label: "Location", value: location))
+        } else if let remote = job.remote {
+            out.append(TicketFact(label: "Location", value: remote.rawValue.capitalized))
+        }
+        if let salary = salary(job, locale: locale) { out.append(TicketFact(label: "Salary", value: salary)) }
+        if let enclosed = enclosed(job, answerCount: answerCount) { out.append(TicketFact(label: "Enclosed", value: enclosed)) }
+        return out
+    }
+
+    /// "INR 3M–4.2M" / "USD 180K" from the posting's range; nil when it listed none.
+    static func salary(_ job: JobItem, locale: Locale = .current) -> String? {
+        let style = IntegerFormatStyle<Int>(locale: locale).notation(.compactName)
+        let range: String
+        switch (job.salaryMin, job.salaryMax) {
+        case let (lo?, hi?) where hi > lo: range = "\(lo.formatted(style))–\(hi.formatted(style))"
+        case let (lo?, _): range = lo.formatted(style)
+        case let (nil, hi?): range = hi.formatted(style)
+        case (nil, nil): return nil
+        }
+        return [job.salaryCurrency.c3Trimmed, range].compactMap { $0 }.joined(separator: " ")
+    }
+
+    /// What went (or goes) with the application: "Resume + Letter + 9 answers". Only once there
+    /// is an application to enclose them in (waiting for review, sending, applied, unconfirmed).
+    static func enclosed(_ job: JobItem, answerCount: Int?) -> String? {
+        guard [.awaitingReview, .submitting, .submitted, .unknownVerify].contains(job.state) else { return nil }
+        var parts: [String] = []
+        if job.resumeVariantID != nil { parts.append("Resume") }
+        if job.coverLetterPath.c3Trimmed != nil { parts.append("Letter") }
+        if let n = answerCount, n > 0 { parts.append(n == 1 ? "1 answer" : "\(n) answers") }
+        return parts.isEmpty ? nil : parts.joined(separator: " + ")
     }
 
     /// Open Needs You clusters that block this job, in inbox (impact) order.

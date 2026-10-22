@@ -175,8 +175,8 @@ enum QASource {
             if let id, let resume = library.resume(id: id) { return "Extracted from \(resume.label) (\((resume.filePath as NSString).lastPathComponent))." }
             return "Extracted from your resume."
         case .profile: return "From your profile."
-        case .neverGuess: return "A fact only you set. The agent never guesses it."
-        case .generated: return "Drafted by the agent from your profile, stories and the job description. Check it before you rely on it."
+        case .neverGuess: return "A fact only you set. I never guess it."
+        case .generated: return "I drafted this from your profile, stories and the job description. Check it before you rely on it."
         case .user: return "You answered this directly."
         }
     }
