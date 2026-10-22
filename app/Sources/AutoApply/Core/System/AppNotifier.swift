@@ -4,8 +4,9 @@
 //
 // Notifications you can act on (DESIGN_AWARD_VISION 1H): a short text question takes its answer
 // inline (a text-input action → `answer_question` for the cluster); a yes/no or a choice of at
-// most four options offers them as buttons; "Ready for review" offers Approve (through the store's
-// normal approve path, never a raw command) and Open.
+// most four options offers them as buttons; "Ready for review" offers Approve and Open. Approve
+// takes the same path as the Review screen: the ≈5 s send hold (`SendHoldModel`), so it can
+// still be undone in the app before anything is sent, and never a raw command.
 //
 // A kind no (1F): rejections never notify: not an employer's "not moving forward", not a
 // contact's "not interested". They wait quietly in Needs You ▸ Replies.
@@ -279,8 +280,9 @@ final class AppNotifier: NSObject, UNUserNotificationCenterDelegate {
         }
     }
 
-    /// Approve through the store's approve path (the same one Review uses). A job with an answer
-    /// that needs a look, or one no longer waiting, opens in Review instead.
+    /// Approve through the same path Review uses: the send hold (`SendHoldModel`), which sends
+    /// the `approve` command only after its Undo window closes. A job with an answer that needs a
+    /// look, or one no longer waiting (or already on hold), opens in Review instead.
     private func approveFromNotification(info: [String: String], store: AppStore) async {
         guard let appID = info["application"].flatMap(Int.init), let job = store.jobs.job(applicationID: appID),
               job.state == .awaitingReview else {
@@ -293,11 +295,18 @@ final class AppNotifier: NSObject, UNUserNotificationCenterDelegate {
             open(info)
             return
         }
-        if await store.approve(applicationIDs: [appID]) {
-            Sounds.play(.send)
-        } else {
-            post(id: "review-fail-\(appID)", title: "Not approved yet", body: "\(job.company) · \(job.title) is still in Review.", route: info)
+        let label = "\(job.company) · \(job.title)"
+        let hold = SendHoldModel.shared(for: store)
+        let held = hold.hold(jobIDs: [job.id]) { [weak self] sent in
+            // The hold's own toast and send sound cover success; only a failure needs a notification.
+            guard !sent else { return }
+            self?.post(id: "review-fail-\(appID)", title: "Not approved yet", body: "\(label) is still in Review.", route: info)
         }
+        guard !held.isEmpty else { open(info); return }
+        // In the app the hold reads like Review's: a draining Undo toast for the same window.
+        let jobID = job.id
+        store.toasts.show("Approved · sending in \(Int(SendHoldTiming.seconds(hold.window).rounded())) s", symbol: "paperplane",
+                          duration: hold.window, actionTitle: "Undo", countdown: true) { hold.undo(jobID: jobID) }
     }
 
     /// The application's Q&A has loaded and no answer is medium or low confidence.

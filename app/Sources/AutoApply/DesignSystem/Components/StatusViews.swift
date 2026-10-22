@@ -1,6 +1,9 @@
 // StatusViews.swift — the one Badge (status, score, answer source, site, plain labels), plus
 // StatusDot, StatusBar, ConfidenceDot and LockedField. Status colour is never the only signal:
 // every status badge carries a symbol and a word.
+//
+// Motion: a badge whose word or symbol changes cross-fades in place (words never slide); dots and
+// bars cross-fade their hue. All scoped to the badge's own value, so a list never re-lays out.
 import SwiftUI
 
 /// A small symbol + label capsule on the sunken stone. One component for every badge.
@@ -44,14 +47,17 @@ struct Badge: View {
                 Image(systemName: symbol)
                     .imageScale(.small)
                     .foregroundStyle(tone.color)
+                    .contentTransition(.symbolEffect(.replace))
             }
             if let text {
                 Text(text)
                     .font(numeric ? Typography.metricSmall : Typography.callout)
                     .foregroundStyle(numeric ? tone.color : Palette.textPrimary)
                     .lineLimit(1)
+                    .contentTransition(numeric ? .numericText(value: Double(text) ?? 0) : .interpolate)
             }
         }
+        .motion(Motion.fade, value: BadgeMotionKey(text: text, symbol: symbol, tone: tone))
         .padding(.horizontal, text == nil ? Space.xs : Space.s)
         .padding(.vertical, Space.xxs)
         .background(Palette.sunken, in: Capsule())
@@ -59,6 +65,13 @@ struct Badge: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText ?? text ?? "")
     }
+}
+
+/// What a badge cross-fades on.
+private struct BadgeMotionKey: Equatable {
+    var text: String?
+    var symbol: String?
+    var tone: Badge.Tone
 }
 
 extension Badge {
@@ -100,6 +113,7 @@ struct StatusDot: View {
 
     var body: some View {
         Circle().fill(kind.color).frame(width: size, height: size)
+            .motion(Motion.fade, value: kind)
             .accessibilityHidden(true)
     }
 }
@@ -112,6 +126,7 @@ struct StatusBar: View {
         RoundedRectangle(cornerRadius: 1, style: .continuous)
             .fill(kind.color)
             .frame(width: 2)
+            .motion(Motion.fade, value: kind)
             .accessibilityHidden(true)
     }
 }

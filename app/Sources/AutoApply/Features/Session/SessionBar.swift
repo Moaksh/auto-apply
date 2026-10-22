@@ -53,7 +53,7 @@ struct SessionBar: View {
                     if let item = session.current {
                         activeBar(item)
                             .glassEffectID("session", in: glass)
-                            .transition(reduced ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+                            .transition(.reduced(.slideIn(from: .bottom), reduced))
                     }
                 case .done:
                     doneBar

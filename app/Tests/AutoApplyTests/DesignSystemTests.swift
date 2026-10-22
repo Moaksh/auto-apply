@@ -159,6 +159,110 @@ struct DesignSystemTests {
         ]).isEmpty, "system focus rings stay on")
     }
 
+    // MARK: Motion language (DesignSystem/Motion.swift)
+
+    private static let motionFile = "DesignSystem/Motion.swift"
+
+    /// Lines matching `pattern` outside the given path prefixes.
+    private func regexOffenders(_ pattern: String, allowedIn allowed: [String]) -> [String] {
+        let regex = try! NSRegularExpression(pattern: pattern)
+        return Self.sources().flatMap { file in
+            allowed.contains(where: { file.path.hasPrefix($0) }) ? [] :
+                file.lines.enumerated().filter { _, line in
+                    regex.firstMatch(in: line, range: NSRange(line.startIndex..., in: line)) != nil
+                }.map { "\(file.path):\($0.offset + 1)" }
+        }
+    }
+
+    @Test func motionGoesThroughTheLanguage() {
+        // No raw curves outside Motion.swift: every animation is a named `Motion.*` token.
+        let rawCurves = [
+            #"\.(easeIn|easeOut|easeInOut)\b"#,                    // .easeInOut(duration:), .easeOut …
+            #"\.linear\("#, #"\.spring\("#, #"\.smooth\("#, #"\.snappy\("#, #"\.bouncy\b"#,
+            #"\.(interpolatingSpring|interactiveSpring|timingCurve)\b"#,
+            #"\bSpring\(duration"#, #"spring: \.[a-z]"#,           // keyframes use Motion.Springs.*
+            #"Animation\.default\b"#, #"\.animation\(\.default"#,
+        ]
+        for pattern in rawCurves {
+            let hits = regexOffenders(pattern, allowedIn: [Self.motionFile])
+            #expect(hits.isEmpty, "raw curve \(pattern) outside Motion.swift: \(hits)")
+        }
+        // Every `.animation(…)` / `withAnimation(…)` names a Motion token (or nil to switch it off).
+        let calls = regexOffenders(#"(?<!TimelineView\()\.animation\(|withAnimation\("#, allowedIn: [Self.motionFile])
+        let untokened = calls.filter { loc in
+            let parts = loc.split(separator: ":")
+            let file = Self.sources().first { $0.path == parts[0] }!
+            let line = file.lines[Int(parts[1])! - 1]
+            return !line.contains("Motion.") && !line.contains(".animation(nil")
+        }
+        #expect(untokened.isEmpty, "animations must use Motion.*: \(untokened)")
+        // Edge transitions come from the catalog (`.slideIn(from:)`), so Reduce Motion and the curves stay consistent.
+        #expect(regexOffenders(#"\.move\(edge:"#, allowedIn: [Self.motionFile]).isEmpty, "use .slideIn(from:)")
+    }
+
+    @Test func continuousMotionOnlyWhereAllowed() {
+        // Tier 2 (continuous) motion lives only in the hero, live activity, real countdowns,
+        // loading skeletons and moments (`MotionPolicy.continuousAllowed`). Reading surfaces are still.
+        let loops = [#"repeatForever"#, #"PhaseAnimator"#, #"\.phaseAnimator\("#, #"TimelineView\(\.animation"#]
+        for pattern in loops {
+            let hits = regexOffenders(pattern, allowedIn: MotionPolicy.continuousAllowed)
+            #expect(hits.isEmpty, "continuous motion (\(pattern)) outside the allowed files: \(hits)")
+        }
+        #expect(!MotionPolicy.allowsContinuousMotion("Features/Board/BoardView.swift"))
+        #expect(!MotionPolicy.allowsContinuousMotion("Features/Settings/SettingsView.swift"))
+        #expect(MotionPolicy.allowsContinuousMotion("Features/Dashboard/Hero/HeroStyle.swift"))
+        // repeatForever is never needed at all: loops are TimelineViews that pause when hidden.
+        #expect(regexOffenders("repeatForever", allowedIn: []).isEmpty)
+    }
+
+    @Test func continuousMotionPausesWhenHidden() {
+        // Every file that runs a TimelineView(.animation) loop outside the hero (which gates through
+        // `heroMotionActive`) and moments also tracks window visibility or pauses on its own clock.
+        // Easter eggs are skippable moments of a second or two; they're exempt.
+        let loopFiles = Self.sources().filter { file in
+            !file.path.hasPrefix("Features/EasterEggs/") && file.lines.contains { $0.contains("TimelineView(.animation") }
+        }
+        for file in loopFiles {
+            let text = file.lines.joined(separator: "\n")
+            let gated = text.contains("trackWindowVisibility") || text.contains("paused:") || text.contains("windowVisible")
+            #expect(gated, "\(file.path) runs a TimelineView(.animation) loop without a pause condition")
+        }
+    }
+
+    @Test func motionTokensKeepTheBudget() {
+        // Tier 1 responses finish within 0.3 s; leaving is quicker than arriving.
+        for (name, spring) in [("snappy", Motion.Springs.snappy), ("press", Motion.Springs.press),
+                               ("enter", Motion.Springs.enter), ("exit", Motion.Springs.exit)] {
+            #expect(spring.duration <= Motion.Budget.response + 0.0001, "\(name) is a Tier 1 response")
+        }
+        #expect(Motion.Springs.exit.duration < Motion.Springs.enter.duration)
+        #expect(Motion.Springs.press.duration < Motion.Springs.snappy.duration)
+        // Movement springs settle without overshoot; only emphasis, settle and moments bounce.
+        for spring in [Motion.Springs.snappy, Motion.Springs.press, Motion.Springs.enter, Motion.Springs.exit,
+                       Motion.Springs.move, Motion.Springs.flow] {
+            #expect(spring.bounce == 0)
+        }
+        #expect(Motion.Springs.emphasize.bounce > 0 && Motion.Springs.celebrate.bounce > Motion.Springs.settle.bounce)
+        // Stagger: one leader, 30 ms apart, at most 8 staggered.
+        #expect(Motion.staggerDelay(index: 0) == 0)
+        #expect(abs(Motion.staggerDelay(index: 3) - 0.09) < 0.0001)
+        #expect(Motion.staggerDelay(index: 50) == Motion.staggerDelay(index: 8))
+        // The skeleton shimmer sweeps slowly and is bounded.
+        #expect(Motion.Budget.shimmerPeriod >= 1.5)
+        #expect(Motion.Budget.shimmerLimit <= .seconds(15))
+        let base = Date(timeIntervalSinceReferenceDate: 1000 * Motion.Budget.shimmerPeriod)
+        let p0 = Motion.shimmerPhase(at: base)
+        #expect(p0 >= 0 && p0 < 1 && min(p0, 1 - p0) < 0.0001)
+        #expect(abs(Motion.shimmerPhase(at: base.addingTimeInterval(Motion.Budget.shimmerPeriod / 2)) - 0.5) < 0.0001)
+        // The Reduce Motion substitute is a short cross-fade.
+        #expect(Motion.resolve(Motion.flow, reduceMotion: true) == Motion.reducedFade)
+        #expect(Motion.resolve(Motion.flow, reduceMotion: false) == Motion.flow)
+        // Every named transition has a Reduce Motion form (a fade) and a full form.
+        let kinds: [MotionTransition] = [.rise, .fade, .slideIn(.trailing), .scaleIn, .collapse, .row]
+        #expect(kinds.count == 6)
+        for kind in kinds { _ = kind.resolved(reduced: true); _ = kind.resolved(reduced: false) }
+    }
+
     @Test func modeSwitchNeverApproves() {
         let root = Self.sources().first { $0.path == "App/RootView.swift" }
         #expect(root != nil)

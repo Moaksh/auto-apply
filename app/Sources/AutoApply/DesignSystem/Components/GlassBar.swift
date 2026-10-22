@@ -60,15 +60,16 @@ struct HUDToast: View {
 }
 
 /// The draining ring beside a toast's Undo: full when the toast appears, empty when the window
-/// closes. Steps once a second under Reduce Motion.
+/// closes. Steps once a second under Reduce Motion; holds still while the window is hidden.
 struct UndoRing: View {
     var start: Date
     var duration: Duration
     var size: CGFloat = 14
     @Environment(\.motionReduced) private var reduced
+    @State private var windowVisible = true
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: reduced ? 1 : 1.0 / 30)) { context in
+        TimelineView(.animation(minimumInterval: reduced ? 1 : 1.0 / 30, paused: !windowVisible)) { context in
             let left = Self.remaining(start: start, duration: duration, now: context.date)
             ZStack {
                 Circle().stroke(Palette.hairline, lineWidth: 2)
@@ -79,6 +80,7 @@ struct UndoRing: View {
             }
             .frame(width: size, height: size)
         }
+        .trackWindowVisibility($windowVisible)
         .accessibilityHidden(true)
     }
 
@@ -101,7 +103,7 @@ struct HUDToastHost: ViewModifier {
                 if let toast = center.current {
                     HUDToast(toast: toast, onAction: { center.performAction() }, onSecondary: { center.performSecondaryAction() })
                         .id(toast.id)
-                        .transition(reduced ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+                        .transition(.reduced(.slideIn(from: .bottom), reduced))
                         .onTapGesture { if toast.actionTitle == nil { center.dismiss() } }
                 }
             }

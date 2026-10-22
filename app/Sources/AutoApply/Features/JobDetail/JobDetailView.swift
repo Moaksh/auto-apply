@@ -104,7 +104,7 @@ struct JobDetailView: View {
                 })
                 .padding(.horizontal, Space.contentPadding)
                 .padding(.bottom, Space.m)
-                .transition(reduced ? .opacity : .move(edge: .top).combined(with: .opacity))
+                .transition(.reduced(.slideIn(from: .top), reduced))
             }
             Divider()
             ScrollView {
@@ -351,6 +351,9 @@ private struct JobDetailHeader: View {
     var body: some View {
         HStack(alignment: .center, spacing: Space.m) {
             CompanyMonogram(name: job.company, size: 36)
+                // The card → Job detail flight lands here (JobFlight).
+                .background(CascadeAnchor(key: JobFlight.targetKey(job.id)))
+                .onAppear { JobFlight.land(jobID: job.id, company: job.company) }
             VStack(alignment: .leading, spacing: 2) {
                 Text(job.displayName).font(Typography.title2).lineLimit(1)
                 Text(meta).font(Typography.callout).foregroundStyle(Palette.textSecondary).lineLimit(1)

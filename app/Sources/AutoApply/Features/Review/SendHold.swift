@@ -2,7 +2,8 @@
 // Approving never sends straight away: the jobs wait here for `SendHoldTiming.window` (≈5 s)
 // with a draining "Sending in 5…" ring and Undo (⌘Z), and only then is the `approve` command
 // sent to the agent. Every approve path goes through it: the Review queue (row, bar, A key, a
-// batch), Job detail (button, ⌘↵) and ⌘K / the Job menu (which route through Job detail).
+// batch), Job detail (button, ⌘↵), ⌘K / the Job menu (which route through Job detail) and the
+// "Ready for review" notification's Approve button (`AppNotifier`).
 //
 // The hold is client-side, like Needs You's undo window, with one difference on quit: held
 // approvals are NOT flushed. Quitting (or a crash) during a hold drops them; they stay in Review
@@ -65,6 +66,9 @@ final class SendHoldModel {
     /// Batch → job ids in the order they were approved.
     @ObservationIgnored private var batches: [UUID: [Int]] = [:]
     @ObservationIgnored private var undoRegistrations: [UUID: (token: SendHoldUndoToken, manager: WeakUndoManager)] = [:]
+    /// Batch → what to call once its `approve` reply is in (true = confirmed). Never called for a
+    /// batch that was undone, abandoned on quit, or had nothing left to send.
+    @ObservationIgnored private var completions: [UUID: @MainActor (Bool) -> Void] = [:]
     @ObservationIgnored private let defaults: UserDefaults?
     @ObservationIgnored private var terminationObserver: NSObjectProtocol?
 
@@ -133,8 +137,10 @@ final class SendHoldModel {
 
     /// Start the hold for these jobs (one batch, one countdown, one Undo). Jobs already held,
     /// gone from Review, or without an application are ignored. Returns the jobs now held.
+    /// `onSent` hears whether the agent confirmed the approve once the window closes (the
+    /// notification path uses it to say "Not approved yet"; the UI relies on toasts).
     @discardableResult
-    func hold(jobIDs: [Int], undoManager: UndoManager? = nil) -> [Int] {
+    func hold(jobIDs: [Int], undoManager: UndoManager? = nil, onSent: (@MainActor (Bool) -> Void)? = nil) -> [Int] {
         var seen: Set<Int> = []
         let fresh: [(Int, Int)] = jobIDs.compactMap { id in
             guard seen.insert(id).inserted, entries[id] == nil, let job = store.jobs.job(id: id),
@@ -151,6 +157,7 @@ final class SendHoldModel {
         }
         let ids = fresh.map(\.0)
         batches[batch] = ids
+        if let onSent { completions[batch] = onSent }
         persist()
         let window = self.window
         tasks[batch] = Task { [weak self] in
@@ -179,6 +186,7 @@ final class SendHoldModel {
         guard !ids.isEmpty else { return [] }
         tasks.removeValue(forKey: batch)?.cancel()
         batches.removeValue(forKey: batch)
+        completions.removeValue(forKey: batch)
         dropUndoRegistration(batch)
         for id in ids { entries.removeValue(forKey: id) }
         persist()
@@ -195,6 +203,7 @@ final class SendHoldModel {
         if batches[entry.batch]?.isEmpty ?? true {
             tasks.removeValue(forKey: entry.batch)?.cancel()
             batches.removeValue(forKey: entry.batch)
+            completions.removeValue(forKey: entry.batch)
             dropUndoRegistration(entry.batch)
         }
         persist()
@@ -221,6 +230,7 @@ final class SendHoldModel {
     func abandonAll() {
         for task in tasks.values { task.cancel() }
         tasks.removeAll()
+        completions.removeAll()
         let held = entries.values.filter { !$0.isSending }.map(\.jobID)
         for id in held { entries.removeValue(forKey: id) }
         for batch in Array(undoRegistrations.keys) { dropUndoRegistration(batch) }
@@ -235,6 +245,7 @@ final class SendHoldModel {
     private func commit(batch: UUID) async {
         tasks.removeValue(forKey: batch)
         dropUndoRegistration(batch)
+        let onSent = completions.removeValue(forKey: batch)
         let ids = (batches.removeValue(forKey: batch) ?? []).filter { entries[$0]?.batch == batch }
         // Skipped / sent elsewhere meanwhile: drop quietly.
         let live = ids.filter { store.jobs.job(id: $0)?.state == .awaitingReview }
@@ -250,6 +261,7 @@ final class SendHoldModel {
             store.toasts.show(appIDs.count == 1 ? "Approved · sending now" : "Approved \(appIDs.count) · sending now",
                               symbol: "paperplane.fill", style: .success)
         }
+        onSent?(ok)
     }
 }
 

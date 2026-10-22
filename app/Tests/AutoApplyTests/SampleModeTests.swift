@@ -115,7 +115,6 @@ struct SampleModeTests {
 
     @Test func setUpForRealReturnsToOnboardingOnTheLiveBackend() async {
         let defaults = isolatedDefaults()
-        UserDefaults.standard.removeObject(forKey: OnboardingModel.stepDefaultsKey)
         let store = await makeOnboardingStore()
         await SampleMode.enter(store: store, defaults: defaults, speed: 50)
         _ = await waitUntil { store.hasSnapshot && store.library.profile.fullName == "Asha Rao" }
@@ -132,7 +131,7 @@ struct SampleModeTests {
         #expect(await waitUntil { store.hasSnapshot && store.isConnected })
         #expect(store.needsOnboarding)
         #expect(OnboardingGate.shouldPresent(store: store))
-        let model = OnboardingModel(store: store, checker: FakeChecker(items: []))
+        let model = OnboardingModel(store: store, checker: FakeChecker(items: []), defaults: defaults)
         model.load()
         #expect(model.step == .ignition, "onboarding starts from the welcome screen")
         #expect(model.profileDraft.fullName == nil)

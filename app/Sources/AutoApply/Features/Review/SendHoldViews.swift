@@ -9,6 +9,8 @@ struct SendHoldCapsule: View {
     var entry: SendHoldModel.Entry
     var onUndo: () -> Void
     @Environment(\.motionReduced) private var reduced
+    /// The ring holds still while the window is hidden (the hold itself keeps its own clock).
+    @State private var windowVisible = true
 
     var body: some View {
         HStack(spacing: Space.s) {
@@ -26,6 +28,7 @@ struct SendHoldCapsule: View {
         .padding(.vertical, Space.xxs)
         .background(Palette.sunken, in: Capsule())
         .fixedSize()
+        .trackWindowVisibility($windowVisible)
         .accessibilityElement(children: .contain)
     }
 
@@ -36,7 +39,7 @@ struct SendHoldCapsule: View {
                 label(now: context.date, fraction: 1)
             }
         } else {
-            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: false)) { context in
+            TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !windowVisible)) { context in
                 label(now: context.date,
                       fraction: SendHoldTiming.fraction(until: entry.deadline, window: entry.window, now: context.date))
             }

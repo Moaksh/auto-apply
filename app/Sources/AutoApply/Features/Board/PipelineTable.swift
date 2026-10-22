@@ -50,6 +50,8 @@ struct PipelineTable: View {
                     StatusDot(kind: row.kind)
                     Text(row.company).font(Typography.bodyEmph)
                 }
+                // Where Job detail's monogram flies from when this row opens (JobFlight).
+                .background(CascadeAnchor(key: JobFlight.sourceKey(row.id)), alignment: .leading)
             }
             .width(min: 110, ideal: 140)
             TableColumn("Title", value: \.title)

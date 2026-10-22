@@ -99,12 +99,14 @@ final class OnboardingModel {
     @ObservationIgnored let store: AppStore
     @ObservationIgnored let checker: any SystemChecking
     @ObservationIgnored private var didLoad = false
+    @ObservationIgnored private let defaults: UserDefaults
 
     static let stepDefaultsKey = "onboarding.step"
 
-    init(store: AppStore, checker: any SystemChecking = LocalSystemChecker()) {
+    init(store: AppStore, checker: any SystemChecking = LocalSystemChecker(), defaults: UserDefaults = .standard) {
         self.store = store
         self.checker = checker
+        self.defaults = defaults
     }
 
     /// Seed drafts from the snapshot/DB and resume a persisted step.
@@ -129,7 +131,7 @@ final class OnboardingModel {
                 Task { await self.loadThumbnail(id: id, url: url) }
             }
         }
-        let saved = max(store.onboarding.step, UserDefaults.standard.integer(forKey: Self.stepDefaultsKey))
+        let saved = max(store.onboarding.step, defaults.integer(forKey: Self.stepDefaultsKey))
         if saved > 0, let s = Step(rawValue: min(saved, Step.mode.rawValue)) {
             step = s
         }
@@ -143,7 +145,7 @@ final class OnboardingModel {
         movingForward = target > step
         step = target
         validationMessage = nil
-        UserDefaults.standard.set(target.rawValue, forKey: Self.stepDefaultsKey)
+        defaults.set(target.rawValue, forKey: Self.stepDefaultsKey)
         if target.rawValue >= 1 && target.rawValue <= 7 {
             Task { await store.onboardingSetStep(target.rawValue) }
         }
@@ -614,7 +616,7 @@ final class OnboardingModel {
         let ok = await store.onboardingComplete(runPrep: runPrep)
         if ok {
             OnboardingGate.markCompleted()
-            UserDefaults.standard.removeObject(forKey: Self.stepDefaultsKey)
+            defaults.removeObject(forKey: Self.stepDefaultsKey)
         }
         return ok
     }

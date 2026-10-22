@@ -176,8 +176,18 @@ struct ActivityLogView: View {
 
     // MARK: Table
 
-    @ViewBuilder
+    /// Which of `content`'s states is showing (skeleton → table cross-fade).
+    private var contentPhase: Int {
+        if !store.activity.isLoaded { return store.repository.isAvailable ? 0 : 1 }
+        return model.rows.isEmpty ? 2 : 3
+    }
+
     private var content: some View {
+        Group { contentBody }.stateCrossFade(contentPhase)
+    }
+
+    @ViewBuilder
+    private var contentBody: some View {
         if !store.activity.isLoaded {
             if store.repository.isAvailable {
                 SkeletonBlock(lines: 12).padding(Space.xl).frame(maxHeight: .infinity, alignment: .top)
@@ -186,7 +196,8 @@ struct ActivityLogView: View {
                     .frame(maxHeight: .infinity)
             }
         } else if model.rows.isEmpty {
-            EmptyState(symbol: "list.bullet.rectangle", title: store.activity.events.isEmpty ? "No activity yet" : "No matching events",
+            EmptyState(symbol: store.activity.events.isEmpty ? AASymbol.planeTrail.rawValue : "list.bullet.rectangle",
+                       title: store.activity.events.isEmpty ? "No activity yet" : "No matching events",
                        message: store.activity.events.isEmpty ? "Everything the agent does is logged here." : "Try a different filter.")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
@@ -244,6 +255,8 @@ struct ActivityLogView: View {
                 .id(e.id)
             }
             .listStyle(.inset(alternatesRowBackgrounds: false))
+            // New events slide in at the top (live activity); keyed on the newest id only.
+            .motion(Motion.enter, value: model.displayed.first?.id)
         }
         .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
         .font(Typography.mono)
@@ -282,11 +295,12 @@ struct ActivityLogView: View {
                     model.resumeFollow()
                 } label: {
                     Text("\(model.newEventCount) new event\(model.newEventCount == 1 ? "" : "s") ↑").font(Typography.bodyEmph)
+                        .numericRoll(Double(model.newEventCount))
                 }
                 .buttonStyle(.plain)
             }
             .padding(.top, Space.l)
-            .transition(reduced ? .opacity : .move(edge: .top).combined(with: .opacity))
+            .motionTransition(.slideIn(.top))
             .accessibilityHint("Resumes follow mode and scrolls to the newest event")
         }
     }

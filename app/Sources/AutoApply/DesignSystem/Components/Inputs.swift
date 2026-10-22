@@ -72,6 +72,13 @@ struct ChipField: View {
         .padding(Space.xs)
         .frame(maxWidth: .infinity, alignment: .leading)
         .well()
+        // Focus arrives as a soft accent hairline (the text field inside is plain, so the well shows it).
+        .overlay {
+            RoundedRectangle(cornerRadius: Radius.inner, style: .continuous)
+                .strokeBorder(Palette.accent.opacity(focused ? 0.55 : 0), lineWidth: 1)
+                .allowsHitTesting(false)
+        }
+        .motion(Motion.snappy, value: focused)
         .motion(Motion.snappy, value: values)
         .onTapGesture { focused = true }
     }

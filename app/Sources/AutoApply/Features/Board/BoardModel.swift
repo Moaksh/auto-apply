@@ -319,6 +319,9 @@ final class BoardModel {
     /// Last card that landed with a celebration (interview / offer).
     private(set) var celebratedJobID: Int?
     private(set) var celebrationSerial = 0
+    /// Last card a drop landed in its new column (it settles into place once).
+    private(set) var landedJobID: Int?
+    private(set) var landingSerial = 0
     /// One-time "First interview. Nice." note.
     private(set) var firstInterviewNoteJobID: Int?
     /// The Closed drawer (Rejected + Ghosted) is folded until the user opens it.
@@ -402,9 +405,9 @@ final class BoardModel {
               let action = BoardRules.dropAction(job, on: column) else { return false }
         switch action {
         case .setStatus(let status):
-            Task { await move(jobID: id, to: status, undoManager: undoManager) }
+            Task { if await move(jobID: id, to: status, undoManager: undoManager) { land(id) } }
         case .queue:
-            Task { await queue(jobID: id) }
+            Task { if await queue(jobID: id) { land(id) } }
         case .markApplied(let status):
             // Can't be undone (it records a real application): ask first.
             pendingManualApply = ManualApply(jobID: id, status: status)
@@ -445,6 +448,12 @@ final class BoardModel {
             celebrateIfNeeded(jobID: pending.jobID, status: pending.status)
         }
         return ok
+    }
+
+    /// The dropped card is in its new column: let it settle (KanbanColumn's drop settle).
+    private func land(_ jobID: Int) {
+        landedJobID = jobID
+        landingSerial += 1
     }
 
     func beginDrag(jobID: Int) {

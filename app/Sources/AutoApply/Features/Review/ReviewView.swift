@@ -21,6 +21,7 @@ struct ReviewQueueView: View {
     @Environment(\.undoManager) private var undoManager
     @FocusState private var listFocused: Bool
     @State private var quickLookURL: URL?
+    @Namespace private var selectionNS
 
     private var model: ReviewModel { ReviewModel.shared(for: store) }
 
@@ -111,12 +112,14 @@ struct ReviewQueueView: View {
                                 }
                                 listFocused = true
                             }
-                            .transition(reduced ? .opacity : .asymmetric(insertion: .opacity,
-                                                                          removal: .move(edge: .trailing).combined(with: .opacity)))
+                            // Arrives with a rise; an approved row leaves off to the right once its hold sends.
+                            .transition(.reduced(.asymmetric(insertion: .rise, removal: .slideIn(from: .trailing)), reduced))
                     }
                 }
                 .padding(Space.s)
                 .padding(.bottom, Space.xxxl * 2)
+                // The focus highlight travels from row to row.
+                .selectionHighlightGroup(selectionNS, selection: model.focusedJobID)
                 .animation(Motion.resolve(Motion.settle, reduceMotion: reduced), value: queue.map(\.id))
             }
             .focusable()
@@ -160,7 +163,7 @@ struct ReviewQueueView: View {
                               onClear: { model.clearSelection() }) {
                     barAccessory(model)
                 }
-                .transition(reduced ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+                .transition(.reduced(.slideIn(from: .bottom), reduced))
             }
         }
         .padding(.bottom, Space.xl)

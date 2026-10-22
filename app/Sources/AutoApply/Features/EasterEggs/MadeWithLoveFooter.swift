@@ -105,8 +105,8 @@ private struct TapBounce: ViewModifier {
                 view.scaleEffect(s)
             } keyframes: { _ in
                 KeyframeTrack {
-                    SpringKeyframe(1.35, duration: 0.12, spring: .snappy)
-                    SpringKeyframe(1.0, duration: 0.3, spring: .bouncy)
+                    SpringKeyframe(1.35, duration: 0.12, spring: Motion.Springs.snappy)
+                    SpringKeyframe(1.0, duration: 0.3, spring: Motion.Springs.celebrate)
                 }
             }
         } else {
@@ -127,6 +127,6 @@ private struct HeartFloater: View {
             .offset(x: away ? drift : 0, y: away ? -22 : 0)
             .opacity(away ? 0 : 0.9)
             .allowsHitTesting(false)
-            .onAppear { withAnimation(.easeOut(duration: 0.8)) { away = true } }
+            .onAppear { withAnimation(Motion.gentle) { away = true } }
     }
 }

@@ -37,21 +37,26 @@ struct Surface<Content: View, Accessory: View>: View {
             if title != nil || Accessory.self != EmptyView.self {
                 SectionHeader(title ?? "") { accessory() }
             }
-            switch state {
-            case .content:
-                content()
-            case .loading:
-                SkeletonBlock(lines: 3)
-            case .empty(let symbol, let message):
-                Label {
-                    Text(message).font(Typography.callout).foregroundStyle(Palette.textSecondary)
-                } icon: {
-                    Image(systemName: symbol).foregroundStyle(Palette.textTertiary)
+            Group {
+                switch state {
+                case .content:
+                    content()
+                case .loading:
+                    SkeletonBlock(lines: 3)
+                case .empty(let symbol, let message):
+                    Label {
+                        Text(message).font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                    } icon: {
+                        Image(systemName: symbol).foregroundStyle(Palette.textTertiary)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+                case .error(let message):
+                    ErrorState(title: message, compact: true, actionTitle: onRetry == nil ? nil : "Try again", action: onRetry)
                 }
-                .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-            case .error(let message):
-                ErrorState(title: message, compact: true, actionTitle: onRetry == nil ? nil : "Try again", action: onRetry)
             }
+            // Skeleton → content (or empty / error) cross-fades; scoped to the state change only.
+            .transition(.opacity)
+            .motion(Motion.fade, value: state)
         }
         .padding(padding)
         .frame(maxWidth: .infinity, maxHeight: fillsHeight ? .infinity : nil, alignment: .topLeading)
@@ -65,11 +70,14 @@ extension EnvironmentValues {
 }
 
 /// The one screen header: title, one plain summary line, and a trailing slot (filters, or the
-/// screen's single action). Sits at the top of every primary screen.
+/// screen's single action). Sits at the top of every primary screen. The numbers in a summary
+/// line roll when they change ("3 ready" → "2 ready"); the words around them cross-fade.
 struct ScreenHeader<Summary: View, Trailing: View>: View {
     var title: String
     @ViewBuilder var summary: () -> Summary
     @ViewBuilder var trailing: () -> Trailing
+    /// The summary's text when it was given as a string: what the roll animates on.
+    var summaryKey: String?
 
     init(_ title: String, @ViewBuilder summary: @escaping () -> Summary,
          @ViewBuilder trailing: @escaping () -> Trailing = { EmptyView() }) {
@@ -87,6 +95,8 @@ struct ScreenHeader<Summary: View, Trailing: View>: View {
                 .font(Typography.body)
                 .foregroundStyle(Palette.textSecondary)
                 .lineLimit(1)
+                .contentTransition(.numericText())
+                .motion(Motion.numeric, value: summaryKey)
             Spacer(minLength: Space.s)
             trailing()
         }
@@ -98,6 +108,7 @@ struct ScreenHeader<Summary: View, Trailing: View>: View {
 extension ScreenHeader where Summary == Text {
     init(_ title: String, summary: String = "", @ViewBuilder trailing: @escaping () -> Trailing = { EmptyView() }) {
         self.init(title, summary: { Text(summary) }, trailing: trailing)
+        summaryKey = summary
     }
 }
 

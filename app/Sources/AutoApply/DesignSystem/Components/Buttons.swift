@@ -1,5 +1,7 @@
 // Buttons.swift — the two in-content button styles.
 //
+// Motion: the pill goes down to 97 % while pressed and springs back (`Motion.press`); a link dims.
+//
 // `.primaryPill`: the one obvious action on a screen. An ink pill on light, a white pill on
 // dark (`primaryFill` / `onPrimaryFill`). At most one is visible per screen; a render test
 // checks this through `ProminenceAudit`.
@@ -33,6 +35,8 @@ private struct PrimaryPillBody: View {
             .background(Palette.primaryFill.opacity(configuration.isPressed ? 0.8 : 1), in: Capsule())
             .opacity(isEnabled ? 1 : 0.35)
             .contentShape(Capsule())
+            .pressResponse(configuration.isPressed)
+            .motion(Motion.fade, value: isEnabled)
     }
 }
 
@@ -52,6 +56,7 @@ private struct SecondaryLinkBody: View {
             .foregroundStyle(isEnabled ? Palette.accent : Palette.textTertiary)
             .underline(hovering && isEnabled, color: Palette.accent.opacity(0.5))
             .opacity(configuration.isPressed ? 0.6 : 1)
+            .motion(Motion.press, value: configuration.isPressed)
             .contentShape(Rectangle())
             .onHover { hovering = $0 }
     }

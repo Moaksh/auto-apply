@@ -164,8 +164,21 @@ struct BoardView: View {
 
     // MARK: Content
 
-    @ViewBuilder
+    /// Which of `content`'s states is showing (they cross-fade).
+    private enum ContentPhase: Equatable { case loading, unavailable, empty, table, board }
+
+    private var contentPhase: ContentPhase {
+        if !store.jobs.isLoaded { return store.repository.isAvailable ? .loading : .unavailable }
+        if store.jobs.all.isEmpty { return .empty }
+        return mode == .table ? .table : .board
+    }
+
     private var content: some View {
+        Group { contentBody }.stateCrossFade(contentPhase)
+    }
+
+    @ViewBuilder
+    private var contentBody: some View {
         let filter = effectiveFilter
         if !store.jobs.isLoaded {
             if store.repository.isAvailable {
@@ -176,7 +189,8 @@ struct BoardView: View {
                     .frame(maxHeight: .infinity)
             }
         } else if store.jobs.all.isEmpty {
-            EmptyState(symbol: "rectangle.split.3x1", title: "No jobs yet",
+            // The plane draws its trail on: jobs arrive as the agent flies.
+            EmptyState(symbol: AASymbol.planeTrail.rawValue, title: "No jobs yet",
                        message: "Jobs appear here as the agent finds them. Start a run from the toolbar or with \(AppShortcut.runNow.displayString).")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if mode == .table {
@@ -228,7 +242,7 @@ struct BoardView: View {
                     router.focusedJobID = id
                     boardFocused = true
                 },
-                onOpen: { id in router.openJob(id: id) },
+                onOpen: { id in openJob(id) },
                 onSkipReason: { reason in router.pipelineFilter.skipReason = reason }, calm: calm)
         }
 
@@ -264,10 +278,10 @@ struct BoardView: View {
         case .leftArrow: dx = -1
         case .rightArrow: dx = 1
         case .return:
-            if let id = router.focusedJobID { router.openJob(id: id); return .handled }
+            if let id = router.focusedJobID { openJob(id); return .handled }
             return .ignored
         case .space:
-            if let id = router.focusedJobID { router.openJob(id: id); return .handled }
+            if let id = router.focusedJobID { openJob(id); return .handled }
             return .ignored
         case .escape:
             router.focusedJobID = nil
@@ -300,7 +314,13 @@ struct BoardView: View {
             .map { PipelineTableRow(job: $0, resumeLabels: labels) }
         return PipelineTable(rows: rows,
                              selection: Binding(get: { router.focusedJobID }, set: { router.focusedJobID = $0 }),
-                             onOpen: { id in router.openJob(id: id) })
+                             onOpen: { id in openJob(id) })
+    }
+
+    /// Open a job in the detail column; its monogram flies from the card into the header.
+    private func openJob(_ id: Int) {
+        JobFlight.prepare(jobID: id)
+        router.openJob(id: id)
     }
 
     private var boardSkeleton: some View {

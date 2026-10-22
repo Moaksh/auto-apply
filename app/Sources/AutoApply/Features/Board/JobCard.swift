@@ -33,6 +33,8 @@ struct JobCard: View, Equatable {
             VStack(alignment: .leading, spacing: Space.xs) {
                 HStack(spacing: Space.s) {
                     CompanyMonogram(name: job.company)
+                        // Where Job detail's monogram flies from (JobFlight).
+                        .background(CascadeAnchor(key: JobFlight.sourceKey(job.id)))
                     Text(job.company).font(Typography.bodyEmph).lineLimit(1)
                     Spacer(minLength: 0)
                     if job.status == .offer {
@@ -72,6 +74,7 @@ struct JobCard: View, Equatable {
             }
         }
         .opacity(isDragging ? 0.4 : 1)
+        .motion(Motion.snappy, value: isDragging)
         .contentShape(RoundedRectangle(cornerRadius: Radius.inner, style: .continuous))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityText)

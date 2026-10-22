@@ -147,12 +147,36 @@ struct NotificationActionsTests {
         #expect(request.content.categoryIdentifier == AppNotifier.reviewCategory)
         #expect(center.category(AppNotifier.reviewCategory)?.actions.map(\.title) == ["Approve", "Open"])
 
+        let hold = SendHoldModel.shared(for: store)
+        hold.window = .milliseconds(40)
         await n.respond(action: AppNotifier.approveAction, text: nil, info: request.content.userInfo as! [String: String])
+        // The same send hold as Review: held first, nothing sent inside the window.
+        #expect(hold.isHeld(7))
+        #expect(daemon.sent("approve").isEmpty)
+        #expect(store.toasts.current?.actionTitle == "Undo")
+        _ = await c3WaitUntil { !daemon.sent("approve").isEmpty }
         let approvals = daemon.sent("approve")
         #expect(approvals.count == 1)
         if case .approve(let p)? = approvals.first { #expect(p.applicationIds == [7]) }
         // The store's path ran: its optimistic state, not a bare command.
         #expect(store.jobs.job(id: 7)?.state == .submitting)
+        await store.stop()
+    }
+
+    @Test func approveFromNotificationCanBeUndoneInsideTheHold() async {
+        let job = C3Fixtures.job(id: 9, company: "Linear", state: .awaitingReview)
+        let data = RepositoryData(jobs: [job], applicationAnswers: [9: [C3Fixtures.answer(id: 1, app: 9, question: "Name", confidence: 0.99)]])
+        let (store, daemon, _) = await makeC3Store(data: data)
+        let (n, _) = notifier(store)
+        let hold = SendHoldModel.shared(for: store)
+        hold.window = .milliseconds(150)
+        await n.respond(action: AppNotifier.approveAction, text: nil, info: ["route": "review", "application": "9", "job": "9"])
+        #expect(hold.isHeld(9))
+        store.toasts.performAction()  // the toast's Undo
+        #expect(!hold.isHeld(9))
+        try? await Task.sleep(for: .milliseconds(250))
+        #expect(daemon.sent("approve").isEmpty)
+        #expect(store.jobs.job(id: 9)?.state == .awaitingReview)
         await store.stop()
     }
 

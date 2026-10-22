@@ -24,10 +24,10 @@ struct CommandPaletteHost: View {
                 .frame(width: LayoutMetrics.paletteWidth)
                 .glassChrome(in: RoundedRectangle(cornerRadius: Radius.palette, style: .continuous))
                 .padding(.top, Space.xxxl * 2)
-                .transition(reduced ? .opacity : .scale(scale: 0.96).combined(with: .opacity))
+                // Opens with `enter` from 96 %, closes faster with `exit`; a fade under Reduce Motion.
+                .motionTransition(.scaleIn)
             }
         }
-        .animation(Motion.resolve(Motion.snappy, reduceMotion: reduced), value: router.isPalettePresented)
     }
 }
 

@@ -79,6 +79,7 @@ struct NeedsYouCard: View {
                         Text(open == 1 ? "question or task" : "questions and tasks").font(Typography.body)
                     }
                     Text("\(waiting) job\(waiting == 1 ? "" : "s") waiting for you").font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                        .numericRoll(Double(waiting))
                     Button {
                         router.go(.needsYou)
                     } label: {

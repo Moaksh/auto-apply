@@ -39,8 +39,8 @@ struct SubmittedCheck: View {
             } keyframes: { _ in
                 KeyframeTrack(\.scale) {
                     LinearKeyframe(0.6, duration: 0.0)
-                    SpringKeyframe(1.12, duration: 0.25, spring: .snappy)
-                    SpringKeyframe(1.0, duration: 0.35, spring: .smooth)
+                    SpringKeyframe(1.12, duration: 0.25, spring: Motion.Springs.snappy)
+                    SpringKeyframe(1.0, duration: 0.35, spring: Motion.Springs.move)
                 }
                 KeyframeTrack(\.opacity) {
                     LinearKeyframe(0, duration: 0.0)

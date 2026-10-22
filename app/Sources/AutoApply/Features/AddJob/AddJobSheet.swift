@@ -16,6 +16,8 @@ struct AddJobSheet: View {
     @State private var applyNow = true
     @State private var showDetails = false
     @State private var isAdding = false
+    /// Bumped to shake the link field when Add is tried with a bad link (the one validation error).
+    @State private var shake = 0
     @FocusState private var urlFocused: Bool
 
     private var problem: String? { AddJobLink.problem(url) }
@@ -35,8 +37,11 @@ struct AddJobSheet: View {
                     .textFieldStyle(.roundedBorder)
                     .focused($urlFocused)
                     .onSubmit { Task { await add() } }
+                    .errorShake(trigger: shake)
                 if !url.isEmpty, let problem {
                     Text(problem).font(Typography.callout).foregroundStyle(Palette.error)
+                        .wordSwap(problem)
+                        .motionTransition(.rise)
                 }
             }
 
@@ -63,8 +68,11 @@ struct AddJobSheet: View {
 
             HStack {
                 if isAdding {
-                    ProgressView().controlSize(.small)
-                    Text("Reading the posting…").font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                    Group {
+                        ProgressView().controlSize(.small)
+                        Text("Reading the posting…").font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                    }
+                    .motionTransition(.fade)
                 } else if !store.isConnected {
                     Text("Not connected to the agent").font(Typography.callout).foregroundStyle(Palette.textSecondary)
                 }
@@ -85,6 +93,8 @@ struct AddJobSheet: View {
     }
 
     private func add() async {
+        // Return with a bad link: say so with the field (the reason is already under it).
+        if problem != nil && !isAdding { shake += 1 }
         guard canAdd else { return }
         isAdding = true
         defer { isAdding = false }

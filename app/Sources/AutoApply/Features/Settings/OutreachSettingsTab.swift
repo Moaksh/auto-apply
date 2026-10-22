@@ -184,6 +184,8 @@ private struct HunterKeyRow: View {
 private struct SuppressionListRow: View {
     @Environment(AppStore.self) private var store
     @State private var entry = ""
+    /// Bumped to shake the field when Return is pressed on something that isn't an address or @domain.
+    @State private var shake = 0
 
     var body: some View {
         let items = store.outreach.data.suppression
@@ -194,6 +196,7 @@ private struct SuppressionListRow: View {
                     .textFieldStyle(.roundedBorder)
                     .frame(maxWidth: 300)
                     .onSubmit(add)
+                    .errorShake(trigger: shake)
                 Button("Add", action: add).disabled(!isValid || !store.isConnected)
             }
             if items.isEmpty {
@@ -223,7 +226,10 @@ private struct SuppressionListRow: View {
     private var isValid: Bool { trimmed.contains("@") ? trimmed.split(separator: "@").last?.contains(".") == true : false }
 
     private func add() {
-        guard isValid else { return }
+        guard isValid else {
+            if !trimmed.isEmpty { shake += 1 }
+            return
+        }
         let value = trimmed
         Task {
             let ok = value.hasPrefix("@") ? await store.suppress(domain: String(value.dropFirst())) : await store.suppress(email: value)

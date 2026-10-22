@@ -86,8 +86,9 @@ struct PeopleView: View {
         } else {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Space.xxs) {
-                    ForEach(contacts) { ContactRow(contact: $0, model: model) }
+                    ForEach(contacts) { ContactRow(contact: $0, model: model).motionTransition(.row) }
                 }
+                .motion(Motion.move, value: contacts.map(\.id))
                 .padding(.horizontal, Space.l)
                 .padding(.vertical, Space.m)
                 .frame(maxWidth: 1100, alignment: .leading)

@@ -20,8 +20,11 @@ struct StoryBankView: View {
             }
             Divider()
             if model.isImporting {
-                ImportStoryPanel(model: model)
-                Divider()
+                VStack(spacing: 0) {
+                    ImportStoryPanel(model: model)
+                    Divider()
+                }
+                .motionTransition(.collapse)
             }
             if model.stories.isEmpty && model.draft == nil {
                 EmptyState(symbol: "text.book.closed", title: "Add your first story",
@@ -44,6 +47,8 @@ struct StoryBankView: View {
                         }
                     }
                     .listStyle(.inset)
+                    // New and deleted stories animate with the list's own row animation.
+                    .motion(Motion.move, value: model.stories.map(\.id))
                     .frame(width: 280)
                     Divider()
                     if model.draft != nil {
@@ -55,6 +60,8 @@ struct StoryBankView: View {
             }
         }
         .background(Palette.windowBackground)
+        // The import panel opening / closing: the list below makes room once, with `move`.
+        .motion(Motion.move, value: model.isImporting)
         .onAppear { model.ensureSelection() }
         .onChange(of: store.library.stories) { model.ensureSelection() }
     }

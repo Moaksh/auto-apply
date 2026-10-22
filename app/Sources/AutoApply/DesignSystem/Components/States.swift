@@ -1,5 +1,11 @@
-// States.swift — the one EmptyState, LoadingState and ErrorState, plus SkeletonBlock (static,
-// no shimmer) and ThinkingDots. All calm: no brand field, no animation at rest.
+// States.swift — the one EmptyState, LoadingState and ErrorState, plus SkeletonBlock and
+// ThinkingDots. All calm: no brand field, no animation at rest.
+//
+// Motion: an empty / success state's symbol greets you once on appear (a gentle bounce; custom
+// `aa.*` symbols draw on: `aa.plane.trail` draws its trail). A skeleton shimmers slowly while its
+// data is on its way, only while the window is visible, at most `Motion.Budget.shimmerLimit`, and
+// never under Reduce Motion; when the content arrives it replaces the skeleton with a cross-fade
+// (`Surface`, `.motionTransition(.fade)`). ThinkingDots loop only while the agent is working.
 import SwiftUI
 
 /// Symbol + title + one line + at most one action. The action is a text link unless the state
@@ -14,11 +20,18 @@ struct EmptyState: View {
 
     var body: some View {
         VStack(spacing: Space.s) {
-            Image(systemName: symbol)
-                .font(.system(size: 32, weight: .light))
-                .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(Palette.textTertiary)
-                .padding(.bottom, Space.xs)
+            Group {
+                if let custom = AASymbol(rawValue: symbol) {
+                    AASymbolDrawOn(symbol: custom, size: 34)
+                } else {
+                    Image(systemName: symbol)
+                        .font(.system(size: 32, weight: .light))
+                        .symbolRenderingMode(.hierarchical)
+                        .symbolGreeting()
+                }
+            }
+            .foregroundStyle(Palette.textTertiary)
+            .padding(.bottom, Space.xs)
             Text(title).font(Typography.title2).multilineTextAlignment(.center)
             if let message {
                 Text(message)
@@ -120,12 +133,37 @@ struct ErrorState: View {
     }
 }
 
-/// Static placeholder lines (no shimmer).
+/// Placeholder lines while data is on its way. A slow, soft sweep runs across them (Tier 2: only
+/// while visible, never under Reduce Motion, and it stops after `Motion.Budget.shimmerLimit`).
 struct SkeletonBlock: View {
     var lines: Int = 3
     var lineHeight: CGFloat = 10
+    @Environment(\.motionReduced) private var reduced
+    @State private var windowVisible = true
+    @State private var expired = false
 
     var body: some View {
+        let shimmering = !reduced && !expired
+        placeholder
+            .overlay {
+                if shimmering {
+                    TimelineView(.animation(minimumInterval: 1.0 / 20, paused: !windowVisible)) { timeline in
+                        SkeletonSweep(phase: Motion.shimmerPhase(at: timeline.date))
+                    }
+                    .mask { placeholder }
+                    .allowsHitTesting(false)
+                }
+            }
+            .trackWindowVisibility($windowVisible)
+            .task {
+                try? await Task.sleep(for: Motion.Budget.shimmerLimit)
+                expired = true
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Loading")
+    }
+
+    private var placeholder: some View {
         VStack(alignment: .leading, spacing: Space.s) {
             ForEach(0..<max(1, lines), id: \.self) { i in
                 RoundedRectangle(cornerRadius: 3, style: .continuous)
@@ -134,7 +172,49 @@ struct SkeletonBlock: View {
                     .frame(maxWidth: i == lines - 1 ? 140 : .infinity, alignment: .leading)
             }
         }
-        .accessibilityLabel("Loading")
+    }
+}
+
+/// The shimmer band: a soft highlight crossing from leading to trailing.
+private struct SkeletonSweep: View {
+    var phase: Double
+
+    var body: some View {
+        GeometryReader { proxy in
+            let w = proxy.size.width
+            LinearGradient(colors: [.clear, Palette.surface.opacity(0.55), .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(width: max(60, w * 0.35))
+                .offset(x: -w * 0.35 + (w * 1.35) * phase)
+        }
+    }
+}
+
+/// A custom `aa.*` symbol that draws on once when it appears (`aa.plane.trail` draws its trail;
+/// the others fade up). The rest pose is the finished symbol, so a renderer that never animates
+/// draws it complete. Nothing under Reduce Motion.
+struct AASymbolDrawOn: View {
+    var symbol: AASymbol
+    var size: CGFloat = 32
+    @Environment(\.motionReduced) private var reduced
+    @State private var appeared = 0
+
+    var body: some View {
+        AASymbolView(symbol, size: size)
+            .hidden()
+            .overlay {
+                Color.clear.keyframeAnimator(initialValue: 1.0, trigger: appeared) { _, progress in
+                    AASymbolView(symbol, size: size, progress: symbol == .planeTrail ? progress : 1)
+                        .opacity(symbol == .planeTrail ? 1 : 0.4 + 0.6 * progress)
+                } keyframes: { _ in
+                    KeyframeTrack {
+                        MoveKeyframe(0)
+                        SpringKeyframe(1, duration: 0.9, spring: Motion.Springs.flow)
+                    }
+                }
+            }
+            .onAppear { if !reduced { appeared += 1 } }
+            .accessibilityElement()
+            .accessibilityLabel(symbol.accessibilityLabel)
     }
 }
 
@@ -143,15 +223,20 @@ struct ThinkingDots: View {
     var isActive: Bool
     var color: Color = Palette.textSecondary
     @Environment(\.motionReduced) private var reduced
+    @State private var windowVisible = true
 
     var body: some View {
-        if isActive && !reduced {
-            PhaseAnimator([0, 1, 2]) { phase in
-                dots(highlight: phase)
-            } animation: { _ in .easeInOut(duration: 0.3) }
-        } else {
-            dots(highlight: -1)
+        Group {
+            // Paused (still dots) while the window is hidden: no frames for nobody.
+            if isActive && !reduced && windowVisible {
+                PhaseAnimator([0, 1, 2]) { phase in
+                    dots(highlight: phase)
+                } animation: { _ in Motion.tick }
+            } else {
+                dots(highlight: -1)
+            }
         }
+        .trackWindowVisibility($windowVisible)
     }
 
     private func dots(highlight: Int) -> some View {

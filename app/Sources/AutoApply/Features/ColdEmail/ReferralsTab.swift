@@ -37,13 +37,15 @@ struct ReferralsList: View {
                         .padding(.bottom, Space.xs)
                     if !open.isEmpty {
                         Text("In progress").eyebrowStyle().accessibilityAddTraits(.isHeader)
-                        ForEach(open) { ReferralCard(referral: $0, model: model) }
+                        ForEach(open) { ReferralCard(referral: $0, model: model).motionTransition(.row) }
                     }
                     if !settled.isEmpty {
                         Text("Done").eyebrowStyle().padding(.top, Space.m).accessibilityAddTraits(.isHeader)
-                        ForEach(settled) { ReferralCard(referral: $0, model: model) }
+                        ForEach(settled) { ReferralCard(referral: $0, model: model).motionTransition(.row) }
                     }
                 }
+                // A referral moving to Done travels down with `move`.
+                .motion(Motion.move, value: open.map(\.id) + [-1] + settled.map(\.id))
                 .padding(.horizontal, Space.contentPadding)
                 .padding(.vertical, Space.l)
                 .frame(maxWidth: 900, alignment: .leading)

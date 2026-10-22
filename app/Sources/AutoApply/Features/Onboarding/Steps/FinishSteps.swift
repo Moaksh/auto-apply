@@ -109,7 +109,7 @@ private struct LoginSourceCard: View {
             back.opacity(connected ? 1 : 0).rotation3DEffect(.degrees(reduced ? 0 : 180), axis: (x: 0, y: 1, z: 0))
         }
         .rotation3DEffect(.degrees(connected && !reduced ? 180 : 0), axis: (x: 0, y: 1, z: 0))
-        .animation(reduced ? .easeInOut(duration: 0.18) : .easeInOut(duration: 0.5), value: connected)
+        .animation(reduced ? Motion.reducedFade : Motion.reveal, value: connected)
         // A new status (success or failure) ends the optimistic "waiting" state.
         .onChange(of: status?.checkedAt) { requested = false }
     }

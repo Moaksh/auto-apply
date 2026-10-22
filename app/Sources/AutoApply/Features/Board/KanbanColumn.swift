@@ -3,6 +3,11 @@
 // to 40% and the cursor shows "forbidden"; legal ones get a 1.5pt accent dashed outline and an
 // insertion slot that opens at the top and says what the drop does (the agent applies / applied
 // by you / move).
+//
+// Motion: the dragged card dims (`snappy`) while its preview lifts (`dragLift`); the insertion
+// slot opens from the top; a dropped card flies to its new column (the board's matched geometry,
+// `Motion.flow`) and settles once (`Motion.Springs.settle`); counts roll; cards answer the
+// pointer with `hoverResponse`.
 import SwiftUI
 
 struct KanbanColumn: View {
@@ -54,7 +59,7 @@ struct KanbanColumn: View {
                                         .foregroundStyle(Palette.accent)
                                 }
                             }
-                            .transition(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)))
+                            .transition(.reduced(.opacity.combined(with: .scale(scale: 0.95, anchor: .top)), reduced))
                     }
                     if column == .skipped && skipReasonFilter == nil {
                         skipReasonList
@@ -119,12 +124,13 @@ struct KanbanColumn: View {
         .padding(.horizontal, Space.xs)
         .padding(.vertical, 2)
         .background((headerTint ? StatusKind(column: column).color.opacity(0.15) : .clear), in: RoundedRectangle(cornerRadius: 6))
-        .animation(.easeInOut(duration: 0.3), value: headerTint)
+        .motion(Motion.fade, value: headerTint)
         .accessibilityAddTraits(.isHeader)
     }
 
     private func card(_ job: JobItem) -> some View {
         let celebrating = model.celebratedJobID == job.id
+        let landed = model.landedJobID == job.id && !celebrating
         return VStack(alignment: .leading, spacing: Space.xs) {
             JobCard(job: job, threshold: threshold, questionCount: questionCounts[job.id] ?? 0,
                     nudge: BoardRules.nudge(for: job, now: now, nudgeDays: nudgeDays, ghostAfterDays: ghostAfterDays),
@@ -135,18 +141,28 @@ struct KanbanColumn: View {
                 Task { await model.move(jobID: job.id, to: status, undoManager: undoManager) }
             }
             .equatable()
+            .hoverResponse(cornerRadius: Radius.inner)
+            // Drop settle: the card lands a touch large and springs into place.
+            .keyframeAnimator(initialValue: 1.0, trigger: landed && !reduced ? model.landingSerial : 0) { view, scale in
+                view.scaleEffect(scale)
+            } keyframes: { _ in
+                KeyframeTrack {
+                    MoveKeyframe(1.03)
+                    SpringKeyframe(1.0, duration: 0.45, spring: Motion.Springs.settle)
+                }
+            }
             .keyframeAnimator(initialValue: 1.0, trigger: celebrating && !reduced ? model.celebrationSerial : 0) { view, scale in
                 view.scaleEffect(scale)
             } keyframes: { _ in
                 KeyframeTrack {
-                    SpringKeyframe(1.06, duration: 0.25, spring: .bouncy)
-                    SpringKeyframe(1.0, duration: 0.3, spring: .smooth)
+                    SpringKeyframe(1.06, duration: 0.25, spring: Motion.Springs.emphasize)
+                    SpringKeyframe(1.0, duration: 0.3, spring: Motion.Springs.move)
                 }
             }
             if model.firstInterviewNoteJobID == job.id {
                 Text("First interview. Nice. Good luck\(firstName.map { ", \($0)" } ?? "").")
                     .font(Typography.callout).foregroundStyle(Palette.interview)
-                    .transition(.opacity)
+                    .motionTransition(.rise)
             }
         }
         .matchedGeometryEffect(id: job.id, in: namespace)

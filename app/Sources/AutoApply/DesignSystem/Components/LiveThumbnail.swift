@@ -1,5 +1,5 @@
 // LiveThumbnail.swift — the live Chrome frame well (LiveBrowserThumb in the spec, §4.3 W2c):
-// 16:10, sunken, radius 6; new frames cross-fade in 0.25 s; desaturated when showing the last
+// 16:10, sunken, radius 6; new frames cross-fade (`Motion.fade`); desaturated when showing the last
 // submitted page instead of a live one.
 import SwiftUI
 
@@ -17,7 +17,7 @@ struct LiveThumbnail: View {
                     .aspectRatio(16 / 10, contentMode: .fit)
                     .saturation(isLive ? 1 : 0.4)
                     .id(frame.receivedAt)
-                    .transition(.opacity.animation(.easeInOut(duration: 0.25)))
+                    .transition(.opacity.animation(Motion.fade))
             } else {
                 Image(systemName: "macwindow").font(.system(size: 28)).foregroundStyle(Palette.textTertiary)
             }

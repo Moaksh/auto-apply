@@ -29,6 +29,7 @@ struct ResumesView: View {
                 if !model.adding.isEmpty {
                     ProgressView().controlSize(.small)
                     Text("Adding \(model.adding.joined(separator: ", "))…").font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                        .motionTransition(.fade)
                 }
                 Button { model.chooseAndAdd() } label: { Label("Add resume", systemImage: "plus") }
                     .buttonStyle(.primaryPill)
@@ -41,12 +42,16 @@ struct ResumesView: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 190, maximum: 240), spacing: Space.gutter)], spacing: Space.gutter) {
                         ForEach(variants) { variant in
                             ResumeCard(model: model, variant: variant, isSelected: variant.id == model.selectedID)
+                                .hoverResponse(cornerRadius: Radius.card)
                                 .onTapGesture {
                                     model.selectedID = variant.id
                                     router.isInspectorPresented = true
                                 }
+                                .motionTransition(.scaleIn)
                         }
                     }
+                    // A new resume scales in; the grid makes room with `move`.
+                    .motion(Motion.move, value: variants.map(\.id))
                 }
                 HStack(spacing: Space.s) {
                     Text("How the agent picks:").eyebrowStyle()
@@ -115,9 +120,11 @@ private struct ResumeCard: View {
         .overlay {
             if isSelected {
                 RoundedRectangle(cornerRadius: Radius.card + 2, style: .continuous).stroke(Palette.accent, lineWidth: 2).padding(-2)
+                    .motionTransition(.fade)
             }
         }
         .opacity(variant.enabled ? 1 : 0.6)
+        .motion(Motion.fade, value: variant.enabled)
         .contentShape(Rectangle())
         .contextMenu {
             if let url = LocalFiles.existing(variant.filePath) {

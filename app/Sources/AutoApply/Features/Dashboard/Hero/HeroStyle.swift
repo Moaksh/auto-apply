@@ -166,8 +166,8 @@ private struct HoverLiftModifier: ViewModifier {
             .onHover { hovering = $0 }
             .onChange(of: glowTrigger) { old, new in
                 guard new > old else { return }
-                withMotion(.easeOut(duration: 0.3), reduceMotion: reduced) { glow = true }
-                withMotion(.easeIn(duration: 0.6).delay(0.5), reduceMotion: reduced) { glow = false }
+                withMotion(Motion.flashIn, reduceMotion: reduced) { glow = true }
+                withMotion(Motion.flashOut.delay(0.5), reduceMotion: reduced) { glow = false }
             }
     }
 }
@@ -182,7 +182,7 @@ private struct DrawInModifier: ViewModifier {
             .mask(alignment: .leading) {
                 Rectangle().scaleEffect(x: entered ? 1 : 0.001, anchor: .leading)
             }
-            .animation(reduced ? nil : .easeInOut(duration: 0.9).delay(delay), value: entered)
+            .animation(reduced ? nil : Motion.drawIn.delay(delay), value: entered)
     }
 }
 

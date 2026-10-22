@@ -63,7 +63,7 @@ struct IgnitionView: View {
         Group {
             if skipped || reduced {
                 content(.final)
-                    .transition(.opacity.animation(.easeOut(duration: 0.4)))
+                    .transition(.opacity.animation(Motion.reveal))
             } else {
                 KeyframeAnimator(initialValue: IgnitionState(), trigger: trigger) { state in
                     content(state)
@@ -85,7 +85,7 @@ struct IgnitionView: View {
                     }
                     KeyframeTrack(\.trimEnd) {
                         LinearKeyframe(0, duration: 1.3)
-                        SpringKeyframe(1, duration: 0.6, spring: Spring(duration: 0.7, bounce: 0))
+                        SpringKeyframe(1, duration: 0.6, spring: Motion.Springs.flow)
                     }
                     KeyframeTrack(\.glassOpacity) {
                         LinearKeyframe(0, duration: 1.9)
@@ -105,11 +105,11 @@ struct IgnitionView: View {
                     }
                     KeyframeTrack(\.markScale) {
                         LinearKeyframe(1, duration: 2.45)
-                        SpringKeyframe(0.62, duration: 0.45, spring: Spring(duration: 0.45, bounce: 0.12))
+                        SpringKeyframe(0.62, duration: 0.45, spring: Motion.Springs.settle)
                     }
                     KeyframeTrack(\.markOffset) {
                         LinearKeyframe(0, duration: 2.45)
-                        SpringKeyframe(-120, duration: 0.45, spring: Spring(duration: 0.45, bounce: 0.12))
+                        SpringKeyframe(-120, duration: 0.45, spring: Motion.Springs.settle)
                     }
                     KeyframeTrack(\.textPhase) {
                         LinearKeyframe(0, duration: 2.7)
@@ -125,7 +125,7 @@ struct IgnitionView: View {
                     }
                     KeyframeTrack(\.buttonOffset) {
                         LinearKeyframe(8, duration: 3.2)
-                        SpringKeyframe(0, duration: 0.3, spring: Spring(duration: 0.3, bounce: 0))
+                        SpringKeyframe(0, duration: 0.3, spring: Motion.Springs.snappy)
                     }
                 }
             }

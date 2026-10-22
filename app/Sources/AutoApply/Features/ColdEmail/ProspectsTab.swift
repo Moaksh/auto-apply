@@ -8,6 +8,7 @@ import SwiftUI
 struct ProspectsTab: View {
     @Bindable var model: ColdEmailModel
     @Environment(AppStore.self) private var store
+    @Namespace private var selectionNS
 
     var body: some View {
         HStack(spacing: 0) {
@@ -62,9 +63,13 @@ struct ProspectsTab: View {
                     ForEach(prospects) { p in
                         ProspectRow(prospect: p, isSelected: model.selectedProspect?.id == p.id)
                             .onTapGesture { model.selectedProspectID = p.id }
+                            .motionTransition(.row)
                     }
                 }
                 .padding(Space.s)
+                // The selection travels; new prospects rise in and the list makes room.
+                .selectionHighlightGroup(selectionNS, selection: model.selectedProspect?.id)
+                .motion(Motion.move, value: prospects.map(\.id))
             }
         }
     }

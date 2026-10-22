@@ -17,6 +17,7 @@ struct InboxView: View {
     @Environment(\.motionReduced) private var reduced
     @Environment(\.undoManager) private var undoManager
     @FocusState private var listFocused: Bool
+    @Namespace private var selectionNS
 
     private var model: InboxModel { InboxModel.shared(for: store) }
 
@@ -90,6 +91,8 @@ struct InboxView: View {
                         .padding(.top, Space.l)
                 }
                 .padding(Space.s)
+                // The selected fill travels from row to row (questions, tasks and replies share it).
+                .selectionHighlightGroup(selectionNS, selection: "\(model.selectedClusterID ?? "")|\(model.selectedReply.map { "\($0.key)" } ?? "")")
                 .animation(Motion.resolve(Motion.settle, reduceMotion: reduced), value: model.clusters.map(\.clusterId))
                 .animation(Motion.resolve(Motion.snappy, reduceMotion: reduced), value: model.clusters.map(\.jobCount))
             }
@@ -135,7 +138,7 @@ private struct InboxSectionHeader: View {
                 .foregroundStyle(kind == .action ? Palette.needsYou : Palette.textTertiary)
             Text(kind == .action ? "Tasks for you" : "Questions").eyebrowStyle()
             Spacer()
-            Text("\(count)").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary).monospacedDigit()
+            Text("\(count)").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary).numericRoll(Double(count))
         }
         .padding(.horizontal, Space.m)
         .padding(.top, Space.s)
@@ -177,7 +180,7 @@ private struct InboxHeader: View {
                 }
                 .padding(.horizontal, Space.contentPadding)
                 .padding(.bottom, Space.m)
-                .transition(.opacity)
+                .motionTransition(.rise)
             }
         }
     }

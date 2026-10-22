@@ -111,10 +111,19 @@ private struct FirstRunStep: View {
 private struct UpNextQueue: View {
     var model: ColdEmailModel
     @Environment(AppStore.self) private var store
+    @Namespace private var selectionNS
+
+    /// What the queue's rows are: when it changes, rows rise in / collapse out and the rest close up.
+    private struct Signature: Equatable {
+        var drafts: [Int], replies: [Int], jobs: [Int], checks: [Int], scheduled: [Int], sent: Int, showSent: Bool, showAll: Bool
+    }
 
     var body: some View {
         let o = store.outreach
         let jobs = model.jobsAwaitingNote
+        let signature = Signature(drafts: o.drafts.map(\.id), replies: o.replyThreads.map(\.id), jobs: jobs.prefix(model.showAllApplied ? 200 : 5).map(\.id),
+                                  checks: (o.unknownSends + o.failedSends).map(\.id), scheduled: o.scheduled.map(\.id),
+                                  sent: model.showSent ? min(200, o.sent.count) : 0, showSent: model.showSent, showAll: model.showAllApplied)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Space.xxs) {
                 if !o.drafts.isEmpty {
@@ -167,9 +176,12 @@ private struct UpNextQueue: View {
                         model.showSent.toggle()
                     } label: {
                         HStack(spacing: Space.xs) {
-                            Image(systemName: model.showSent ? "chevron.down" : "chevron.right").imageScale(.small)
+                            Image(systemName: "chevron.right").imageScale(.small)
+                                .rotationEffect(.degrees(model.showSent ? 90 : 0))
+                                .motion(Motion.snappy, value: model.showSent)
                             Text("Sent").eyebrowStyle()
                             Text("\(o.sent.count)").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
+                                .numericRoll(Double(o.sent.count))
                         }
                     }
                     .buttonStyle(.plain)
@@ -186,6 +198,9 @@ private struct UpNextQueue: View {
             .padding(.top, Space.xs)
             // Room for the floating send bar.
             .padding(.bottom, 80)
+            // The focus highlight travels between rows; rows arrive and leave with `.row`.
+            .selectionHighlightGroup(selectionNS, selection: "\(model.focusedMessageID ?? -1)|\(model.focusedJobID ?? -1)")
+            .motion(Motion.move, value: signature)
         }
     }
 
@@ -196,7 +211,7 @@ private struct UpNextQueue: View {
     private func section<Trailing: View>(_ title: String, count: Int, first: Bool = false, @ViewBuilder trailing: () -> Trailing) -> some View {
         HStack(spacing: Space.s) {
             Text(title).eyebrowStyle()
-            Text("\(count)").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
+            Text("\(count)").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary).numericRoll(Double(count))
             Spacer()
             trailing()
         }
@@ -241,6 +256,7 @@ private struct UpNextQueue: View {
         }
         .selectableRow(isSelected: model.focusedMessageID == m.id)
         .onTapGesture { model.focus(m.id) }
+        .motionTransition(.row)
         .accessibilityElement(children: .contain)
         .accessibilityAddTraits(model.focusedMessageID == m.id ? [.isSelected, .isButton] : .isButton)
         .accessibilityLabel("Draft to \(contact?.fullName ?? "unknown") at \(thread?.company ?? "")\(m.needsClaimsFix ? ", a claim to check" : "")\(ticked ? ", in the batch" : "")")
@@ -272,6 +288,7 @@ private struct UpNextQueue: View {
         }
         .selectableRow(isSelected: model.focusedMessageID == m.id)
         .onTapGesture { model.focus(m.id) }
+        .motionTransition(.row)
         .accessibilityElement(children: .contain)
     }
 
@@ -293,6 +310,7 @@ private struct UpNextQueue: View {
         }
         .selectableRow(isSelected: reply.map { model.focusedMessageID == $0.id } ?? false)
         .onTapGesture { if let reply { model.focus(reply.id) } }
+        .motionTransition(.row)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(t.unreadReply ? "Unread reply" : "Reply") from \(contact?.fullName ?? "someone") at \(t.company)")
     }
@@ -310,6 +328,7 @@ private struct UpNextQueue: View {
         }
         .selectableRow(isSelected: model.focusedJobID == job.id)
         .onTapGesture { model.focusJob(job.id) }
+        .motionTransition(.row)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isButton)
         .accessibilityLabel("\(job.company), \(job.title), \(status.label)")

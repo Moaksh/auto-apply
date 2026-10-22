@@ -44,12 +44,14 @@ struct EasyApplyView: View {
                         }
                     }
                     .listStyle(.inset)
+                    // Rows marked done / dismissed leave (and new ones arrive) with the list's own animation.
+                    .motion(Motion.move, value: visible.map(\.id))
                     .frame(width: 320)
                     Divider()
                     if let entry = model.selected {
                         EasyApplyDetail(model: model, entry: entry)
                             .id(entry.id)
-                            .transition(.opacity)
+                            .motionTransition(.fade)
                     } else {
                         EmptyState(symbol: "hand.point.left", title: "Pick a job").frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -72,6 +74,8 @@ private struct EasyApplyListRow: View {
             Image(systemName: entry.item.done ? "checkmark" : (entry.item.opened ? "circle" : "circle.fill"))
                 .imageScale(.small)
                 .foregroundStyle(entry.item.done ? Palette.applied : (entry.item.opened ? Palette.textTertiary : Palette.accent))
+                .contentTransition(.symbolEffect(.replace))
+                .motion(Motion.snappy, value: entry.item.done ? 2 : (entry.item.opened ? 1 : 0))
                 .frame(width: 14)
                 .accessibilityLabel(entry.item.done ? "Done" : (entry.item.opened ? "Opened" : "Unopened"))
             VStack(alignment: .leading, spacing: 1) {
@@ -242,7 +246,7 @@ struct CopyRow: View {
             flashing = true
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(300))
-                withAnimation(.easeOut(duration: 0.2)) { flashing = false }
+                withAnimation(Motion.fade) { flashing = false }
             }
         }
         .accessibilityLabel("\(answer.question): \(answer.answer)")

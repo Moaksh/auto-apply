@@ -53,6 +53,8 @@ struct BriefingCard: View {
                     Text(summary.headline)
                         .font(Typography.title2)
                         .fixedSize(horizontal: false, vertical: true)
+                        .contentTransition(.numericText())
+                        .motion(Motion.numeric, value: summary.headline)
                 }
                 Spacer(minLength: Space.m)
                 startButton(summary, session: session)
@@ -94,6 +96,8 @@ struct BriefingCard: View {
                 Text("Today's ten minutes").eyebrowStyle().accessibilityAddTraits(.isHeader)
                 Text("In progress · \(session.progressLabel)")
                     .font(Typography.title2)
+                    .contentTransition(.numericText())
+                    .motion(Motion.numeric, value: session.progressLabel)
                 Text(session.remainingLabel.prefix(1).uppercased() + session.remainingLabel.dropFirst() + " (an estimate).")
                     .font(Typography.callout)
                     .foregroundStyle(Palette.textSecondary)

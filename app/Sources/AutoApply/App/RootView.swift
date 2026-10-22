@@ -21,10 +21,15 @@ struct RootView: View {
             NavigationStack(path: $router.path) {
                 registry.view(for: router.selection.screen)
                     .detailColumnSized()
+                    // Screen to screen: a quick cross-fade and 6 pt rise (opacity/offset only).
+                    .screenEntrance(trigger: router.selection)
                     .navigationDestination(for: Destination.self) { destination in
                         switch destination {
-                        case .job(let id): registry.jobDetail(id: id).detailColumnSized()
-                        case .insights: InsightsView().detailColumnSized()
+                        case .job(let id):
+                            registry.jobDetail(id: id).detailColumnSized()
+                                .screenArrival()
+                                .screenEntrance(trigger: id)
+                        case .insights: InsightsView().detailColumnSized().screenArrival()
                         }
                     }
             }
@@ -35,11 +40,11 @@ struct RootView: View {
             // ">>", and an AppKit constraint loop that crashed the app).
             .overlay(alignment: .trailing) {
                 if router.isInspectorPresented {
+                    // Slides in from the trailing edge with `move`, leaves with `exit`.
                     InspectorPanel { router.isInspectorPresented = false }
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        .motionTransition(.slideIn(.trailing))
                 }
             }
-            .animation(reduced ? nil : Motion.flow, value: router.isInspectorPresented)
             // On the detail column so the controls stay over the screen they act on.
             .toolbar { MainToolbar() }
         }
@@ -100,7 +105,7 @@ private struct PausedHairline: View {
 
     var body: some View {
         if store.isPaused {
-            Rectangle().fill(Palette.needsYou).frame(height: 1).transition(.opacity)
+            Rectangle().fill(Palette.needsYou).frame(height: 1).motionTransition(.fade)
         }
     }
 }
