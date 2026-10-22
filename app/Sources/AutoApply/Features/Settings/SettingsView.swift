@@ -145,7 +145,7 @@ struct SettingsRow<Content: View>: View {
 private struct GeneralSettingsTab: View {
     @AppStorage(AppDelegate.showInDockKey) private var showInDock = true
     @AppStorage(GeneralSettings.menuBarCounterKey) private var menuBarCounter = true
-    @AppStorage(GeneralSettings.soundsKey) private var sounds = true
+    @AppStorage(Sounds.levelKey) private var soundLevel = Sounds.level()
     @AppStorage(Haptics.settingsKey) private var haptics = true
     @State private var launchAtLogin = GeneralSettings.launchAtLogin
     @State private var loginError: String?
@@ -166,7 +166,12 @@ private struct GeneralSettingsTab: View {
             }
         }
         SettingsRow("Feedback") {
-            Toggle("Play sounds", isOn: $sounds)
+            Picker("Sounds", selection: $soundLevel) {
+                ForEach(Sounds.Level.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
+            .help("Moments only: an interview or offer, inbox zero and easter eggs. All: also every answer, move and approval.")
             Toggle("Trackpad haptics", isOn: $haptics)
         }
         UpdatesSettingsRow()

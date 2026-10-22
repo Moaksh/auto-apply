@@ -31,15 +31,10 @@ if [ -z "$VERSION" ] || [ "$VERSION" != "$ENGINE_VERSION" ]; then
   exit 1
 fi
 
-# Icon (best effort)
+# Icon (best effort): make_icon.swift draws every iconset size natively (small sizes get a simpler mark).
 ICON_KEY=""
 TMP="$(mktemp -d)"
-if swift scripts/make_icon.swift "$TMP/icon.png" 2>/dev/null; then
-  mkdir "$TMP/AppIcon.iconset"
-  for s in 16 32 128 256 512; do
-    sips -z $s $s "$TMP/icon.png" --out "$TMP/AppIcon.iconset/icon_${s}x${s}.png" >/dev/null
-    sips -z $((s*2)) $((s*2)) "$TMP/icon.png" --out "$TMP/AppIcon.iconset/icon_${s}x${s}@2x.png" >/dev/null
-  done
+if swift scripts/make_icon.swift "$TMP/AppIcon.iconset" 2>/dev/null; then
   if iconutil -c icns "$TMP/AppIcon.iconset" -o "$OUT/Contents/Resources/AppIcon.icns"; then
     ICON_KEY='<key>CFBundleIconFile</key><string>AppIcon</string>'
   fi
