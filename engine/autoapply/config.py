@@ -61,7 +61,11 @@ class Preferences(BaseModel):
     daily_cap: int = Field(default=15, ge=0)
     per_company_cooldown_days: int = Field(default=30, ge=0)
     match_threshold: int = Field(default=70, ge=0, le=100)
-    mode: Mode = Mode.AUTO
+    mode: Mode = Field(
+        default=Mode.REVIEW,
+        description="Global mode. New installs start in Review (schema v13); Auto is offered per application "
+                    "site once it is earned (autonomy.py) and the user can pick any mode at any level at any time.",
+    )
     per_ats_mode: dict[Ats, Mode] = Field(
         default_factory=lambda: {Ats.WORKDAY: Mode.REVIEW},
         description="Per-ATS mode override. Missing ATS = inherit global mode.",

@@ -1161,7 +1161,35 @@ class Daemon:
             t = db.begin_submit(self.conn, a.id, actor=Actor.USER)
             await self.emit("application_state", t.to_payload())
         self._spawn(self.pipeline.submit_approved(ids), name="submit-approved")
+        await self._offer_earned_autonomy(prefs)
         return {"application_ids": ids}
+
+    async def _offer_earned_autonomy(self, prefs: Any) -> None:
+        """After Review approvals: a site in Review with enough clean approvals gets a one-time
+        ``autonomy_suggestion`` (autonomy.py). Never changes a mode; never fails the command."""
+        from autoapply import autonomy
+
+        try:
+            suggestions = autonomy.new_suggestions(self.conn, prefs)
+        except Exception:  # noqa: BLE001
+            log.exception("autonomy check failed")
+            return
+        for s in suggestions:
+            db.log_event(self.conn, "autonomy", f"Auto suggested for {s.ats.value} after {s.clean_approvals} clean approvals",
+                         actor=Actor.SYSTEM, payload={"ats": s.ats.value, "clean_approvals": s.clean_approvals})
+            await self.emit("autonomy_suggestion", s)
+
+    async def _cmd_get_autonomy(self, p: Any) -> dict[str, Any]:
+        """Settings ▸ Modes: per-site Review track record and the earned-Auto suggestion state."""
+        from autoapply import autonomy
+
+        return autonomy.report(self.conn).model_dump(mode="json")
+
+    async def _cmd_dismiss_autonomy_suggestion(self, p: Any) -> None:
+        from autoapply import autonomy
+
+        autonomy.dismiss(self.conn, p.ats)
+        db.log_event(self.conn, "user", f"not now: Auto for {p.ats.value}", actor=Actor.USER, payload={"ats": p.ats.value})
 
     def _submitted(self, application_id: int) -> None:
         if self.pipeline is not None:

@@ -106,7 +106,7 @@ struct MessagesTests {
         let p = Preferences()
         #expect(p.matchThreshold == 70)
         #expect(p.perCompanyCooldownDays == 30)
-        #expect(p.mode == .auto)
+        #expect(p.mode == .review)  // schema v13: new installs start in Review
         #expect(p.schedule == ["09:00", "13:00", "18:00"])
         #expect(p.ghostAfterDays == 21)
         #expect(p.perAtsMode == ["workday": .review])

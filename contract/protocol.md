@@ -206,6 +206,24 @@ An advisory report computed from the user's own data. It never changes a thresho
 - **`upskill`** (`UpskillHints`): skills (fixed vocabulary) named in the descriptions of jobs skipped after scoring or rejected (status `rejected` or a rejection reply) in the last 90 days, that the profile does not mention anywhere (skills, headline, summary, roles, resume text). Listed from 3 jobs, up to 10: `hints[]` `{skill, jobs, skipped, rejected, examples}`, plus `note` (advisory wording) and the optional `summary`.
 - **`variants`** (`VariantInsights`): `variants[]` `{resume_variant_id, label, applications, responses, interviews, response_rate, low_sample (< 10)}`, the dashboard's "By resume variant" shape counted with the response rule above, and a one-line `finding`.
 
+#### 5.3.1 Earned autonomy (`engine/autoapply/autonomy.py`; schema v13 changes only the default)
+
+Auto is earned per application site (ATS) and offered, never switched on by the engine. The user can always pick any mode at any level (global `mode`, `per_ats_mode`, `per_company_mode`, `set_job_mode`), with no locks; precedence stays job > company > site > global.
+
+**New installs start in Review** (`preferences.mode` default `review` since schema v13; it was `auto`). The v13 migration rebuilds `preferences` with the new column default and copies the row unchanged, so an existing user's stored mode (Auto or Review) is kept. A pre-v13 database without the row gets `auto`, as before.
+
+| type | payload | ack `result` | notes |
+|---|---|---|---|
+| `get_autonomy` | `{}` | `AutonomyReport` `{threshold, sites[]}` | one `AutonomySite` per ATS value (zeros included): `{ats, mode, mode_source (site\|global), approved, approved_without_edits, edited, rejected_wrong_answers, clean_approvals, since?, last_decision_at?, eligible, suggestion (none\|pending\|dismissed), suggested_at?, dismissed_at?}`. `mode` is the site's effective mode ignoring company / job overrides |
+| `dismiss_autonomy_suggestion` | `ats` | `null` | "Not now": the site's suggestion becomes `dismissed` and is never emitted again (also when dismissed before it was offered). Idempotent. No mode changes |
+
+Accepting a suggestion is `update_preferences {preferences: {per_ats_mode: {<ats>: "auto"}}}` (send the whole merged map); there is no separate command.
+
+- **Computed from existing tables.** A *review decision* is an `events` row `kind = 'state'`, `actor = 'user'`, payload `from = 'awaiting_review'` and `to` = `submitting` (approval) or `skipped` (`reject`). An approval is **clean** when no `edit_application_answer` (event `kind = 'user'` with `application_answer_id`) touched that application before it. Answers typed in Needs You (origin `user`, `field_key` `inbox:…`) are not Review edits and do not count. A `reject` with reason `wrong_answers` (any case / spaces) counts against the agent; other reasons (`not_interested`, `company`, `other`) are about the job and are neutral.
+- **Rule.** `clean_approvals` is the current streak of clean approvals on the site; an edited approval or a wrong-answers reject resets it to 0 (`since` = first approval of the streak). `eligible` when `clean_approvals >= threshold` (10): ten clean approvals in a row and therefore no wrong-answers rejects among the last ten decisions.
+- **`suggestion`.** `none` when the site is in Auto or not eligible; `dismissed` after `dismiss_autonomy_suggestion`; `pending` when the site is in Review and eligible.
+- **Emitted once.** After `approve`, a site whose suggestion is `pending` and was never offered gets one `autonomy_suggestion` event (and an `events` row `kind = 'autonomy'`). State is stored in `meta` key `autonomy_suggestions`: `{ats: {suggested_at, clean_approvals, dismissed_at?}}`. A streak broken and re-earned is not announced again; Settings still shows a pending suggestion.
+
 #### 5.4 Interview prep commands (`engine/autoapply/interview.py`; no schema change)
 
 Packs and debriefs are JSON files under the AutoApply home, not tables:
@@ -309,6 +327,7 @@ the user edits the text and answers with `answer_question`.
 | `outreach_reply` | `thread_id`, `message_id?`, `contact_name`, `company`, `label` (`positive`\|`referred`\|`not_interested`\|`opt_out`\|`question`\|`other`\|`ooo`\|`bounce`), `snippet`, `application_id?`, `suggested_status?` (`interview`\|`rejected`) | someone replied (Needs You ▸ Replies); a board move is only suggested, and is also stored on the thread (`outreach_threads.suggested_status`, `suggestion_state = 'pending'`, §6.2.2) so it survives a relaunch |
 | `application_reply` | `reply_id`, `application_id`, `job_id`, `company`, `title?`, `label` (`interview_invite`\|`assessment`\|`rejection`\|`offer`\|`received_ack`\|`other`), `suggested_status?` (`interview`\|`assessment`\|`rejected`\|`offer`), `ambiguous`, `from_email`, `from_name?`, `subject`, `snippet`, `received_at`, `message_id` | an employer / ATS email about a submitted application was read (§6.2.3). A board move is only suggested; the user accepts or dismisses it |
 | `scout_finished` | `company_id`, `purpose`, `application_id?`, `found`, `with_email`, `best_confidence?`, `queued_google`, `thread_id?` | a scout's HTTP phase ended (`thread_id`: the automatic draft) |
+| `autonomy_suggestion` | `ats`, `clean_approvals`, `since` | a site in Review earned Auto (§5.3.1); emitted once per site. The app offers "Turn on Auto" (`update_preferences` `per_ats_mode`) or "Not now" (`dismiss_autonomy_suggestion`). Nothing changes by itself |
 | `log` | `level` (`debug`\|`info`\|`warning`\|`error`), `message`, `logger?`, `job_id?`, `application_id?`, `at` | human-readable daemon log line |
 
 ### 6.1 Snapshot

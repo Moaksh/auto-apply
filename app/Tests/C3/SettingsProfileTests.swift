@@ -86,8 +86,8 @@ struct SettingsModelTests {
         #expect(model.companyName("7") == "Stripe")
         #expect(!model.hasUnsavedPreferences)
         _ = try #require(daemon.sent("update_preferences").last?.preferencesValues)
-        await model.setGlobalMode(.review)
-        #expect(daemon.sent("update_preferences").last?.preferencesValues == ["mode": .string("review")])
+        await model.setGlobalMode(.auto)  // new installs start in Review (schema v13)
+        #expect(daemon.sent("update_preferences").last?.preferencesValues == ["mode": .string("auto")])
     }
 
     @Test func sourcesAndScheduleHelpers() async {

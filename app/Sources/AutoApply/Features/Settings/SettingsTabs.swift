@@ -311,11 +311,13 @@ struct NeverGuessEditor: View {
 struct ModesSettingsTab: View {
     @Bindable var model: SettingsModel
     @Environment(AppStore.self) private var store
+    @Environment(\.motionReduced) private var reduced
 
     static let atsRows: [Ats] = [.greenhouse, .lever, .ashby, .workday, .other]
 
     var body: some View {
-        SettingsRow("Mode", help: "Auto sends applications when the checks pass. Review holds each filled application for your OK.") {
+        SettingsRow("Mode", help: "Every mode is your choice, for the whole app, a site, a company or one job, and you can change it any time. "
+                    + "Review holds each filled application for your OK. Auto sends it when the checks pass.") {
             Picker("Mode", selection: Binding(get: { model.preferencesDraft.mode }, set: { m in Task { await model.setGlobalMode(m) } })) {
                 Text("Auto").tag(Mode.auto)
                 Text("Review").tag(Mode.review)
@@ -324,14 +326,15 @@ struct ModesSettingsTab: View {
             .labelsHidden()
             .frame(width: 200)
         }
-        SettingsRow("Per application site", help: "A setting here wins over the app-wide mode. Workday starts on Review.") {
+        .task { await store.fetchAutonomy() }
+        SettingsRow("Per application site", help: siteHelp) {
             Grid(alignment: .leading, horizontalSpacing: Space.l, verticalSpacing: Space.s) {
                 ForEach(Self.atsRows, id: \.self) { ats in
                     GridRow {
                         Text(ats.label).font(Typography.body).frame(width: 110, alignment: .leading)
                         Picker(ats.label, selection: Binding(
                             get: { model.preferencesDraft.perAtsMode[ats.rawValue] },
-                            set: { m in Task { await model.setAtsMode(ats, m) } })) {
+                            set: { m in Task { await model.setAtsMode(ats, m); await store.fetchAutonomy() } })) {
                             Text("App setting").tag(Mode?.none)
                             Text("Auto").tag(Mode?.some(.auto))
                             Text("Review").tag(Mode?.some(.review))
@@ -340,8 +343,18 @@ struct ModesSettingsTab: View {
                         .labelsHidden()
                         .frame(width: 240)
                     }
+                    if let trust = trust(for: ats) {
+                        GridRow {
+                            Color.clear.gridCellUnsizedAxes([.horizontal, .vertical])
+                            SiteTrustLine(site: trust,
+                                          onTurnOn: { Task { await model.setAtsMode(ats, .auto); await store.fetchAutonomy() } },
+                                          onNotNow: { Task { await store.dismissAutonomySuggestion(ats) } })
+                                .transition(.opacity)
+                        }
+                    }
                 }
             }
+            .animation(Motion.resolve(Motion.snappy, reduceMotion: reduced), value: store.autonomy)
         }
         SettingsRow("Per company") {
             let overrides = model.preferencesDraft.perCompanyMode.sorted { model.companyName($0.key) < model.companyName($1.key) }
@@ -386,6 +399,50 @@ struct ModesSettingsTab: View {
                 }
             }
         }
+    }
+
+    private var siteHelp: String {
+        let n = store.autonomy?.threshold ?? 10
+        return "A setting here wins over the app-wide mode. Workday starts on Review. After \(n) approvals in a row "
+            + "without edits on a site, Auto is suggested for it. Nothing changes unless you choose it."
+    }
+
+    /// The site's Review track record, once there is one.
+    private func trust(for ats: Ats) -> AutonomySite? {
+        guard let site = store.autonomy?.sites.first(where: { $0.ats == ats }), site.approved > 0 else { return nil }
+        return site
+    }
+}
+
+/// "12 approved without edits · Auto suggested" under a site's mode, with Turn on Auto / Not now
+/// while the suggestion is open. Quiet links only: Settings has no primary action.
+struct SiteTrustLine: View {
+    var site: AutonomySite
+    var onTurnOn: () -> Void
+    var onNotNow: () -> Void
+
+    var body: some View {
+        HStack(spacing: Space.s) {
+            if site.suggestion == .pending {
+                Image(systemName: "checkmark.seal").foregroundStyle(Palette.applied).accessibilityHidden(true)
+            }
+            Text(Self.summary(site)).font(Typography.callout).foregroundStyle(Palette.textSecondary)
+            if site.suggestion == .pending {
+                Button("Turn on Auto", action: onTurnOn).buttonStyle(.secondaryLink).font(Typography.callout.weight(.semibold))
+                Button("Not now", action: onNotNow).buttonStyle(.secondaryLink).font(Typography.callout)
+            }
+        }
+        .accessibilityElement(children: .contain)
+    }
+
+    static func summary(_ site: AutonomySite) -> String {
+        if site.suggestion == .pending {
+            return "\(site.cleanApprovals) approved without edits · Auto suggested"
+        }
+        var parts = ["\(site.approvedWithoutEdits) approved without edits"]
+        if site.edited > 0 { parts.append("\(site.edited) edited") }
+        if site.rejectedWrongAnswers > 0 { parts.append("\(site.rejectedWrongAnswers) skipped for wrong answers") }
+        return parts.joined(separator: " · ")
     }
 }
 

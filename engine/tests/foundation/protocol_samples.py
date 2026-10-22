@@ -13,6 +13,8 @@ from pathlib import Path
 from autoapply.config import Preferences
 from autoapply.models import (
     AgentStepPayload,
+    AutonomyReport,
+    AutonomySite,
     CapsStatus,
     Counts,
     Envelope,
@@ -68,6 +70,15 @@ _insights = Insights(
                                      response_rate=5 / 14, low_sample=False)],
         finding="Not enough data yet to compare resumes: each needs at least 10 applications."),
 )
+
+_autonomy = AutonomyReport(threshold=10, sites=[
+    AutonomySite(ats="greenhouse", mode="review", mode_source="global", approved=13, approved_without_edits=12, edited=1,
+                 clean_approvals=12, since="2026-10-01T09:00:00.000Z", last_decision_at=TS, eligible=True,
+                 suggestion="pending", suggested_at=TS),
+    AutonomySite(ats="workday", mode="review", mode_source="site", approved=3, approved_without_edits=1, edited=2,
+                 rejected_wrong_answers=1, clean_approvals=0, last_decision_at=TS),
+    AutonomySite(ats="lever", mode="auto", mode_source="site"),
+])
 
 _cluster = QuestionCluster(
     cluster_id="9f2c4b1e0d8a4c6b9e1f2a3b4c5d6e7f",
@@ -200,6 +211,8 @@ def samples() -> list[Envelope]:
     c("interview_debrief", {"application_id": 11, "notes": "Spoke with Priya (EM). Went deep on Kafka consumer lag; I froze on a sharding question."})
     c("draft_answer", {"cluster_id": "c-async", "job_id": 11, "instructions": "Make it shorter and mention my Kafka work.",
                        "current_answer": "I have worked remotely for three years across time zones."})
+    c("get_autonomy", {})
+    c("dismiss_autonomy_suggestion", {"ats": "greenhouse"})
     c("get_voice_profile", {})
     c("update_voice_profile", {"sign_off": "Thanks", "formality": "neutral", "max_words": 180,
                                "avoid_phrases": ["circling back"], "writing_sample": "Hi Ravi, quick one about the Go role."})
@@ -208,6 +221,7 @@ def samples() -> list[Envelope]:
     e("ack", {"ok": True, "result": {"application_ids": [11, 12]}}, reply_to=CMD)
     e("ack", {"ok": True, "result": None}, reply_to=CMD)
     e("ack", {"ok": True, "result": _insights.model_dump(mode="json")}, reply_to=CMD)
+    e("ack", {"ok": True, "result": _autonomy.model_dump(mode="json")}, reply_to=CMD)
     e("error", {"code": "illegal_transition", "message": "application 13 is not awaiting review",
                 "details": {"state": "queued"}, "application_id": 13}, reply_to=CMD)
     e("snapshot", {
@@ -263,6 +277,7 @@ def samples() -> list[Envelope]:
                             "received_at": TS, "message_id": "<abc123@greenhouse-mail.io>"})
     e("scout_finished", {"company_id": 1, "purpose": "application", "application_id": 11, "found": 6, "with_email": 4,
                          "best_confidence": 95, "queued_google": True, "thread_id": 3})
+    e("autonomy_suggestion", {"ats": "greenhouse", "clean_approvals": 10, "since": "2026-10-01T09:00:00.000Z"})
     e("log", {"level": "warning", "message": "selector timeout on step 5 · retried ok", "logger": "apply.lever",
               "job_id": 11, "application_id": 11, "at": TS})
     return out

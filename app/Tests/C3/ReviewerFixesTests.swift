@@ -163,7 +163,7 @@ struct ReviewerFixesTests {
         daemon.responder = { cmd in
             if case .updatePreferences(let p) = cmd {
                 var prefs = Preferences()
-                if p.preferences.values["mode"] == .string("review") { prefs.mode = .review }
+                if p.preferences.values["mode"] == .string("auto") { prefs.mode = .auto }
                 return .ack(AckPayload(ok: true, result: ["preferences": (try? JSONValue.encode(prefs)) ?? .null]))
             }
             return .ack(AckPayload())
@@ -172,10 +172,10 @@ struct ReviewerFixesTests {
         model.debounce = .milliseconds(20)
         model.preferencesDraft.remotePolicy = []
         #expect(model.issue(for: .remotePolicy) != nil)
-        #expect(await model.setGlobalMode(.review))
-        #expect(daemon.sent("update_preferences").map(\.preferencesValues) == [["mode": .string("review")]])
-        #expect(store.preferences.mode == .review)
-        #expect(model.preferencesDraft.mode == .review)
+        #expect(await model.setGlobalMode(.auto))  // new installs start in Review (schema v13)
+        #expect(daemon.sent("update_preferences").map(\.preferencesValues) == [["mode": .string("auto")]])
+        #expect(store.preferences.mode == .auto)
+        #expect(model.preferencesDraft.mode == .auto)
         #expect(model.preferencesDraft.remotePolicy.isEmpty)   // the invalid edit is still pending
         // An explicit save with the invalid field reports why instead of silently idling.
         #expect(await model.savePreferences() == false)

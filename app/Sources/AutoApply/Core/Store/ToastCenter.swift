@@ -20,6 +20,9 @@ final class ToastCenter {
         var countdown = false
         /// When it went on screen (the ring's clock); set on present.
         var presentedAt: Date?
+        /// A quiet second choice next to the action (e.g. "Not now"); runs and dismisses.
+        var secondaryTitle: String?
+        var secondaryAction: (@MainActor () -> Void)?
 
         static func == (a: Toast, b: Toast) -> Bool { a.id == b.id }
     }
@@ -53,6 +56,13 @@ final class ToastCenter {
             if current?.message == toast.message || queue.last?.message == toast.message { return }
             queue.append(toast)
         }
+    }
+
+    /// Run the current toast's second choice (e.g. "Not now") and dismiss it.
+    func performSecondaryAction() {
+        let action = current?.secondaryAction
+        dismiss()
+        action?()
     }
 
     /// Run the current toast's action (e.g. Undo) and dismiss it.

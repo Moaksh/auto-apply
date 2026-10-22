@@ -91,7 +91,9 @@
     "interview_debrief",
     "draft_answer",
     "get_voice_profile",
-    "update_voice_profile"
+    "update_voice_profile",
+    "get_autonomy",
+    "dismiss_autonomy_suggestion"
   ],
   "x-event-types": [
     "ack",
@@ -114,6 +116,7 @@
     "outreach_reply",
     "application_reply",
     "scout_finished",
+    "autonomy_suggestion",
     "log"
   ],
   "x-state-machine": {
@@ -1104,6 +1107,192 @@
       "title": "Ats",
       "type": "string"
     },
+    "AutonomyReport": {
+      "additionalProperties": false,
+      "description": "``ack.result`` for ``get_autonomy``: one row per ATS value. Advisory only; never changes a mode.",
+      "properties": {
+        "threshold": {
+          "description": "Clean approvals in a row before Auto is offered for a site.",
+          "title": "Threshold",
+          "type": "integer"
+        },
+        "sites": {
+          "items": {
+            "$ref": "#/$defs/AutonomySite"
+          },
+          "title": "Sites",
+          "type": "array",
+          "default": []
+        }
+      },
+      "required": [
+        "threshold"
+      ],
+      "title": "AutonomyReport",
+      "type": "object"
+    },
+    "AutonomySite": {
+      "additionalProperties": false,
+      "description": "One application site's Review track record (``get_autonomy``).",
+      "properties": {
+        "ats": {
+          "$ref": "#/$defs/Ats"
+        },
+        "mode": {
+          "$ref": "#/$defs/Mode",
+          "description": "Effective mode for this site (per-site override, else the global mode)."
+        },
+        "mode_source": {
+          "description": "'site' when per_ats_mode sets it, else inherited.",
+          "enum": [
+            "site",
+            "global"
+          ],
+          "title": "Mode Source",
+          "type": "string"
+        },
+        "approved": {
+          "default": 0,
+          "description": "Applications approved in Review.",
+          "minimum": 0,
+          "title": "Approved",
+          "type": "integer"
+        },
+        "approved_without_edits": {
+          "default": 0,
+          "description": "Approved with no answer edited in Review.",
+          "minimum": 0,
+          "title": "Approved Without Edits",
+          "type": "integer"
+        },
+        "edited": {
+          "default": 0,
+          "description": "Approved after editing at least one answer.",
+          "minimum": 0,
+          "title": "Edited",
+          "type": "integer"
+        },
+        "rejected_wrong_answers": {
+          "default": 0,
+          "description": "Skipped in Review with reason 'wrong_answers'.",
+          "minimum": 0,
+          "title": "Rejected Wrong Answers",
+          "type": "integer"
+        },
+        "clean_approvals": {
+          "default": 0,
+          "description": "Current streak of approvals without edits (an edit or a wrong-answers skip resets it).",
+          "minimum": 0,
+          "title": "Clean Approvals",
+          "type": "integer"
+        },
+        "since": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "First approval of the current streak.",
+          "title": "Since"
+        },
+        "last_decision_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Last Decision At"
+        },
+        "eligible": {
+          "default": false,
+          "description": "clean_approvals >= threshold.",
+          "title": "Eligible",
+          "type": "boolean"
+        },
+        "suggestion": {
+          "default": "none",
+          "description": "pending: in Review and eligible (offer Auto); dismissed: 'Not now'; none otherwise.",
+          "enum": [
+            "none",
+            "pending",
+            "dismissed"
+          ],
+          "title": "Suggestion",
+          "type": "string"
+        },
+        "suggested_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "When autonomy_suggestion was emitted.",
+          "title": "Suggested At"
+        },
+        "dismissed_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Dismissed At"
+        }
+      },
+      "required": [
+        "ats",
+        "mode",
+        "mode_source"
+      ],
+      "title": "AutonomySite",
+      "type": "object"
+    },
+    "AutonomySuggestionPayload": {
+      "additionalProperties": false,
+      "description": "A site in Review earned Auto: ``clean_approvals`` approvals in a row without edits. Emitted once\nper site. The app offers \"Turn on Auto\" (``update_preferences`` per_ats_mode) or \"Not now\"\n(``dismiss_autonomy_suggestion``); nothing changes by itself.",
+      "properties": {
+        "ats": {
+          "$ref": "#/$defs/Ats"
+        },
+        "clean_approvals": {
+          "minimum": 0,
+          "title": "Clean Approvals",
+          "type": "integer"
+        },
+        "since": {
+          "description": "First approval of the clean streak.",
+          "format": "date-time",
+          "title": "Since",
+          "type": "string"
+        }
+      },
+      "required": [
+        "ats",
+        "clean_approvals",
+        "since"
+      ],
+      "title": "AutonomySuggestionPayload",
+      "type": "object"
+    },
     "BoardStatus": {
       "description": "Manual post-apply board status (only once state == submitted).",
       "enum": [
@@ -1622,6 +1811,20 @@
         "thread_id"
       ],
       "title": "DiscardOutreachPayload",
+      "type": "object"
+    },
+    "DismissAutonomySuggestionPayload": {
+      "additionalProperties": false,
+      "description": "\"Not now\" for a site's Auto suggestion: it is not offered again. Modes stay the user's choice.",
+      "properties": {
+        "ats": {
+          "$ref": "#/$defs/Ats"
+        }
+      },
+      "required": [
+        "ats"
+      ],
+      "title": "DismissAutonomySuggestionPayload",
       "type": "object"
     },
     "DismissCompanySuggestionPayload": {
@@ -2193,6 +2396,13 @@
         "application_id"
       ],
       "title": "GenerateInterviewPrepPayload",
+      "type": "object"
+    },
+    "GetAutonomyPayload": {
+      "additionalProperties": false,
+      "description": "Per application site trust stats and the earned-Auto suggestion state (autonomy.py).",
+      "properties": {},
+      "title": "GetAutonomyPayload",
       "type": "object"
     },
     "GetInsightsPayload": {
@@ -3920,7 +4130,8 @@
         },
         "mode": {
           "$ref": "#/$defs/Mode",
-          "default": "auto"
+          "default": "review",
+          "description": "Global mode. New installs start in Review (schema v13); Auto is offered per application site once it is earned (autonomy.py) and the user can pick any mode at any level at any time."
         },
         "per_ats_mode": {
           "additionalProperties": {
@@ -4331,7 +4542,8 @@
               "type": "null"
             }
           ],
-          "default": null
+          "default": null,
+          "description": "Global mode. New installs start in Review (schema v13); Auto is offered per application site once it is earned (autonomy.py) and the user can pick any mode at any level at any time."
         },
         "per_ats_mode": {
           "anyOf": [
@@ -9910,6 +10122,58 @@
       ],
       "additionalProperties": false
     },
+    "CommandGetAutonomy": {
+      "type": "object",
+      "title": "Command: get_autonomy",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "get_autonomy"
+        },
+        "payload": {
+          "$ref": "#/$defs/GetAutonomyPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandDismissAutonomySuggestion": {
+      "type": "object",
+      "title": "Command: dismiss_autonomy_suggestion",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "dismiss_autonomy_suggestion"
+        },
+        "payload": {
+          "$ref": "#/$defs/DismissAutonomySuggestionPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
     "EventAck": {
       "type": "object",
       "title": "Event: ack",
@@ -10511,6 +10775,36 @@
       ],
       "additionalProperties": false
     },
+    "EventAutonomySuggestion": {
+      "type": "object",
+      "title": "Event: autonomy_suggestion",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "autonomy_suggestion"
+        },
+        "payload": {
+          "$ref": "#/$defs/AutonomySuggestionPayload"
+        },
+        "reply_to": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
     "EventLog": {
       "type": "object",
       "title": "Event: log",
@@ -10803,6 +11097,12 @@
         },
         {
           "$ref": "#/$defs/CommandUpdateVoiceProfile"
+        },
+        {
+          "$ref": "#/$defs/CommandGetAutonomy"
+        },
+        {
+          "$ref": "#/$defs/CommandDismissAutonomySuggestion"
         }
       ]
     },
@@ -10867,6 +11167,9 @@
         },
         {
           "$ref": "#/$defs/EventScoutFinished"
+        },
+        {
+          "$ref": "#/$defs/EventAutonomySuggestion"
         },
         {
           "$ref": "#/$defs/EventLog"

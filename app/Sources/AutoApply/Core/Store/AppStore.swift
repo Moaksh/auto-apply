@@ -80,6 +80,8 @@ final class AppStore {
     private(set) var snapshotCaps = CapsStatus()
     private(set) var nextRunAt: Date?
     private(set) var dismissedIssueIDs: Set<String> = []
+    /// Per application site Review track record (`get_autonomy`; AppStore+Autonomy.swift).
+    var autonomy: AutonomyReport?
 
     // MARK: Tasks
     @ObservationIgnored private var coalescer: EventCoalescer?
@@ -261,6 +263,8 @@ final class AppStore {
             }
         case .runFinished:
             scheduleStats()
+        case .autonomySuggestion(let p):
+            presentAutonomySuggestion(p)
         default:
             break
         }

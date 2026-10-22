@@ -18,7 +18,7 @@ def test_preference_defaults_from_plan():
     p = Preferences()
     assert p.match_threshold == 70
     assert p.per_company_cooldown_days == 30
-    assert p.mode is Mode.AUTO
+    assert p.mode is Mode.REVIEW  # v13: new installs start in Review (earned autonomy)
     assert p.schedule == ["09:00", "13:00", "18:00"]
     assert p.ghost_after_days == 21
     assert p.nudge_days == [7, 14]

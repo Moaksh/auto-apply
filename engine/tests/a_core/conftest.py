@@ -272,3 +272,5 @@ class EventSink:
 
     def of(self, type_: str) -> list[Any]:
         return [p for t, p in self.events if t == type_]
+
+from tests.legacy_auto_mode import _fresh_db_starts_in_auto  # noqa: E402,F401  (autouse: fresh DBs start in Auto)

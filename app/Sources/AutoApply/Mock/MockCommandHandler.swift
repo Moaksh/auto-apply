@@ -1,6 +1,7 @@
 // MockCommandHandler.swift — autoapplyd's command semantics (contract/protocol.md §5) against
 // MockWorld: validation errors, ack results, and follow-up side-effect events.
 import Foundation
+import Synchronization
 
 enum MockCommandHandler {
     struct Handled: Sendable {
@@ -477,7 +478,42 @@ enum MockCommandHandler {
             return MockCareer.handle(command, world: world)
         case .updateVoiceProfile:
             return MockCareer.handle(command, world: world)
+
+        // Earned autonomy (protocol.md §5.3.1): a fixed track record per site; "Not now" is remembered per world.
+        case .getAutonomy:
+            return Handled(reply: ack(encoding: autonomyReport(world)))
+        case .dismissAutonomySuggestion(let p):
+            autonomyDismissed.withLock { $0[ObjectIdentifier(world), default: []].insert(p.ats) }
+            return Handled(reply: ack())
         }
+    }
+
+    /// Sites the user said "Not now" to, per mock world.
+    private static let autonomyDismissed = Mutex<[ObjectIdentifier: Set<Ats>]>([:])
+
+    /// (approved, edited, wrong-answer skips, clean streak) per site in mock mode.
+    static let autonomyTrackRecord: [Ats: (approved: Int, edited: Int, wrong: Int, streak: Int)] = [
+        .greenhouse: (13, 1, 0, 12), .lever: (4, 0, 0, 4), .workday: (3, 2, 1, 0),
+    ]
+
+    static func autonomyReport(_ world: MockWorld) -> AutonomyReport {
+        let prefs = world.read { $0.preferences }
+        let dismissed = autonomyDismissed.withLock { $0[ObjectIdentifier(world)] ?? [] }
+        let threshold = 10
+        let since = Date().addingTimeInterval(-9 * 86_400)
+        let sites = Ats.allCases.map { ats -> AutonomySite in
+            let r = autonomyTrackRecord[ats] ?? (0, 0, 0, 0)
+            let mode = prefs.perAtsMode[ats.rawValue] ?? prefs.mode
+            let eligible = r.streak >= threshold
+            let suggestion: AutonomySite.Suggestion = mode == .auto ? .none : dismissed.contains(ats) ? .dismissed : eligible ? .pending : .none
+            return AutonomySite(ats: ats, mode: mode, modeSource: prefs.perAtsMode[ats.rawValue] == nil ? .global : .site,
+                                approved: r.approved, approvedWithoutEdits: r.approved - r.edited, edited: r.edited,
+                                rejectedWrongAnswers: r.wrong, cleanApprovals: r.streak, since: r.streak > 0 ? since : nil,
+                                lastDecisionAt: r.approved > 0 ? Date().addingTimeInterval(-3_600) : nil, eligible: eligible,
+                                suggestion: suggestion, suggestedAt: eligible ? since.addingTimeInterval(8 * 86_400) : nil,
+                                dismissedAt: dismissed.contains(ats) ? Date() : nil)
+        }
+        return AutonomyReport(threshold: threshold, sites: sites)
     }
 
     private static func addResume(world: MockWorld, label: String, path: String, tags: [String], isDefault: Bool) -> Int {

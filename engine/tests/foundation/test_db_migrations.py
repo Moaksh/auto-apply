@@ -275,7 +275,7 @@ def test_v11_database_upgrades_to_v12(tmp_path, conn):
         c.execute("INSERT INTO application_replies(application_id, message_id, from_email, received_at, label, match_basis, "
                   "suggested_status, suggestion_state) VALUES (?, ?, 'hr@acme.com', '2026-10-01T00:00:00.000Z', 'other', 'domain', ?, ?)",
                   (app.id, f"<m{i}@acme.com>", "interview" if state != "none" else None, state))
-    assert db.migrate(c) == db.SCHEMA_VERSION == 12
+    assert db.migrate(c) == db.SCHEMA_VERSION
     for table in ("outreach_threads", "application_replies"):
         assert _shape(c, table) == _shape(conn, table), table
     t = c.execute("SELECT suggested_status, suggestion_state, suggestion_decided_at FROM outreach_threads").fetchone()
@@ -285,4 +285,49 @@ def test_v11_database_upgrades_to_v12(tmp_path, conn):
     assert reads["pending"] is None and reads["dismissed"] and reads["none"]
     assert db.compute_counts(c).application_replies_unread == 1  # unchanged by the upgrade
     assert db.migrate(c) == db.SCHEMA_VERSION  # idempotent
+    c.close()
+
+
+# ---- v13 (new installs start in Review; existing users keep their mode) -------------------------
+
+
+def _v12_schema_sql() -> str:
+    """schema.sql as it was at v12: ``preferences.mode`` defaulted to 'auto', no v13 row."""
+    sql = schema_sql_path().read_text()
+    old = "mode                        TEXT NOT NULL DEFAULT 'review' CHECK"
+    assert old in sql
+    sql = sql.replace(old, "mode                        TEXT NOT NULL DEFAULT 'auto' CHECK")
+    return "\n".join(line for line in sql.splitlines()
+                     if not any(f"VALUES ({v})" in line for v in range(13, db.SCHEMA_VERSION + 1)))
+
+
+def test_fresh_install_defaults_to_review(conn):
+    assert db.get_preferences(conn).mode.value == "review"
+    assert conn.execute("SELECT mode FROM preferences").fetchone()[0] == "review"
+
+
+@pytest.mark.parametrize("stored", ["auto", "review"])
+def test_v12_database_upgrades_to_v13_keeping_the_mode(tmp_path, conn, stored):
+    c = db.connect(tmp_path / "v12.db")
+    c.executescript("BEGIN;\n" + _v12_schema_sql() + "\nCOMMIT;")
+    assert db.current_schema_version(c) == 12
+    c.execute("UPDATE preferences SET mode = ?, daily_cap = 7, per_ats_mode = ?, create_accounts = 0",
+              (stored, '{"lever":"auto"}'))
+    assert db.migrate(c) == db.SCHEMA_VERSION
+    prefs = db.get_preferences(c)
+    assert prefs.mode.value == stored  # an existing user's mode is never changed
+    assert (prefs.daily_cap, {k.value: v.value for k, v in prefs.per_ats_mode.items()}, prefs.create_accounts) == (
+        7, {"lever": "auto"}, False)
+    assert _shape(c, "preferences") == _shape(conn, "preferences")  # column default is now 'review'
+    assert db.migrate(c) == db.SCHEMA_VERSION  # idempotent
+    c.close()
+
+
+def test_v13_without_a_preferences_row_keeps_auto(tmp_path):
+    """A v12 database whose row was never written behaves as it did (Auto), not as a new install."""
+    c = db.connect(tmp_path / "v12.db")
+    c.executescript("BEGIN;\n" + _v12_schema_sql() + "\nCOMMIT;")
+    c.execute("DELETE FROM preferences")
+    db.migrate(c)
+    assert db.get_preferences(c).mode.value == "auto"
     c.close()

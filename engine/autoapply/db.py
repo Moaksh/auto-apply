@@ -99,7 +99,7 @@ from autoapply.models import (
 )
 
 #: Must equal MAX(version) seeded by contract/schema.sql.
-SCHEMA_VERSION = 12
+SCHEMA_VERSION = 13
 
 #: Forward migrations: version -> SQL to go from (version-1) to version. Append-only.
 #: Version 1 is the baseline created by contract/schema.sql itself.
@@ -174,6 +174,9 @@ CREATE INDEX IF NOT EXISTS ix_application_replies_suggestion ON application_repl
     # with accept_outreach_suggestion / dismiss_outreach_suggestion); employer replies get a
     # read flag (mark_application_reply_read).
     12: "python:_migrate_v12",
+    # v13: new installs start in Review (``preferences.mode`` column default 'auto' -> 'review').
+    # The stored row is copied as is, so existing users keep the mode they had.
+    13: "python:_migrate_v13",
 }
 
 
@@ -496,6 +499,34 @@ def _migrate_v12(conn: sqlite3.Connection) -> None:
         conn.execute("UPDATE application_replies SET read_at = COALESCE(decided_at, created_at) "
                      "WHERE read_at IS NULL AND suggestion_state <> 'pending'")
         conn.execute("INSERT INTO schema_version(version) VALUES (12)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+_V13_MODE_DEFAULT = re.compile(r"(\n\s*mode\s+TEXT\s+NOT\s+NULL\s+DEFAULT\s+)'auto'")
+
+
+def _migrate_v13(conn: sqlite3.Connection) -> None:
+    """v13: the ``preferences.mode`` column default becomes 'review' (new installs start in Review).
+
+    SQLite cannot change a column default in place, so the table is rebuilt from its own stored
+    definition (keeping every column added by earlier ALTERs) and the single row is copied over
+    unchanged: an existing user's mode, Auto or Review, is kept. Idempotent."""
+    conn.execute("BEGIN")
+    try:
+        sql = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'preferences'").fetchone()[0]
+        new_sql, n = _V13_MODE_DEFAULT.subn(r"\1'review'", sql, count=1)
+        if n:
+            # A database without the row would otherwise get the new default; pin the old one.
+            conn.execute("INSERT OR IGNORE INTO preferences(id, mode) VALUES (1, 'auto')")
+            cols = ", ".join(f'"{r[1]}"' for r in conn.execute("PRAGMA table_info(preferences)"))
+            conn.execute(re.sub(r"^CREATE TABLE\s+\"?preferences\"?", "CREATE TABLE preferences_v13", new_sql, count=1))
+            conn.execute(f"INSERT INTO preferences_v13 ({cols}) SELECT {cols} FROM preferences")
+            conn.execute("DROP TABLE preferences")
+            conn.execute("ALTER TABLE preferences_v13 RENAME TO preferences")
+        conn.execute("INSERT INTO schema_version(version) VALUES (13)")
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")

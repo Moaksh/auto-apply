@@ -7,7 +7,9 @@ import Synchronization
 final class MockWorld: Sendable {
     struct State: Sendable {
         var daemon = StatePayload(daemon: .idle)
-        var preferences = Preferences()
+        /// Demo worlds behave like an existing install that already runs in Auto (new installs default
+        /// to Review); the reviewMode and sample scenarios set Review themselves.
+        var preferences: Preferences = { var p = Preferences(); p.mode = .auto; return p }()
         var onboarding = OnboardingState(completed: true, step: 7)
         var sources: [SourceStatus] = MockWorld.defaultSources
         var caps = CapsStatus(dailyUsed: 0, dailyLimit: 15, companiesCoolingDown: 2, linkedinSessionsUsed: 1,

@@ -374,8 +374,8 @@ extension StoreReducerTests {
         let daemon = StubDaemon()
         daemon.responder = { _ in .error(ErrorPayload(code: .invalidPayload, message: "bad")) }
         let (store, _) = makeStore(daemon)
-        #expect(await store.setMode(.review) == false)
-        #expect(store.mode == .auto, "rolled back")
+        #expect(await store.setMode(.auto) == false)
+        #expect(store.mode == .review, "rolled back (new installs start in Review)")
         if case .daemon(let p)? = store.lastCommandError { #expect(p.code == .invalidPayload) } else { Issue.record("lastCommandError not set") }
     }
 }

@@ -97,3 +97,5 @@ def make_ctx(conn: sqlite3.Connection, app_id: int, llm: FakeLLMProvider, home: 
 def gen(answer: str, confidence: float = 0.9, grounded: bool = True, story_ids: list[int] | None = None) -> dict[str, Any]:
     """A FakeLLMProvider response for the resolver's GENERATE ANSWER prompt."""
     return {"answer": answer, "confidence": confidence, "grounded": grounded, "story_ids": story_ids or []}
+
+from tests.legacy_auto_mode import _fresh_db_starts_in_auto  # noqa: E402,F401  (autouse: fresh DBs start in Auto)

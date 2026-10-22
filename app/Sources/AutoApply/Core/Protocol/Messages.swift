@@ -846,6 +846,113 @@ extension ApprovePayload {
     }
 }
 
+/// ``ack.result`` for ``get_autonomy``: one row per ATS value. Advisory only; never changes a mode.
+struct AutonomyReport: Codable, Sendable, Hashable {
+    var threshold: Int
+    var sites: [AutonomySite] = []
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case threshold
+        case sites
+    }
+}
+
+extension AutonomyReport {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        threshold = try c.decode(Int.self, forKey: .threshold)
+        sites = try c.decodeIfPresent([AutonomySite].self, forKey: .sites) ?? []
+    }
+}
+
+/// One application site's Review track record (``get_autonomy``).
+struct AutonomySite: Codable, Sendable, Hashable {
+    enum ModeSource: String, Codable, Sendable, CaseIterable, Hashable {
+        case site
+        case global
+    }
+    enum Suggestion: String, Codable, Sendable, CaseIterable, Hashable {
+        case none
+        case pending
+        case dismissed
+    }
+    var ats: Ats
+    var mode: Mode
+    var modeSource: ModeSource
+    var approved: Int = 0
+    var approvedWithoutEdits: Int = 0
+    var edited: Int = 0
+    var rejectedWrongAnswers: Int = 0
+    var cleanApprovals: Int = 0
+    var since: Date? = nil
+    var lastDecisionAt: Date? = nil
+    var eligible: Bool = false
+    var suggestion: Suggestion = .none
+    var suggestedAt: Date? = nil
+    var dismissedAt: Date? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case ats
+        case mode
+        case modeSource = "mode_source"
+        case approved
+        case approvedWithoutEdits = "approved_without_edits"
+        case edited
+        case rejectedWrongAnswers = "rejected_wrong_answers"
+        case cleanApprovals = "clean_approvals"
+        case since
+        case lastDecisionAt = "last_decision_at"
+        case eligible
+        case suggestion
+        case suggestedAt = "suggested_at"
+        case dismissedAt = "dismissed_at"
+    }
+}
+
+extension AutonomySite {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        ats = try c.decode(Ats.self, forKey: .ats)
+        mode = try c.decode(Mode.self, forKey: .mode)
+        modeSource = try c.decode(ModeSource.self, forKey: .modeSource)
+        approved = try c.decodeIfPresent(Int.self, forKey: .approved) ?? 0
+        approvedWithoutEdits = try c.decodeIfPresent(Int.self, forKey: .approvedWithoutEdits) ?? 0
+        edited = try c.decodeIfPresent(Int.self, forKey: .edited) ?? 0
+        rejectedWrongAnswers = try c.decodeIfPresent(Int.self, forKey: .rejectedWrongAnswers) ?? 0
+        cleanApprovals = try c.decodeIfPresent(Int.self, forKey: .cleanApprovals) ?? 0
+        since = try c.decodeIfPresent(Date.self, forKey: .since)
+        lastDecisionAt = try c.decodeIfPresent(Date.self, forKey: .lastDecisionAt)
+        eligible = try c.decodeIfPresent(Bool.self, forKey: .eligible) ?? false
+        suggestion = try c.decodeIfPresent(Suggestion.self, forKey: .suggestion) ?? .none
+        suggestedAt = try c.decodeIfPresent(Date.self, forKey: .suggestedAt)
+        dismissedAt = try c.decodeIfPresent(Date.self, forKey: .dismissedAt)
+    }
+}
+
+/// A site in Review earned Auto: ``clean_approvals`` approvals in a row without edits. Emitted once
+/// per site. The app offers "Turn on Auto" (``update_preferences`` per_ats_mode) or "Not now"
+/// (``dismiss_autonomy_suggestion``); nothing changes by itself.
+struct AutonomySuggestionPayload: Codable, Sendable, Hashable {
+    var ats: Ats
+    var cleanApprovals: Int
+    var since: Date
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case ats
+        case cleanApprovals = "clean_approvals"
+        case since
+    }
+}
+
+extension AutonomySuggestionPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        ats = try c.decode(Ats.self, forKey: .ats)
+        cleanApprovals = try c.decode(Int.self, forKey: .cleanApprovals)
+        since = try c.decode(Date.self, forKey: .since)
+    }
+}
+
 struct CancelOutreachPayload: Codable, Sendable, Hashable {
     var messageIds: [Int]
 
@@ -1184,6 +1291,22 @@ extension DiscardOutreachPayload {
     }
 }
 
+/// "Not now" for a site's Auto suggestion: it is not offered again. Modes stay the user's choice.
+struct DismissAutonomySuggestionPayload: Codable, Sendable, Hashable {
+    var ats: Ats
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case ats
+    }
+}
+
+extension DismissAutonomySuggestionPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        ats = try c.decode(Ats.self, forKey: .ats)
+    }
+}
+
 struct DismissCompanySuggestionPayload: Codable, Sendable, Hashable {
     var suggestionId: Int
 
@@ -1513,6 +1636,15 @@ extension GenerateInterviewPrepPayload {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         applicationId = try c.decode(Int.self, forKey: .applicationId)
         force = try c.decodeIfPresent(Bool.self, forKey: .force) ?? false
+    }
+}
+
+/// Per application site trust stats and the earned-Auto suggestion state (autonomy.py).
+struct GetAutonomyPayload: Codable, Sendable, Hashable {
+}
+
+extension GetAutonomyPayload {
+    init(from decoder: any Decoder) throws {
     }
 }
 
@@ -2404,7 +2536,7 @@ struct Preferences: Codable, Sendable, Hashable {
     var dailyCap: Int = 15
     var perCompanyCooldownDays: Int = 30
     var matchThreshold: Int = 70
-    var mode: Mode = .auto
+    var mode: Mode = .review
     var perAtsMode: [String: Mode] = ["workday": .review]
     var perCompanyMode: [String: Mode] = [:]
     var schedule: [String] = ["09:00", "13:00", "18:00"]
@@ -2490,7 +2622,7 @@ extension Preferences {
         dailyCap = try c.decodeIfPresent(Int.self, forKey: .dailyCap) ?? 15
         perCompanyCooldownDays = try c.decodeIfPresent(Int.self, forKey: .perCompanyCooldownDays) ?? 30
         matchThreshold = try c.decodeIfPresent(Int.self, forKey: .matchThreshold) ?? 70
-        mode = try c.decodeIfPresent(Mode.self, forKey: .mode) ?? .auto
+        mode = try c.decodeIfPresent(Mode.self, forKey: .mode) ?? .review
         perAtsMode = try c.decodeIfPresent([String: Mode].self, forKey: .perAtsMode) ?? ["workday": .review]
         perCompanyMode = try c.decodeIfPresent([String: Mode].self, forKey: .perCompanyMode) ?? [:]
         schedule = try c.decodeIfPresent([String].self, forKey: .schedule) ?? ["09:00", "13:00", "18:00"]
@@ -4273,6 +4405,8 @@ enum Command: Sendable, Hashable {
     case draftAnswer(DraftAnswerPayload)
     case getVoiceProfile(GetVoiceProfilePayload)
     case updateVoiceProfile(UpdateVoiceProfilePayload)
+    case getAutonomy(GetAutonomyPayload)
+    case dismissAutonomySuggestion(DismissAutonomySuggestionPayload)
 
     /// Wire `type` string.
     var type: String {
@@ -4364,6 +4498,8 @@ enum Command: Sendable, Hashable {
         case .draftAnswer: "draft_answer"
         case .getVoiceProfile: "get_voice_profile"
         case .updateVoiceProfile: "update_voice_profile"
+        case .getAutonomy: "get_autonomy"
+        case .dismissAutonomySuggestion: "dismiss_autonomy_suggestion"
         }
     }
 
@@ -4455,6 +4591,8 @@ enum Command: Sendable, Hashable {
         "draft_answer",
         "get_voice_profile",
         "update_voice_profile",
+        "get_autonomy",
+        "dismiss_autonomy_suggestion",
     ]
 }
 
@@ -4480,6 +4618,7 @@ enum DaemonEvent: Sendable, Hashable {
     case outreachReply(OutreachReplyPayload)
     case applicationReply(ApplicationReplyPayload)
     case scoutFinished(ScoutFinishedPayload)
+    case autonomySuggestion(AutonomySuggestionPayload)
     case log(LogPayload)
     case unknown(type: String, payload: JSONValue)
 
@@ -4506,6 +4645,7 @@ enum DaemonEvent: Sendable, Hashable {
         case .outreachReply: "outreach_reply"
         case .applicationReply: "application_reply"
         case .scoutFinished: "scout_finished"
+        case .autonomySuggestion: "autonomy_suggestion"
         case .log: "log"
         case .unknown(let type, _): type
         }
@@ -4532,6 +4672,7 @@ enum DaemonEvent: Sendable, Hashable {
         "outreach_reply",
         "application_reply",
         "scout_finished",
+        "autonomy_suggestion",
         "log",
     ]
 
@@ -4649,6 +4790,8 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case "draft_answer": command = .draftAnswer(try c.decode(DraftAnswerPayload.self, forKey: .payload))
         case "get_voice_profile": command = .getVoiceProfile(try c.decode(GetVoiceProfilePayload.self, forKey: .payload))
         case "update_voice_profile": command = .updateVoiceProfile(try c.decode(UpdateVoiceProfilePayload.self, forKey: .payload))
+        case "get_autonomy": command = .getAutonomy(try c.decode(GetAutonomyPayload.self, forKey: .payload))
+        case "dismiss_autonomy_suggestion": command = .dismissAutonomySuggestion(try c.decode(DismissAutonomySuggestionPayload.self, forKey: .payload))
         default:
             throw DecodingError.dataCorruptedError(forKey: .type, in: c, debugDescription: "unknown command type \(type)")
         }
@@ -4747,6 +4890,8 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case .draftAnswer(let p): try c.encode(p, forKey: .payload)
         case .getVoiceProfile(let p): try c.encode(p, forKey: .payload)
         case .updateVoiceProfile(let p): try c.encode(p, forKey: .payload)
+        case .getAutonomy(let p): try c.encode(p, forKey: .payload)
+        case .dismissAutonomySuggestion(let p): try c.encode(p, forKey: .payload)
         }
     }
 }
@@ -4797,6 +4942,7 @@ struct EventEnvelope: Codable, Sendable, Hashable {
         case "outreach_reply": event = .outreachReply(try c.decode(OutreachReplyPayload.self, forKey: .payload))
         case "application_reply": event = .applicationReply(try c.decode(ApplicationReplyPayload.self, forKey: .payload))
         case "scout_finished": event = .scoutFinished(try c.decode(ScoutFinishedPayload.self, forKey: .payload))
+        case "autonomy_suggestion": event = .autonomySuggestion(try c.decode(AutonomySuggestionPayload.self, forKey: .payload))
         case "log": event = .log(try c.decode(LogPayload.self, forKey: .payload))
         default:
             event = .unknown(type: type, payload: try c.decodeIfPresent(JSONValue.self, forKey: .payload) ?? .object([:]))
@@ -4830,6 +4976,7 @@ struct EventEnvelope: Codable, Sendable, Hashable {
         case .outreachReply(let p): try c.encode(p, forKey: .payload)
         case .applicationReply(let p): try c.encode(p, forKey: .payload)
         case .scoutFinished(let p): try c.encode(p, forKey: .payload)
+        case .autonomySuggestion(let p): try c.encode(p, forKey: .payload)
         case .log(let p): try c.encode(p, forKey: .payload)
         case .unknown(_, let payload): try c.encode(payload, forKey: .payload)
         }

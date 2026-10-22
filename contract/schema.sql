@@ -1,6 +1,6 @@
 -- =====================================================================================
 -- AutoApply SQLite schema — SINGLE SOURCE OF TRUTH for the database.
--- Contract version: schema_version = 12  (keep in sync with autoapply.db.SCHEMA_VERSION)
+-- Contract version: schema_version = 13  (keep in sync with autoapply.db.SCHEMA_VERSION)
 --
 -- Location: ~/Library/Application Support/AutoApply/autoapply.db (AUTOAPPLY_HOME overrides)
 --
@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS preferences (
     daily_cap                   INTEGER NOT NULL DEFAULT 15 CHECK (daily_cap >= 0),
     per_company_cooldown_days   INTEGER NOT NULL DEFAULT 30 CHECK (per_company_cooldown_days >= 0),
     match_threshold             INTEGER NOT NULL DEFAULT 70 CHECK (match_threshold BETWEEN 0 AND 100),
-    mode                        TEXT NOT NULL DEFAULT 'auto' CHECK (mode IN ('auto', 'review')),
+    mode                        TEXT NOT NULL DEFAULT 'review' CHECK (mode IN ('auto', 'review')),  -- v13: new installs start in Review (was 'auto'; stored rows are kept)
     per_ats_mode                TEXT NOT NULL DEFAULT '{"workday":"review"}' CHECK (json_valid(per_ats_mode)), -- {ats: "auto"|"review"}
     per_company_mode            TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(per_company_mode)),            -- {company_id(str): "auto"|"review"}
     schedule                    TEXT NOT NULL DEFAULT '["09:00","13:00","18:00"]' CHECK (json_valid(schedule)), -- local HH:MM
@@ -675,3 +675,4 @@ INSERT OR IGNORE INTO schema_version (version) VALUES (9);
 INSERT OR IGNORE INTO schema_version (version) VALUES (10);
 INSERT OR IGNORE INTO schema_version (version) VALUES (11);
 INSERT OR IGNORE INTO schema_version (version) VALUES (12);
+INSERT OR IGNORE INTO schema_version (version) VALUES (13);

@@ -1429,6 +1429,44 @@ class DismissCompanySuggestionPayload(_P):
     suggestion_id: int
 
 
+class GetAutonomyPayload(_P):
+    """Per application site trust stats and the earned-Auto suggestion state (autonomy.py)."""
+
+
+class DismissAutonomySuggestionPayload(_P):
+    """"Not now" for a site's Auto suggestion: it is not offered again. Modes stay the user's choice."""
+
+    ats: Ats
+
+
+class AutonomySite(_P):
+    """One application site's Review track record (``get_autonomy``)."""
+
+    ats: Ats
+    mode: Mode = Field(description="Effective mode for this site (per-site override, else the global mode).")
+    mode_source: Literal["site", "global"] = Field(description="'site' when per_ats_mode sets it, else inherited.")
+    approved: int = Field(default=0, ge=0, description="Applications approved in Review.")
+    approved_without_edits: int = Field(default=0, ge=0, description="Approved with no answer edited in Review.")
+    edited: int = Field(default=0, ge=0, description="Approved after editing at least one answer.")
+    rejected_wrong_answers: int = Field(default=0, ge=0, description="Skipped in Review with reason 'wrong_answers'.")
+    clean_approvals: int = Field(default=0, ge=0, description="Current streak of approvals without edits "
+                                                              "(an edit or a wrong-answers skip resets it).")
+    since: Timestamp | None = Field(default=None, description="First approval of the current streak.")
+    last_decision_at: Timestamp | None = None
+    eligible: bool = Field(default=False, description="clean_approvals >= threshold.")
+    suggestion: Literal["none", "pending", "dismissed"] = Field(
+        default="none", description="pending: in Review and eligible (offer Auto); dismissed: 'Not now'; none otherwise.")
+    suggested_at: Timestamp | None = Field(default=None, description="When autonomy_suggestion was emitted.")
+    dismissed_at: Timestamp | None = None
+
+
+class AutonomyReport(_P):
+    """``ack.result`` for ``get_autonomy``: one row per ATS value. Advisory only; never changes a mode."""
+
+    threshold: int = Field(description="Clean approvals in a row before Auto is offered for a site.")
+    sites: list[AutonomySite] = Field(default_factory=list)
+
+
 class OnboardingSetStepPayload(_P):
     step: int = Field(ge=0, le=7)
 
@@ -1788,6 +1826,8 @@ COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "draft_answer": DraftAnswerPayload,
     "get_voice_profile": GetVoiceProfilePayload,
     "update_voice_profile": UpdateVoiceProfilePayload,
+    "get_autonomy": GetAutonomyPayload,
+    "dismiss_autonomy_suggestion": DismissAutonomySuggestionPayload,
 }
 
 
@@ -1995,6 +2035,16 @@ class ScoutFinishedPayload(_P):
     thread_id: int | None = Field(default=None, description="Draft written automatically for the best contact, if any.")
 
 
+class AutonomySuggestionPayload(_P):
+    """A site in Review earned Auto: ``clean_approvals`` approvals in a row without edits. Emitted once
+    per site. The app offers "Turn on Auto" (``update_preferences`` per_ats_mode) or "Not now"
+    (``dismiss_autonomy_suggestion``); nothing changes by itself."""
+
+    ats: Ats
+    clean_approvals: int = Field(ge=0)
+    since: Timestamp = Field(description="First approval of the clean streak.")
+
+
 EVENT_PAYLOADS: dict[str, type[BaseModel]] = {
     "ack": AckPayload,
     "error": ErrorPayload,
@@ -2016,6 +2066,7 @@ EVENT_PAYLOADS: dict[str, type[BaseModel]] = {
     "outreach_reply": OutreachReplyPayload,
     "application_reply": ApplicationReplyPayload,
     "scout_finished": ScoutFinishedPayload,
+    "autonomy_suggestion": AutonomySuggestionPayload,
     "log": LogPayload,
 }
 
@@ -2163,6 +2214,7 @@ _EXTRA_DEFS: tuple[type[BaseModel], ...] = (
     SystemCheckResult,
     ParseResumeResult,
     Insights,
+    AutonomyReport,
     NeverGuess,
     Profile,
     FormQuestion,

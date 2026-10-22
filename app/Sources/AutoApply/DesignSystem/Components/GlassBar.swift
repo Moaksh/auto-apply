@@ -21,6 +21,7 @@ struct GlassBar<Content: View>: View {
 struct HUDToast: View {
     var toast: ToastCenter.Toast
     var onAction: () -> Void
+    var onSecondary: () -> Void = {}
 
     var body: some View {
         GlassBar {
@@ -37,6 +38,11 @@ struct HUDToast: View {
                 Button(actionTitle, action: onAction)
                     .buttonStyle(.secondaryLink)
                     .font(Typography.bodyEmph)
+            }
+            if let secondaryTitle = toast.secondaryTitle {
+                Button(secondaryTitle, action: onSecondary)
+                    .buttonStyle(.secondaryLink)
+                    .font(Typography.body)
             }
         }
         .accessibilityElement(children: .combine)
@@ -93,7 +99,7 @@ struct HUDToastHost: ViewModifier {
         content.overlay(alignment: .bottom) {
             ZStack {
                 if let toast = center.current {
-                    HUDToast(toast: toast) { center.performAction() }
+                    HUDToast(toast: toast, onAction: { center.performAction() }, onSecondary: { center.performSecondaryAction() })
                         .id(toast.id)
                         .transition(reduced ? .opacity : .move(edge: .bottom).combined(with: .opacity))
                         .onTapGesture { if toast.actionTitle == nil { center.dismiss() } }
