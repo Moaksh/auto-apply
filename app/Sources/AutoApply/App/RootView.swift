@@ -20,10 +20,11 @@ struct RootView: View {
         } detail: {
             NavigationStack(path: $router.path) {
                 registry.view(for: router.selection.screen)
+                    .detailColumnSized()
                     .navigationDestination(for: Destination.self) { destination in
                         switch destination {
-                        case .job(let id): registry.jobDetail(id: id)
-                        case .insights: InsightsView()
+                        case .job(let id): registry.jobDetail(id: id).detailColumnSized()
+                        case .insights: InsightsView().detailColumnSized()
                         }
                     }
             }
@@ -63,6 +64,17 @@ struct RootView: View {
             router.escape()
             return .handled
         }
+    }
+}
+
+extension View {
+    /// Screens fill the detail column but never size it: whatever a screen's content measures at
+    /// the split view's probe sizes (e.g. wrapped text proposed a near-zero width reports a very
+    /// tall minimum), the column's minimum stays zero. Without this one screen could push the
+    /// split view's minimum height past the window, and AppKit then laid the whole split view
+    /// (sidebar included) out off-screen: a blank window, restored on every launch.
+    func detailColumnSized() -> some View {
+        frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity, alignment: .top)
     }
 }
 

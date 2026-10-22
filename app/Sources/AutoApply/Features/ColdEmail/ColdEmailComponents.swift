@@ -161,7 +161,11 @@ struct SendingOffNotice: View {
                      ? "Drafts are written for your review, but nothing goes out until you turn sending on. Turning it on sends one test email to \(account.email ?? "you") first."
                      : "Drafts are written for your review. To send from your own Gmail, connect your mailbox in Settings ▸ Sources, then turn sending on.")
                     .font(Typography.callout).foregroundStyle(Palette.textSecondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                    // Wraps to the width it's given, but no `.fixedSize(vertical:)`: this notice sits
+                    // above a ScrollView outside any scrolling container, and a fixed-height wrapped
+                    // text reports a huge minimum height when the split view probes a near-zero
+                    // width. That pushed the whole window's content off-screen (blank window).
+                    .lineLimit(4)
             }
             Spacer(minLength: Space.s)
             if account.isConnected {
