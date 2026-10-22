@@ -1,7 +1,8 @@
 // ReviewModel.swift — Review queue logic (docs/UI_UX_PLAN.md §5.6): flagged (medium/low
 // confidence) items sorted to the top, multi-selection, the floating bar's states (actions →
-// "include the flagged one?" safeguard → skip reason picker), staggered approve, reject with a
-// reason, and inline answer edits.
+// "include the flagged one?" safeguard → skip reason picker), approve through the send hold
+// (`SendHoldModel`: nothing is sent until its ≈5 s Undo window closes), reject with a reason,
+// jump to the next flagged answer (F), and inline answer edits.
 import Foundation
 import Observation
 
@@ -43,24 +44,15 @@ final class ReviewModel {
     /// Multi-selection (job ids).
     var selection: Set<Int> = []
     var barMode: BarMode = .actions
-    /// Rows animating out after approval (job ids → order index for the 40 ms stagger).
-    private(set) var departing: [Int: Int] = [:]
     /// Q&A per application id (streamed from the DB).
     private(set) var answers: [Int: [ApplicationAnswerItem]] = [:]
     /// Application ids whose Q&A stream has emitted at least once. Until then an application's
     /// confidence is *unknown* and it is never treated as clean by the approve safeguard.
     private(set) var loadedApplicationIDs: Set<Int> = []
-    /// Job ids with an approve in flight (stagger + hold + daemon round trip); a second press
-    /// on the same rows is ignored instead of sending a duplicate `approve`.
-    private(set) var approving: Set<Int> = []
-
-    /// True while any approve is running (disables the bar's Approve button).
-    var isApproving: Bool { !approving.isEmpty }
+    /// Bumped by F / "N need a look": the Q&A panel spotlights the next flagged answer.
+    private(set) var flaggedJumpSerial = 0
 
     @ObservationIgnored private var answerTasks: [Int: Task<Void, Never>] = [:]
-    /// Delay between rows sliding out, and the pause before the command is sent.
-    @ObservationIgnored var staggerStep: Duration = .milliseconds(40)
-    @ObservationIgnored var departHold: Duration = .milliseconds(260)
 
     static func shared(for store: AppStore) -> ReviewModel {
         FeatureModels.model(ReviewModel.self, for: store) { ReviewModel(store: store) }
@@ -69,6 +61,13 @@ final class ReviewModel {
     init(store: AppStore) {
         self.store = store
     }
+
+    /// Approvals wait here (≈5 s, Undo / ⌘Z) before the `approve` command goes out. Shared with
+    /// Job detail, so a job held from either place shows its countdown in both.
+    var sendHold: SendHoldModel { SendHoldModel.shared(for: store) }
+
+    /// On hold (or sending): a second press is ignored instead of sending twice.
+    func isHeld(_ jobID: Int) -> Bool { sendHold.isHeld(jobID) }
 
     // MARK: Queue
 
@@ -84,7 +83,7 @@ final class ReviewModel {
 
     var focusedJob: JobItem? {
         guard let id = focusedJobID else { return nil }
-        return store.jobs.job(id: id).flatMap { $0.state == .awaitingReview || departing[$0.id] != nil ? $0 : nil }
+        return store.jobs.job(id: id).flatMap { $0.state == .awaitingReview ? $0 : nil }
     }
 
     func answers(for job: JobItem) -> [ApplicationAnswerItem] {
@@ -161,8 +160,8 @@ final class ReviewModel {
     func pruneSelection() {
         let live = Set(store.jobs.awaitingReview.map(\.id))
         selection.formIntersection(live)
-        if let f = focusedJobID, !live.contains(f), departing[f] == nil { focusedJobID = nil }
-        if focusedJobID == nil { focusedJobID = queue.first?.id }
+        if let f = focusedJobID, !live.contains(f) { focusedJobID = nil }
+        if focusedJobID == nil { focusedJobID = (queue.first { !isHeld($0.id) } ?? queue.first)?.id }
     }
 
     // MARK: Selection & focus
@@ -177,7 +176,7 @@ final class ReviewModel {
     }
 
     func selectAll() {
-        selection = Set(queue.map(\.id))
+        selection = Set(queue.map(\.id).filter { !isHeld($0) })
         barMode = .actions
     }
 
@@ -193,34 +192,45 @@ final class ReviewModel {
         focusedJobID = list[max(0, min(list.count - 1, current + delta))].id
     }
 
-    /// Targets for an action: the selection when non-empty, else the focused row. Rows already
-    /// departing / being approved are excluded.
+    /// F / the "N need a look" count: spotlight the focused job's next flagged answer.
+    func jumpToNextFlagged() {
+        guard let job = focusedJob, !flaggedAnswers(for: job).isEmpty else { return }
+        flaggedJumpSerial += 1
+    }
+
+    /// After an Undo, focus the first job put back so it can be fixed or approved again.
+    func didUndo(_ jobIDs: [Int]) {
+        if let first = jobIDs.first(where: { id in queue.contains { $0.id == id } }) { focusedJobID = first }
+    }
+
+    /// Targets for an action: the selection when non-empty, else the focused row. Rows on hold
+    /// (or sending) are excluded.
     var targets: [Int] {
-        let order = queue.map(\.id).filter { departing[$0] == nil && !approving.contains($0) }
+        let order = queue.map(\.id).filter { !isHeld($0) }
         if !selection.isEmpty { return order.filter(selection.contains) }
-        guard let f = focusedJobID, departing[f] == nil, !approving.contains(f) else { return [] }
+        guard let f = focusedJobID, !isHeld(f) else { return [] }
         return [f]
     }
 
-    /// "Approve & submit" / "Approve 2 (1 needs a look)".
+    /// "Approve & send" / "Approve 2 (1 needs a look)".
     var approveTitle: String {
         let t = targets
         let flagged = t.filter(needsLook(jobID:)).count
-        if t.count <= 1 { return flagged > 0 ? "Approve (needs a look)" : "Approve & submit" }
-        return flagged > 0 ? "Approve \(t.count) (\(flagged) need\(flagged == 1 ? "s" : "") a look)" : "Approve \(t.count) & submit"
+        if t.count <= 1 { return flagged > 0 ? "Approve (needs a look)" : "Approve & send" }
+        return flagged > 0 ? "Approve \(t.count) (\(flagged) need\(flagged == 1 ? "s" : "") a look)" : "Approve \(t.count) & send"
     }
 
-    // MARK: Approve (with the low-confidence safeguard)
+    // MARK: Approve (with the low-confidence safeguard and the send hold)
 
     /// A / the bar's Approve button (the selection, else the focused row), or the detail pane's
     /// button (`only` that job, whatever else is selected). Asks inline (no modal) when flagged
     /// items are included.
-    func requestApprove(only: [Int]? = nil) async {
-        let t = only.map { ids in ids.filter { departing[$0] == nil && !approving.contains($0) } } ?? targets
+    func requestApprove(only: [Int]? = nil, undoManager: UndoManager? = nil) {
+        let t = only.map { ids in ids.filter { !isHeld($0) } } ?? targets
         guard !t.isEmpty else { return }
         let flagged = t.filter(needsLook(jobID:))
         if flagged.isEmpty {
-            await approve(t)
+            approve(t, undoManager: undoManager)
         } else if flagged.count == t.count {
             barMode = .confirmAllFlagged(targets: t)
         } else {
@@ -229,7 +239,7 @@ final class ReviewModel {
     }
 
     /// Answer the safeguard question.
-    func confirmApprove(includeFlagged: Bool) async {
+    func confirmApprove(includeFlagged: Bool, undoManager: UndoManager? = nil) {
         let t: [Int]
         switch barMode {
         case .confirmFlagged(let targets), .confirmAllFlagged(let targets): t = targets
@@ -237,22 +247,22 @@ final class ReviewModel {
         }
         let chosen = includeFlagged ? t : t.filter { !needsLook(jobID: $0) }
         barMode = .actions
-        await approve(chosen)
+        approve(chosen, undoManager: undoManager)
     }
 
     func cancelBar() { barMode = .actions }
 
-    /// Rows slide out in sequence (40 ms stagger, each with a ✓ draw-on), then the daemon is
-    /// asked to submit them; progress shows in the hero / menu bar, not here.
-    func approve(_ requested: [Int]) async {
-        // In-flight guard: a double press (or a bar button during the departure animation)
-        // must not send a second `approve` for rows already on their way.
-        var jobIDs = requested.filter { !approving.contains($0) && departing[$0] == nil }
+    /// Put the jobs on the send hold: each row shows "Sending in 5…" with Undo (⌘Z) and focus
+    /// moves on. The `approve` command goes out only when the window closes (`SendHoldModel`).
+    func approve(_ requested: [Int], undoManager: UndoManager? = nil) {
+        // In-flight guard: a double press must not hold (and later send) the same rows twice.
+        var jobIDs = requested.filter { !isHeld($0) }
         // The daemon allows one application per company per cooldown window and refuses the whole
-        // batch otherwise. Send the first job per company; the rest stay here for later.
+        // batch otherwise. Send the first job per company (counting jobs already on hold); the
+        // rest stay here for later.
         var held: [String] = []
         if store.preferences.perCompanyCooldownDays > 0 {
-            var seen: Set<Int> = []
+            var seen = Set(sendHold.heldJobIDs.compactMap { store.jobs.job(id: $0)?.companyID })
             jobIDs = jobIDs.filter { id in
                 guard let job = store.jobs.job(id: id) else { return true }
                 if seen.insert(job.companyID).inserted { return true }
@@ -265,33 +275,23 @@ final class ReviewModel {
             store.toasts.show("Kept \(held.count) in Review: one application per company every \(store.preferences.perCompanyCooldownDays) days (\(names))",
                               symbol: "hand.raised", style: .info)
         }
-        let appIDs = jobIDs.compactMap { store.jobs.job(id: $0)?.applicationID }
-        guard !appIDs.isEmpty else { return }
-        approving.formUnion(jobIDs)
-        defer { approving.subtract(jobIDs) }
-        let nextFocus = queue.first { !jobIDs.contains($0.id) }?.id
-        for (i, id) in jobIDs.enumerated() {
-            departing[id] = i
-            if i < jobIDs.count - 1 { try? await Task.sleep(for: staggerStep) }
-        }
-        try? await Task.sleep(for: departHold)
-        selection.subtract(jobIDs)
-        focusedJobID = nextFocus
-        let ok = await store.approve(applicationIDs: appIDs)
-        for id in jobIDs { departing.removeValue(forKey: id) }
-        if ok {
-            Sounds.play(.send)
-            store.toasts.show(appIDs.count == 1 ? "Approved · sending now" : "Approved \(appIDs.count) · sending now",
-                              symbol: "paperplane.fill", style: .success)
-        }
-        pruneSelection()
+        let nextFocus = queue.first { !jobIDs.contains($0.id) && !isHeld($0.id) }?.id
+        let holding = sendHold.hold(jobIDs: jobIDs, undoManager: undoManager)
+        guard !holding.isEmpty else { return }
+        selection.subtract(holding)
+        if let f = focusedJobID, holding.contains(f), let nextFocus { focusedJobID = nextFocus }
+    }
+
+    /// A row's Undo: the job stays in Review, focused, and nothing is sent.
+    func undoHold(jobID: Int) {
+        if sendHold.undo(jobID: jobID) { focusedJobID = jobID }
     }
 
     // MARK: Skip
 
     /// S / Skip: open the reason picker in the bar.
     func requestSkip(only: [Int]? = nil) {
-        let t = only.map { ids in ids.filter { departing[$0] == nil && !approving.contains($0) } } ?? targets
+        let t = only.map { ids in ids.filter { !isHeld($0) } } ?? targets
         guard !t.isEmpty else { return }
         barMode = .skipReason(targets: t)
     }

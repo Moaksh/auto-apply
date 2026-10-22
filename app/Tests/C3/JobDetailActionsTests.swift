@@ -20,7 +20,13 @@ struct JobDetailActionsTests {
             C3Fixtures.job(id: 6, company: "Vercel", state: .needsYou),
         ]
         let (store, daemon, _) = await makeC3Store(data: data, clusters: clusters)
+        // A short send hold (Job detail shares Review's): approvals still wait for it.
+        SendHoldModel.shared(for: store).window = .milliseconds(20)
         return (store, daemon)
+    }
+
+    private func settled(_ store: AppStore) async {
+        _ = await c3WaitUntil { !SendHoldModel.shared(for: store).hasHolds }
     }
 
     private let clean = [C3Fixtures.answer(id: 11, app: 1, question: "Full name"),
@@ -32,11 +38,14 @@ struct JobDetailActionsTests {
         daemon.sent("approve").flatMap { cmd -> [Int] in if case .approve(let p) = cmd { p.applicationIds } else { [] } }
     }
 
-    @Test func cleanApproveSubmitsAndStaysWithAToast() async {
+    @Test func cleanApproveHoldsThenSubmitsAndStaysWithAToast() async {
         let (store, daemon) = await setup()
         let actions = JobDetailActions()
         await actions.requestApprove(job: store.jobs.job(id: 1)!, answers: clean, answersLoaded: true, store: store)
         #expect(actions.prompt == .none)
+        #expect(SendHoldModel.shared(for: store).isHeld(1), "on the send hold first")
+        #expect(approvedIDs(daemon).isEmpty, "nothing is sent during the hold")
+        await settled(store)
         #expect(approvedIDs(daemon) == [1])
         #expect(store.jobs.job(id: 1)?.state == .submitting, "chip updates in place")
         #expect(store.router.selection == .dashboard && store.router.path.isEmpty, "no navigation")
@@ -56,6 +65,7 @@ struct JobDetailActionsTests {
 
         await actions.requestApprove(job: job, answers: flagged, answersLoaded: true, store: store)
         await actions.confirmApprove(job: job, store: store)
+        await settled(store)
         #expect(approvedIDs(daemon) == [2])
         #expect(actions.prompt == .none)
     }
@@ -78,6 +88,7 @@ struct JobDetailActionsTests {
         actions.editingChanged(false)
         #expect(actions.openEditors == 0, "never negative")
         await actions.requestApprove(job: store.jobs.job(id: 1)!, answers: clean, answersLoaded: true, store: store)
+        await settled(store)
         #expect(approvedIDs(daemon) == [1])
     }
 
@@ -87,6 +98,8 @@ struct JobDetailActionsTests {
         let stale = store.jobs.job(id: 1)!
         store.jobs.mutate(jobID: 1) { $0.state = .submitting }
         await actions.requestApprove(job: stale, answers: clean, answersLoaded: true, store: store)
+        #expect(!SendHoldModel.shared(for: store).isHeld(1))
+        await settled(store)
         #expect(approvedIDs(daemon).isEmpty, "already approved elsewhere: no duplicate approve")
     }
 
@@ -141,7 +154,7 @@ struct JobDetailActionsTests {
 
         store.router.openJob(id: 1)
         let item = palette.results.first { $0.kind == .action(.approveOpenJob) }
-        #expect(item?.title == "Approve & submit Stripe")
+        #expect(item?.title == "Approve & send Stripe")
         #expect(item?.shortcut == .submit)
         await store.perform(.approveOpenJob)
         #expect(store.router.jobApproveRequest?.jobID == 1, "routed to the detail so the safeguard applies")

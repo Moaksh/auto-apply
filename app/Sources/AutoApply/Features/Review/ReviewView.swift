@@ -1,9 +1,10 @@
 // ReviewView.swift — Review: approve applications before they're sent. List (flagged first) on
 // the left, screenshot + every answer side by side on the right with hover-linked field
-// highlights and inline ✎ edits. One primary action: Approve & submit (this job, or the floating
+// highlights and inline ✎ edits. One primary action: Approve & send (this job, or the floating
 // glass bulk bar when several are ticked; never both at once). The low-confidence safeguard and
-// skip reasons ask inline. Keys: ↑↓/J K focus, X select, ⌘A select all, A approve, S skip,
-// Space Quick Look.
+// skip reasons ask inline. Approving starts the send hold: the row shows "Sending in 5…" with
+// Undo (⌘Z) and nothing goes to the agent until the window closes. Keys: ↑↓/J K focus,
+// X select, ⌘A select all, A approve, S skip, F next flagged answer, Space Quick Look, ⌘Z undo.
 import QuickLook
 import SwiftUI
 
@@ -17,6 +18,7 @@ final class ReviewFeature: NSObject, FeatureRegistrant {
 struct ReviewQueueView: View {
     @Environment(AppStore.self) private var store
     @Environment(\.motionReduced) private var reduced
+    @Environment(\.undoManager) private var undoManager
     @FocusState private var listFocused: Bool
     @State private var quickLookURL: URL?
 
@@ -33,7 +35,7 @@ struct ReviewQueueView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if !store.hasSnapshot || !store.jobs.isLoaded {
                 LoadingState(message: "Loading applications…")
-            } else if queue.isEmpty && model.departing.isEmpty {
+            } else if queue.isEmpty {
                 EmptyState(symbol: "checkmark.rectangle.stack", title: "Nothing to review",
                            message: store.mode == .review
                                ? "Filled applications wait here for your OK before they're sent."
@@ -60,6 +62,7 @@ struct ReviewQueueView: View {
         .quickLookPreview($quickLookURL)
         .task { model.syncSubscriptions() }
         .onChange(of: store.jobs.revision) { model.syncSubscriptions() }
+        .onChange(of: model.sendHold.lastUndo) { _, event in if let event { model.didUndo(event.jobIDs) } }
     }
 
     // MARK: Header
@@ -97,7 +100,8 @@ struct ReviewQueueView: View {
                         ReviewRow(model: model, job: job,
                                   isFocused: job.id == model.focusedJobID,
                                   isSelected: model.selection.contains(job.id),
-                                  departIndex: model.departing[job.id])
+                                  hold: model.sendHold.entry(for: job.id),
+                                  notSent: model.sendHold.wasNotSent(job.id))
                             .id(job.id)
                             .onTapGesture {
                                 if NSEvent.modifierFlags.contains(.command) {
@@ -125,8 +129,13 @@ struct ReviewQueueView: View {
             .onKeyPress("k") { model.moveFocus(by: -1); return .handled }
             .onShortcut(.toggleSelection) { model.toggleFocusedSelection() }
             .onShortcut(.selectAll) { model.selectAll() }
-            .onShortcut(.approve) { Task { await model.requestApprove() } }
+            .onShortcut(.approve) { model.requestApprove(undoManager: undoManager) }
             .onShortcut(.skip) { model.requestSkip() }
+            .onKeyPress("f", phases: .down) { press in
+                guard press.modifiers.intersection([.command, .shift, .option, .control]).isEmpty else { return .ignored }
+                model.jumpToNextFlagged()
+                return .handled
+            }
             .onShortcut(.quickLook) { quickLookURL = model.focusedJob.flatMap { LocalFiles.existing($0.screenshotPath) } }
             .onKeyPress(.escape) {
                 if model.barMode != .actions { model.cancelBar(); return .handled }
@@ -169,12 +178,12 @@ struct ReviewQueueView: View {
 
     private func barActions(_ model: ReviewModel) -> [BulkAction] {
         guard model.barMode == .actions else { return [] }
-        // Approve is disabled while an approve is in flight; the model's in-flight guard also
-        // ignores repeated presses / the A shortcut.
+        // Rows already on hold are left out of the targets, so a repeated press never holds
+        // (or sends) them twice.
         return [
-            BulkAction(id: "approve", title: model.isApproving ? "Approving…" : model.approveTitle, symbol: "paperplane.fill",
-                       shortcut: .approve, isProminent: true, isDisabled: model.isApproving) {
-                Task { await model.requestApprove() }
+            BulkAction(id: "approve", title: model.approveTitle, symbol: "paperplane.fill",
+                       shortcut: .approve, isProminent: true, isDisabled: model.targets.isEmpty) {
+                model.requestApprove(undoManager: undoManager)
             },
             BulkAction(id: "skip", title: "Skip", shortcut: .skip) { model.requestSkip() },
         ]
@@ -194,9 +203,9 @@ struct ReviewQueueView: View {
                                ? "Some answers are still loading. Include the \(flagged) unchecked?"
                                : (flagged == 1 ? "Include the one that needs a look?" : "Include the \(flagged) that need a look?")) {
                 Button("Cancel") { model.cancelBar() }.buttonStyle(.secondaryLink)
-                Button("Only the \(clean) without issues") { Task { await model.confirmApprove(includeFlagged: false) } }
+                Button("Only the \(clean) without issues") { model.confirmApprove(includeFlagged: false, undoManager: undoManager) }
                     .buttonStyle(.secondaryLink)
-                Button("Include them") { Task { await model.confirmApprove(includeFlagged: true) } }.buttonStyle(.primaryPill)
+                Button("Include them") { model.confirmApprove(includeFlagged: true, undoManager: undoManager) }.buttonStyle(.primaryPill)
             }
         case .confirmAllFlagged(let targets):
             GlassBarPrompt(symbol: "exclamationmark.triangle.fill",
@@ -205,7 +214,7 @@ struct ReviewQueueView: View {
                                : (targets.count == 1 ? "The agent wasn't sure about some answers. Approve anyway?"
                                   : "The agent wasn't sure about some answers in all \(targets.count). Approve anyway?")) {
                 Button("Cancel") { model.cancelBar() }.buttonStyle(.secondaryLink)
-                Button("Approve anyway") { Task { await model.confirmApprove(includeFlagged: true) } }.buttonStyle(.primaryPill)
+                Button("Approve anyway") { model.confirmApprove(includeFlagged: true, undoManager: undoManager) }.buttonStyle(.primaryPill)
             }
         case .skipReason:
             GlassBarPrompt(symbol: nil, message: "Skip because…") {
@@ -225,31 +234,42 @@ private struct ReviewRow: View {
     var job: JobItem
     var isFocused: Bool
     var isSelected: Bool
-    var departIndex: Int?
+    /// On the send hold: the row compresses to its name + "Sending in 5…  Undo".
+    var hold: SendHoldModel.Entry?
+    /// A hold the app quit during: never sent.
+    var notSent: Bool
     @Environment(AppStore.self) private var store
     @Environment(\.motionReduced) private var reduced
 
     var body: some View {
         let flagged = model.isFlagged(job)
         HStack(spacing: Space.s) {
-            Button {
-                model.toggleSelection(job.id)
-            } label: {
-                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
-                    .foregroundStyle(isSelected ? Palette.accent : Palette.textSecondary)
+            if hold == nil {
+                Button {
+                    model.toggleSelection(job.id)
+                } label: {
+                    Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                        .foregroundStyle(isSelected ? Palette.accent : Palette.textSecondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(isSelected ? "Deselect" : "Select")
+            } else {
+                Image(systemName: "paperplane.fill")
+                    .foregroundStyle(Palette.accent)
+                    .symbolEffect(.drawOn, isActive: false)
+                    .accessibilityHidden(true)
             }
-            .buttonStyle(.plain)
-            .accessibilityLabel(isSelected ? "Deselect" : "Select")
             VStack(alignment: .leading, spacing: 2) {
                 Text(job.company).font(Typography.bodyEmph).lineLimit(1)
-                Text(job.title).font(Typography.callout).foregroundStyle(Palette.textSecondary).lineLimit(1)
+                if hold == nil {
+                    Text(job.title).font(Typography.callout).foregroundStyle(Palette.textSecondary).lineLimit(1)
+                }
+                if notSent { NotSentBadge() }
             }
             Spacer(minLength: Space.xs)
-            if departIndex != nil {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundStyle(Palette.applied)
-                    .symbolEffect(.drawOn, isActive: false)
-                    .transition(.scale.combined(with: .opacity))
+            if let hold {
+                SendHoldCapsule(entry: hold) { model.undoHold(jobID: job.id) }
+                    .transition(.opacity)
             } else {
                 if flagged {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -261,11 +281,10 @@ private struct ReviewRow: View {
             }
         }
         .selectableRow(isSelected: isFocused)
-        .offset(x: departIndex != nil && !reduced ? 24 : 0)
-        .opacity(departIndex != nil ? 0.6 : 1)
-        .animation(Motion.resolve(Motion.snappy, reduceMotion: reduced), value: departIndex)
+        .opacity(hold?.isSending == true ? 0.6 : 1)
+        .animation(Motion.resolve(Motion.snappy, reduceMotion: reduced), value: hold)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(job.displayName)\(flagged ? ", needs a look" : "")\(isSelected ? ", selected" : "")")
+        .accessibilityLabel("\(job.displayName)\(hold != nil ? ", approved, sending soon" : "")\(notSent ? ", not sent" : "")\(flagged ? ", needs a look" : "")\(isSelected ? ", selected" : "")")
     }
 }
 
@@ -276,6 +295,7 @@ private struct ReviewDetail: View {
     var job: JobItem
     @Binding var quickLookURL: URL?
     @Environment(AppStore.self) private var store
+    @Environment(\.undoManager) private var undoManager
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.m) {
@@ -303,6 +323,7 @@ private struct ReviewDetail: View {
             }
             actions
             ReviewQAPanel(job: job, answers: model.answers(for: job), answersLoaded: model.answersLoaded(job),
+                          jumpSerial: model.flaggedJumpSerial,
                           onEdit: { answer, text in await model.editAnswer(answer, to: text) },
                           onQuickLook: { quickLookURL = $0 })
         }
@@ -313,13 +334,31 @@ private struct ReviewDetail: View {
     /// This job's own Approve / Skip. Approve is the screen's primary pill only while the
     /// floating bar is away (no ticked jobs, no question open); otherwise it steps down to a plain
     /// button so one prominent action shows at a time.
+    @ViewBuilder
     private var actions: some View {
-        let busy = model.departing[job.id] != nil || model.isApproving
+        if let hold = model.sendHold.entry(for: job.id) {
+            // On hold: the countdown and Undo replace Approve / Skip (nothing is sent yet).
+            HStack(spacing: Space.s) {
+                Text(hold.isSending ? "Approved. Sending to the agent now." : "Approved. If you quit before it sends, it won't be sent.")
+                    .font(Typography.callout)
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                Spacer()
+                SendHoldCapsule(entry: hold) { model.undoHold(jobID: job.id) }
+            }
+        } else {
+            approveActions
+        }
+    }
+
+    private var approveActions: some View {
+        let busy = model.isHeld(job.id)
         let flagged = model.needsLook(job)
         // The A / S keys act on the selection when there is one, so only hint them when they mean this job.
         let keysMeanThisJob = model.selection.isEmpty
         let isPrimary = keysMeanThisJob && model.barMode == .actions
         return HStack(spacing: Space.s) {
+            if model.sendHold.wasNotSent(job.id) { NotSentBadge() }
             if flagged {
                 Label(model.answersLoaded(job) ? "Some answers need a look before you send this" : "Answers are still loading",
                       systemImage: "exclamationmark.triangle.fill")
@@ -336,11 +375,11 @@ private struct ReviewDetail: View {
             .buttonStyle(.secondaryLink)
             .disabled(busy)
             let approve = Button {
-                Task { await model.requestApprove(only: [job.id]) }
+                model.requestApprove(only: [job.id], undoManager: undoManager)
             } label: {
                 HStack(spacing: Space.xs) {
                     Image(systemName: "paperplane.fill")
-                    Text(flagged ? "Approve (needs a look)" : "Approve & submit")
+                    Text(flagged ? "Approve (needs a look)" : "Approve & send")
                     if keysMeanThisJob { KeyCap("A") }
                 }
             }
@@ -348,7 +387,7 @@ private struct ReviewDetail: View {
                 if isPrimary { approve.buttonStyle(.primaryPill) } else { approve.buttonStyle(.bordered) }
             }
             .disabled(busy || !store.isConnected)
-            .help(store.isConnected ? "Send this application now" : "The agent isn't connected")
+            .help(store.isConnected ? "Sends after a \(Int(SendHoldTiming.seconds(model.sendHold.window))) s hold you can undo" : "The agent isn't running, so nothing can send.")
         }
     }
 

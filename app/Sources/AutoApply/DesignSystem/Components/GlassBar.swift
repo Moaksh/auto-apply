@@ -215,7 +215,7 @@ struct PausedBar: View {
         Banner(issues: [AppIssue(id: "d", severity: .error, message: "Can't reach the agent.", fixTitle: "Restart agent", fix: .restartDaemon)],
                onFix: { _ in }, onShowAll: {})
         BulkActionBar(selectionCount: 2, actions: [
-            BulkAction(id: "approve", title: "Approve & submit", shortcut: .approve, isProminent: true) {},
+            BulkAction(id: "approve", title: "Approve & send", shortcut: .approve, isProminent: true) {},
             BulkAction(id: "skip", title: "Skip", shortcut: .skip) {},
         ], onClear: {})
         PausedBar {}

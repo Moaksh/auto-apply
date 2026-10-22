@@ -328,12 +328,26 @@ struct DesignSystemTests {
         let reviewable = MockScripts.reviewSampleJobIDs.compactMap { store.jobs.job(id: $0) }.filter { $0.state == .awaitingReview }
         #expect(!reviewable.isEmpty)
         for job in reviewable {
-            // Exactly one: Approve & submit.
+            // Exactly one: Approve & send.
             #expect(prominentCount(store: store) { JobDetailView(jobID: job.id) } == 1, "Job detail \(job.id)")
         }
         if let applied = store.jobs.all.first(where: { $0.state == .submitted }) {
             #expect(prominentCount(store: store) { JobDetailView(jobID: applied.id) } == 0, "Job detail (applied)")
         }
+        await store.stop()
+    }
+
+    @Test func sendHoldKeepsOnePrimary() async {
+        // While an approval is on the send hold, its countdown + Undo replace the Approve pill.
+        let store = await makeStore(.idle)
+        let reviewable = MockScripts.reviewSampleJobIDs.compactMap { store.jobs.job(id: $0) }.filter { $0.state == .awaitingReview }
+        guard let job = reviewable.first else { Issue.record("no reviewable sample job"); return }
+        let hold = SendHoldModel.shared(for: store)
+        hold.window = .seconds(60)
+        #expect(hold.hold(jobIDs: [job.id]) == [job.id])
+        #expect(prominentCount(store: store) { JobDetailView(jobID: job.id) } == 0, "held: no Approve pill")
+        #expect(prominentCount(store: store) { ReviewQueueView() } <= 1, "Review with a held row")
+        hold.abandonAll()
         await store.stop()
     }
 

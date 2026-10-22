@@ -22,10 +22,44 @@ enum ReviewSafeguard {
     static func needsLook(answers: [ApplicationAnswerItem], loaded: Bool) -> Bool {
         !loaded || flagRank(answers) > 0
     }
+
+    /// "Jump to next flagged": the flagged answer after `current` in form order, wrapping
+    /// around; the first flagged one when nothing (or a clean answer) is spotlit.
+    static func nextFlagged(after current: Int?, in answers: [ApplicationAnswerItem]) -> Int? {
+        let flagged = flaggedAnswers(answers).map(\.id)
+        guard !flagged.isEmpty else { return nil }
+        guard let current, let i = flagged.firstIndex(of: current) else {
+            // From a clean row: the next flagged one below it, else the first.
+            if let current, let pos = answers.firstIndex(where: { $0.id == current }) {
+                return answers[(pos + 1)...].first { flagged.contains($0.id) }?.id ?? flagged[0]
+            }
+            return flagged[0]
+        }
+        return flagged[(i + 1) % flagged.count]
+    }
+
+    /// The flag's badge text, or nil for a confident / not-applicable answer.
+    static func flagLabel(_ level: ApplicationAnswerItem.ConfidenceLevel) -> String? {
+        switch level {
+        case .low: "Low confidence"
+        case .medium: "Check this"
+        case .high, .notApplicable: nil
+        }
+    }
+
+    /// Why it's flagged, in plain words, from the confidence and where the answer came from.
+    static func flagHelp(_ answer: ApplicationAnswerItem) -> String? {
+        guard flagLabel(answer.confidenceLevel) != nil else { return nil }
+        let pct = answer.confidence.map { " (\(Int(($0 * 100).rounded()))%)" } ?? ""
+        let sure = answer.confidenceLevel == .low ? "wasn't sure about this answer" : "was only fairly sure about this answer"
+        return "The agent \(sure)\(pct). Source: \(answer.origin.label). Check it on the page before you send."
+    }
 }
 
 /// Screenshot (left) + every Q&A with provenance, confidence and ✎ edit (right). Hovering a row
-/// outlines its field on the screenshot.
+/// outlines its field on the screenshot. Medium / low-confidence answers carry a coral badge
+/// and rule, and their fields are outlined on the screenshot; "N need a look" (and F in the
+/// Review queue, via `jumpSerial`) spotlights the next one.
 struct ReviewQAPanel: View {
     var job: JobItem
     var answers: [ApplicationAnswerItem]
@@ -33,37 +67,63 @@ struct ReviewQAPanel: View {
     /// Inside an outer ScrollView (Job detail): the Q&A list doesn't scroll on its own and the
     /// screenshot gets a fixed height.
     var embedded = false
+    /// Bumped from outside (the F key) to jump to the next flagged answer.
+    var jumpSerial = 0
     var onEdit: (ApplicationAnswerItem, String) async -> Void
     var onEditingChanged: (Bool) -> Void = { _ in }
     var onQuickLook: (URL) -> Void
     @State private var hoveredAnswerID: Int?
+    /// The flagged answer "Jump to next flagged" landed on.
+    @State private var spotlightID: Int?
+    @Environment(\.motionReduced) private var reduced
 
     var body: some View {
         let flagged = ReviewSafeguard.flaggedAnswers(answers)
-        HStack(alignment: .top, spacing: Space.l) {
-            ReviewScreenshotPane(path: job.screenshotPath, highlight: answers.first { $0.id == hoveredAnswerID }?.bbox,
-                                 onQuickLook: onQuickLook)
-                .frame(minWidth: 260, idealWidth: 340, maxWidth: 420)
-                .frame(height: embedded ? 560 : nil)
-            VStack(alignment: .leading, spacing: Space.s) {
-                HStack {
-                    Text("Answers (\(answers.count))").eyebrowStyle()
-                    Spacer()
-                    if !flagged.isEmpty {
-                        Label("\(flagged.count) need\(flagged.count == 1 ? "s" : "") a look", systemImage: "exclamationmark.triangle.fill")
-                            .font(Typography.callout)
-                            .foregroundStyle(Palette.needsYou)
+        ScrollViewReader { proxy in
+            HStack(alignment: .top, spacing: Space.l) {
+                ReviewScreenshotPane(path: job.screenshotPath,
+                                     highlight: answers.first { $0.id == (hoveredAnswerID ?? spotlightID) }?.bbox,
+                                     flagged: flagged.compactMap(\.bbox),
+                                     onQuickLook: onQuickLook)
+                    .frame(minWidth: 260, idealWidth: 340, maxWidth: 420)
+                    .frame(height: embedded ? 560 : nil)
+                VStack(alignment: .leading, spacing: Space.s) {
+                    HStack {
+                        Text("Answers (\(answers.count))").eyebrowStyle()
+                        Spacer()
+                        if !flagged.isEmpty {
+                            Button { jump(proxy) } label: {
+                                HStack(spacing: Space.xs) {
+                                    Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Palette.needsYou)
+                                    Text("\(flagged.count) need\(flagged.count == 1 ? "s" : "") a look")
+                                    if !embedded { KeyCap("F") }
+                                }
+                                .font(Typography.callout)
+                            }
+                            .buttonStyle(.secondaryLink)
+                            .help("Jump to the next answer that needs a look")
+                            .accessibilityLabel("\(flagged.count) need a look. Jump to the next one")
+                        }
+                    }
+                    if embedded {
+                        rows
+                    } else {
+                        ScrollView { rows.padding(.bottom, 90) }
                     }
                 }
-                if embedded {
-                    rows
-                } else {
-                    ScrollView { rows.padding(.bottom, 90) }
-                }
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: .infinity)
+            .onChange(of: jumpSerial) { jump(proxy) }
         }
     }
+
+    private func jump(_ proxy: ScrollViewProxy) {
+        guard let next = ReviewSafeguard.nextFlagged(after: spotlightID, in: answers) else { return }
+        spotlightID = next
+        withMotion(Motion.snappy, reduceMotion: reduced) { proxy.scrollTo(Self.rowID(next), anchor: .center) }
+    }
+
+    static func rowID(_ answerID: Int) -> String { "qa-\(answerID)" }
 
     private var rows: some View {
         VStack(spacing: 0) {
@@ -76,11 +136,26 @@ struct ReviewQAPanel: View {
                     .padding(.vertical, Space.m)
             }
             ForEach(answers) { answer in
-                ReviewAnswerRow(answer: answer, isHovered: hoveredAnswerID == answer.id, onSave: onEdit, onEditingChanged: onEditingChanged)
+                ReviewAnswerRow(answer: answer, isHovered: hoveredAnswerID == answer.id || spotlightID == answer.id,
+                                onSave: onEdit, onEditingChanged: onEditingChanged)
+                    .id(Self.rowID(answer.id))
                     .onHover { inside in hoveredAnswerID = inside ? answer.id : (hoveredAnswerID == answer.id ? nil : hoveredAnswerID) }
                 Divider()
             }
             ReviewAttachmentRows(job: job)
+        }
+    }
+}
+
+/// The coral flag on a medium / low-confidence answer: a badge, never a filled block.
+struct ConfidenceFlagBadge: View {
+    var answer: ApplicationAnswerItem
+
+    var body: some View {
+        if let label = ReviewSafeguard.flagLabel(answer.confidenceLevel) {
+            Badge(label, symbol: answer.confidenceLevel == .low ? "exclamationmark.triangle.fill" : "questionmark.circle.fill",
+                  tone: .warning, accessibilityText: "\(label), needs a look")
+                .help(ReviewSafeguard.flagHelp(answer) ?? label)
         }
     }
 }
@@ -128,7 +203,10 @@ struct ReviewAnswerRow: View {
                         .font(Typography.body)
                         .lineLimit(3)
                         .textSelection(.enabled)
-                    Badge(origin: answer.origin)
+                    HStack(spacing: Space.xs) {
+                        Badge(origin: answer.origin)
+                        ConfidenceFlagBadge(answer: answer)
+                    }
                 }
             }
             Spacer(minLength: 0)
@@ -149,7 +227,12 @@ struct ReviewAnswerRow: View {
         .padding(.vertical, Space.s)
         .padding(.horizontal, Space.xs)
         .background(isHovered ? Palette.accent.opacity(0.06) : Color.clear)
-        .background(answer.confidenceLevel == .low || answer.confidenceLevel == .medium ? Palette.needsYou.opacity(0.08) : Color.clear)
+        // Flagged: a 2 pt coral rule on the leading edge (plus the badge), not a tinted block.
+        .overlay(alignment: .leading) {
+            if ReviewSafeguard.flagLabel(answer.confidenceLevel) != nil {
+                Capsule().fill(Palette.needsYou).frame(width: 2).padding(.vertical, Space.xs).accessibilityHidden(true)
+            }
+        }
         .onChange(of: editing) { _, now in onEditingChanged(now) }
         .onDisappear { if editing { onEditingChanged(false) } }
     }
@@ -228,6 +311,8 @@ struct ReviewAttachmentRows: View {
 struct ReviewScreenshotPane: View {
     var path: String?
     var highlight: CGRect?
+    /// Fields of medium / low-confidence answers (outlined in coral).
+    var flagged: [CGRect] = []
     var onQuickLook: (URL) -> Void
     @State private var image: DecodedImage?
     @State private var originalSize: CGSize?
@@ -243,6 +328,16 @@ struct ReviewScreenshotPane: View {
                         .aspectRatio(contentMode: .fit)
                         .overlay {
                             GeometryReader { geo in
+                                // The confidence lens: every flagged field gets a thin coral outline.
+                                if scaleBase.width > 0 {
+                                    let s = geo.size.width / scaleBase.width
+                                    ForEach(Array(flagged.enumerated()), id: \.offset) { _, rect in
+                                        RoundedRectangle(cornerRadius: 3, style: .continuous)
+                                            .stroke(Palette.needsYou, lineWidth: 1.5)
+                                            .frame(width: rect.width * s, height: rect.height * s)
+                                            .offset(x: rect.minX * s, y: rect.minY * s)
+                                    }
+                                }
                                 if let highlight, scaleBase.width > 0 {
                                     let s = geo.size.width / scaleBase.width
                                     RoundedRectangle(cornerRadius: 3, style: .continuous)

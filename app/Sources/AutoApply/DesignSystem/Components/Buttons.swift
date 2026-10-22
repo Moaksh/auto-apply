@@ -83,7 +83,7 @@ extension EnvironmentValues {
 
 #Preview("Buttons") {
     HStack(spacing: Space.l) {
-        Button("Approve & submit") {}.buttonStyle(.primaryPill)
+        Button("Approve & send") {}.buttonStyle(.primaryPill)
         Button("Skip") {}.buttonStyle(.secondaryLink)
         Button("Disabled") {}.buttonStyle(.primaryPill).disabled(true)
         Button("Cancel") {}.buttonStyle(.bordered)

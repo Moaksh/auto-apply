@@ -53,7 +53,7 @@ struct JobDetailTests {
 
     @Test func headerActionPresentation() {
         typealias A = JobDetailRules.HeaderAction
-        #expect(A.approve.title == "Approve & submit")
+        #expect(A.approve.title == "Approve & send")
         #expect(A.resolveSent.title == "It was sent" && A.resolveNotSent.title == "It wasn't sent")
         #expect(A.approve.shortcut == .submit && AppShortcut.submit.displayString == "⌘↵")
         #expect(A.skip.shortcut == nil)

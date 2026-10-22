@@ -43,6 +43,7 @@ struct JobDetailView: View {
     var jobID: Int
     @Environment(AppStore.self) private var store
     @Environment(Router.self) private var router
+    @Environment(\.undoManager) private var undoManager
     @State private var loader = JobDetailLoader()
     @State private var tab: JobDetailTab?
     @State private var highlighted: ApplicationAnswerItem?
@@ -322,7 +323,8 @@ struct JobDetailView: View {
     }
 
     private func requestApprove(_ job: JobItem) {
-        Task { await actions.requestApprove(job: job, answers: loader.answers, answersLoaded: loader.answersLoaded, store: store) }
+        Task { await actions.requestApprove(job: job, answers: loader.answers, answersLoaded: loader.answersLoaded, store: store,
+                                            undoManager: undoManager) }
     }
 
     private func copyAll(_ job: JobItem) {
@@ -359,8 +361,15 @@ private struct JobDetailHeader: View {
             if let note = JobDetailRules.headerNote(for: job) {
                 Text(note).font(Typography.callout).foregroundStyle(Palette.textSecondary).fixedSize()
             }
-            ForEach(JobDetailRules.headerActions(for: job), id: \.self) { action in
-                actionButton(action)
+            let hold = SendHoldModel.shared(for: store)
+            if let entry = hold.entry(for: job.id) {
+                // Approved and on the send hold: the countdown + Undo replace Approve / Skip.
+                SendHoldCapsule(entry: entry) { actions.undoHold(job: job, store: store) }
+            } else {
+                if hold.wasNotSent(job.id) { NotSentBadge() }
+                ForEach(JobDetailRules.headerActions(for: job), id: \.self) { action in
+                    actionButton(action)
+                }
             }
             if let url = (job.applyURL ?? job.sourceURL).flatMap(URL.init(string:)) {
                 Button("Open posting") { NSWorkspace.shared.open(url) }
@@ -460,6 +469,7 @@ private struct JobDetailPromptBar: View {
     var actions: JobDetailActions
     var reviewAnswers: () -> Void
     @Environment(AppStore.self) private var store
+    @Environment(\.undoManager) private var undoManager
 
     var body: some View {
         HStack(spacing: Space.s) {
@@ -477,7 +487,7 @@ private struct JobDetailPromptBar: View {
                 Button("Cancel") { actions.cancelPrompt() }
                     .buttonStyle(.secondaryLink)
                     .keyboardShortcut(.cancelAction)
-                Button("Approve anyway") { Task { await actions.confirmApprove(job: job, store: store) } }
+                Button("Approve anyway") { Task { await actions.confirmApprove(job: job, store: store, undoManager: undoManager) } }
                     .buttonStyle(.primaryPill)
             case .skipReason:
                 Text("Skip because…").font(Typography.bodyEmph)

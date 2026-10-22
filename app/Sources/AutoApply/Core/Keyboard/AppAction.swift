@@ -84,7 +84,7 @@ enum AppAction: Hashable, Sendable, Identifiable {
         case .openAgentChrome: "Open the agent's Chrome"
         case .openDataFolder: "Open data folder"
         case .openMainWindow: "Open AutoApply"
-        case .approveOpenJob: approvableJob(in: store).map { "Approve & submit \($0.company)" } ?? "Approve & submit"
+        case .approveOpenJob: approvableJob(in: store).map { "Approve & send \($0.company)" } ?? "Approve & send"
         case .showInsights: "Show what's working (insights)"
         case .openInterviewPrep: interviewPrepJob(in: store).map { "Interview prep: \($0.company)" } ?? "Interview prep"
         case .importLinkedInConnections: "Import LinkedIn connections…"

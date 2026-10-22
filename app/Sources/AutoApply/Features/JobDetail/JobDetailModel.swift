@@ -55,7 +55,7 @@ enum JobDetailRules {
             case .retry: "Try again"
             case .resolveSubmitted: "It was sent"
             case .resolveFailed: "It wasn't sent"
-            case .approve: "Approve & submit"
+            case .approve: "Approve & send"
             case .reject: "Skip"
             case .applyAnyway: "Queue for next run"
             }
@@ -88,7 +88,7 @@ enum JobDetailRules {
 
         var title: String {
             switch self {
-            case .approve: "Approve & submit"
+            case .approve: "Approve & send"
             case .skip: "Skip"
             case .retry: "Try again"
             case .applyAnyway: "Queue for next run"
@@ -121,7 +121,7 @@ enum JobDetailRules {
 
         var help: String {
             switch self {
-            case .approve: "Send this application as filled (\(AppShortcut.submit.displayString))"
+            case .approve: "Send this application as filled, after a short hold you can undo (\(AppShortcut.submit.displayString))"
             case .skip: "Don't send it; pick a reason"
             case .retry: "Queue this application to be filled again on the next run"
             case .applyAnyway: "Undo the skip: the agent applies on its next run"
@@ -131,7 +131,7 @@ enum JobDetailRules {
         }
     }
 
-    /// awaiting_review → Approve & submit + Skip; failed → Retry; skipped → Apply anyway;
+    /// awaiting_review → Approve & send + Skip; failed → Retry; skipped → Apply anyway;
     /// unknown_verify → It was sent / It wasn't sent. Actions that need an application row are
     /// omitted when there is none. needs_you has none: its questions are answered in the
     /// Questions tab.
@@ -356,31 +356,37 @@ final class JobDetailActions {
     // MARK: Approve (with the safeguard)
 
     /// Button / ⌘↵ / palette. Asks inline when an answer needs a look or the Q&A hasn't loaded.
-    func requestApprove(job: JobItem, answers: [ApplicationAnswerItem], answersLoaded: Bool, store: AppStore) async {
-        guard !inFlight, !isEditing, job.state == .awaitingReview, job.applicationID != nil else { return }
+    func requestApprove(job: JobItem, answers: [ApplicationAnswerItem], answersLoaded: Bool, store: AppStore,
+                        undoManager: UndoManager? = nil) async {
+        guard !inFlight, !isEditing, job.state == .awaitingReview, job.applicationID != nil,
+              !SendHoldModel.shared(for: store).isHeld(job.id) else { return }
         if ReviewSafeguard.needsLook(answers: answers, loaded: answersLoaded) {
             prompt = .confirmFlagged(flagged: ReviewSafeguard.flaggedAnswers(answers).count, loading: !answersLoaded)
         } else {
-            await approve(job: job, store: store)
+            approve(job: job, store: store, undoManager: undoManager)
         }
     }
 
     /// "Approve anyway" in the safeguard prompt.
-    func confirmApprove(job: JobItem, store: AppStore) async {
+    func confirmApprove(job: JobItem, store: AppStore, undoManager: UndoManager? = nil) async {
         guard case .confirmFlagged = prompt else { return }
         prompt = .none
-        await approve(job: job, store: store)
+        approve(job: job, store: store, undoManager: undoManager)
     }
 
-    private func approve(job: JobItem, store: AppStore) async {
-        // Re-read: another window (or the Review queue) may have approved it meanwhile.
+    /// Starts the send hold (shared with Review): the header shows "Sending in 5…" with Undo /
+    /// ⌘Z, and the `approve` command goes out only when the window closes.
+    private func approve(job: JobItem, store: AppStore, undoManager: UndoManager?) {
+        // Re-read: another window (or the Review queue) may have approved it meanwhile; the hold
+        // ignores jobs no longer awaiting review or already on hold.
         guard !inFlight, let current = store.jobs.job(id: job.id), current.state == .awaitingReview,
-              let appID = current.applicationID else { return }
-        inFlight = true
-        defer { inFlight = false }
-        if await store.approve(applicationIDs: [appID]) {
-            store.toasts.show("Approved · sending now", symbol: "paperplane.fill", style: .success)
-        }
+              current.applicationID != nil else { return }
+        SendHoldModel.shared(for: store).hold(jobIDs: [current.id], undoManager: undoManager)
+    }
+
+    /// The header's Undo: the job stays awaiting review and nothing is sent.
+    func undoHold(job: JobItem, store: AppStore) {
+        SendHoldModel.shared(for: store).undo(jobID: job.id)
     }
 
     // MARK: Skip

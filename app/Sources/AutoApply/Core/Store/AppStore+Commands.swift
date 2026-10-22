@@ -187,6 +187,10 @@ extension AppStore {
 
     /// Approve reviewed applications for submission. Returns true once the daemon acks.
     ///
+    /// This sends immediately. The UI never calls it directly: every approve (Review, Job detail,
+    /// ⌘K / the Job menu) goes through `SendHoldModel`, which calls this only after its ≈5 s
+    /// Undo window closes, and never on quit.
+    ///
     /// An explicit error reply rolls the optimistic `submitting` state back. A *timeout* does
     /// not: the daemon may already have accepted the approval and be submitting, so the rows
     /// stay `submitting` (the DB poll reconciles them) and the user gets a calm info toast

@@ -24,11 +24,16 @@ struct ReviewModelTests {
         ]
         let (store, daemon, _) = await makeC3Store(data: data)
         let model = ReviewModel(store: store)
-        model.staggerStep = .milliseconds(1)
-        model.departHold = .milliseconds(1)
+        // A short send hold: approvals still wait for it, the tests just don't wait 5 s.
+        model.sendHold.window = .milliseconds(20)
         model.syncSubscriptions()
         _ = await c3WaitUntil { model.answers.count == 3 }
         return (store, daemon, model)
+    }
+
+    /// Wait out the send hold.
+    private func settled(_ model: ReviewModel) async {
+        _ = await c3WaitUntil { !model.sendHold.hasHolds }
     }
 
     private func approvedIDs(_ daemon: C3StubDaemon) -> [Int] {
@@ -42,54 +47,73 @@ struct ReviewModelTests {
         #expect(!model.isFlagged(model.queue[2]))
     }
 
-    @Test func cleanApproveGoesStraightThrough() async {
+    @Test func cleanApproveHoldsThenSends() async {
         let (store, daemon, model) = await setup()
         model.focusedJobID = 1
-        #expect(model.approveTitle == "Approve & submit")
-        await model.requestApprove()
+        #expect(model.approveTitle == "Approve & send")
+        model.requestApprove()
         #expect(model.barMode == .actions)
+        #expect(model.isHeld(1), "on the send hold first")
+        #expect(approvedIDs(daemon).isEmpty, "nothing is sent during the hold")
+        #expect(model.focusedJobID != 1, "focus moves on")
+        await settled(model)
         #expect(approvedIDs(daemon) == [1])
         #expect(store.jobs.job(id: 1)?.state == .submitting)
-        #expect(model.departing.isEmpty)
-        #expect(model.focusedJobID != 1)
+        #expect(store.toasts.current?.message == "Approved · sending now")
     }
 
     @Test func mixedSelectionAsksInlineAndCanApproveOnlyClean() async {
         let (_, daemon, model) = await setup()
         model.selectAll()
         #expect(model.approveTitle == "Approve 3 (2 need a look)")
-        await model.requestApprove()
+        model.requestApprove()
         #expect(model.barMode == .confirmFlagged(targets: [2, 3, 1]))
         #expect(approvedIDs(daemon).isEmpty)
-        await model.confirmApprove(includeFlagged: false)
-        #expect(approvedIDs(daemon) == [1])
+        model.confirmApprove(includeFlagged: false)
         #expect(model.barMode == .actions)
         #expect(model.selection == [2, 3])
+        await settled(model)
+        #expect(approvedIDs(daemon) == [1])
     }
 
     @Test func approveSendsOneJobPerCompanyAndKeepsTheRest() async {
         let (store, daemon, model) = await setup()
         let stripeID = store.jobs.job(id: 1)!.companyID
         store.jobs.mutate(applicationID: 2) { $0.companyID = stripeID; $0.company = "Stripe" }
-        await model.approve([1, 2, 3])
+        model.approve([1, 2, 3])
+        #expect(store.toasts.current?.message.contains("Kept 1 in Review") == true)
+        await settled(model)
         #expect(Set(approvedIDs(daemon)) == [1, 3])
         #expect(store.jobs.job(id: 2)?.state == .awaitingReview)
+    }
+
+    @Test func perCompanyCountsJobsAlreadyOnHold() async {
+        let (store, daemon, model) = await setup()
+        model.sendHold.window = .seconds(30)
+        let stripeID = store.jobs.job(id: 1)!.companyID
+        store.jobs.mutate(applicationID: 2) { $0.companyID = stripeID; $0.company = "Stripe" }
+        model.approve([1])
+        model.approve([2])
+        #expect(model.isHeld(1) && !model.isHeld(2), "a second Stripe job isn't held while the first one is")
         #expect(store.toasts.current?.message.contains("Kept 1 in Review") == true)
+        model.sendHold.abandonAll()
+        #expect(approvedIDs(daemon).isEmpty)
     }
 
     @Test func includeFlaggedApprovesEverything() async {
         let (_, daemon, model) = await setup()
         model.toggleSelection(1)
         model.toggleSelection(2)
-        await model.requestApprove()
-        await model.confirmApprove(includeFlagged: true)
+        model.requestApprove()
+        model.confirmApprove(includeFlagged: true)
+        await settled(model)
         #expect(Set(approvedIDs(daemon)) == [1, 2])
     }
 
     @Test func allFlaggedAsksApproveAnyway() async {
         let (_, daemon, model) = await setup()
         model.focusedJobID = 2
-        await model.requestApprove()
+        model.requestApprove()
         #expect(model.barMode == .confirmAllFlagged(targets: [2]))
         model.cancelBar()
         #expect(model.barMode == .actions)
@@ -103,9 +127,12 @@ struct ReviewModelTests {
             return .ack(AckPayload())
         }
         model.focusedJobID = 1
-        await model.requestApprove()
+        model.requestApprove()
+        await settled(model)
+        #expect(daemon.sent("approve").count == 1)
         #expect(store.jobs.job(id: 1)?.state == .awaitingReview)
         #expect(model.queue.contains { $0.id == 1 })
+        #expect(!model.isHeld(1), "can be approved again")
     }
 
     @Test func skipAsksForReasonThenRejects() async throws {
@@ -152,8 +179,7 @@ struct ReviewModelTests {
         // The scenario fills 5 applications one after another (the 3rd is low-confidence).
         #expect(await c3WaitUntil(timeout: .seconds(20)) { store.jobs.awaitingReview.count >= 5 })
         let model = ReviewModel(store: store)
-        model.staggerStep = .milliseconds(1)
-        model.departHold = .milliseconds(1)
+        model.sendHold.window = .milliseconds(20)
         model.syncSubscriptions()
         #expect(await c3WaitUntil { model.answers.count == store.jobs.awaitingReview.count })
         // The low-confidence application sorts first.
@@ -162,7 +188,7 @@ struct ReviewModelTests {
         let clean = try #require(model.queue.last)
         #expect(!model.isFlagged(clean))
         model.focusedJobID = clean.id
-        await model.requestApprove()
+        model.requestApprove()
         #expect(await c3WaitUntil(timeout: .seconds(10)) { store.jobs.job(id: clean.id)?.state == .submitted })
         await store.stop()
     }

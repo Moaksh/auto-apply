@@ -20,7 +20,7 @@ struct ReviewerFixesTests {
         ]
         let (store, daemon, _) = await makeC3Store(data: data)
         let model = ReviewModel(store: store)
-        model.staggerStep = .milliseconds(1)
+        model.sendHold.window = .milliseconds(20)
         if subscribe {
             model.syncSubscriptions()
             _ = await c3WaitUntil { model.loadedApplicationIDs.count == 2 }
@@ -32,41 +32,38 @@ struct ReviewerFixesTests {
         daemon.sent("approve").compactMap { if case .approve(let p) = $0 { p.applicationIds } else { nil } }
     }
 
-    @Test func doubleApproveDuringDepartureSendsOnce() async {
+    @Test func doubleApproveDuringTheHoldSendsOnce() async {
         let (store, daemon, model) = await reviewSetup()
-        daemon.responder = { cmd in
-            if case .approve = cmd { return .ack(AckPayload()) }
-            return .ack(AckPayload())
-        }
-        model.departHold = .milliseconds(200)
+        model.sendHold.window = .milliseconds(200)
         model.focusedJobID = 1
-        let first = Task { await model.requestApprove() }
-        _ = await c3WaitUntil { model.isApproving }
+        model.requestApprove()
+        #expect(model.isHeld(1))
+        // Focus moved on; pressing again (or approving the held row directly) adds nothing.
+        model.focusedJobID = 1
         #expect(model.targets.isEmpty)
-        await model.requestApprove()
-        await model.approve([1])
-        await first.value
+        model.requestApprove()
+        model.approve([1])
+        #expect(await c3WaitUntil { !approves(daemon).isEmpty && !model.sendHold.hasHolds })
+        try? await Task.sleep(for: .milliseconds(250))
         #expect(approves(daemon) == [[1]])
         #expect(store.jobs.job(id: 1)?.state == .submitting)
-        #expect(!model.isApproving)
         #expect(store.toasts.current?.style != .error)
     }
 
     @Test func approveBeforeAnswersLoadAsksInsteadOfSubmitting() async {
         let (_, daemon, model) = await reviewSetup(subscribe: false)
-        model.departHold = .milliseconds(1)
         model.focusedJobID = 1
         let job = try! #require(model.queue.first { $0.id == 1 })
         #expect(!model.answersLoaded(job))
         #expect(model.needsLook(job))
         #expect(model.approveTitle == "Approve (needs a look)")
-        await model.requestApprove()
+        model.requestApprove()
         #expect(model.barMode == .confirmAllFlagged(targets: [1]))
         #expect(model.anyLoading([1]))
         #expect(approves(daemon).isEmpty)
         // "Only the clean ones" never includes unknowns.
         model.selectAll()
-        await model.requestApprove()
+        model.requestApprove()
         #expect(model.barMode == .confirmAllFlagged(targets: [1, 2]) || model.barMode == .confirmAllFlagged(targets: [2, 1]))
         model.cancelBar()
         // Once loaded, the clean one goes straight through.
@@ -74,8 +71,8 @@ struct ReviewerFixesTests {
         model.syncSubscriptions()
         #expect(await c3WaitUntil { model.loadedApplicationIDs.count == 2 })
         model.focusedJobID = 1
-        await model.requestApprove()
-        #expect(approves(daemon) == [[1]])
+        model.requestApprove()
+        #expect(await c3WaitUntil { approves(daemon) == [[1]] })
     }
 
     // MARK: Inbox
