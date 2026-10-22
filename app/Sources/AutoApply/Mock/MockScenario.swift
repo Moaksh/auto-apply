@@ -199,15 +199,20 @@ enum MockScripts {
     }
 
     static let reviewSampleJobIDs = [25_001, 25_002]
+    /// Three more clean ones (different companies), so Review shows a queue of tickets to tear
+    /// through, with the low-confidence one held for your answer at the top.
+    static let reviewExtraJobIDs = [25_003, 25_004, 25_005]
 
     static func screenshotName(_ applicationID: Int, _ company: String) -> String {
         "\(applicationID)-\(company.lowercased().filter { $0.isLetter || $0.isNumber })-pre"
     }
 
-    /// Two filled applications awaiting review: one clean, one with a low-confidence answer.
+    /// Filled applications awaiting review: the two samples (one clean, one with a low-confidence
+    /// answer) and three more clean ones. All but the last enclose a cover letter.
     static func addReviewSamples(_ data: inout RepositoryData, now: Date) {
-        addJobs(&data, ids: reviewSampleJobIDs, state: .awaitingReview, now: now)
-        for (k, id) in reviewSampleJobIDs.enumerated() {
+        let ids = reviewSampleJobIDs + reviewExtraJobIDs
+        addJobs(&data, ids: ids, state: .awaitingReview, now: now)
+        for (k, id) in ids.enumerated() {
             guard let i = data.jobs.firstIndex(where: { $0.id == id }) else { continue }
             let company = data.jobs[i].company
             let answers = MockFixtures.applicationAnswers(applicationID: id, company: company, lowConfidence: k == 1,
@@ -216,6 +221,7 @@ enum MockScripts {
             data.jobs[i].stateReason = "review_mode"
             data.jobs[i].stateUpdatedAt = now.addingTimeInterval(-Double(20 + k * 25) * 60)
             data.jobs[i].resumePickScore = 0.91
+            if id != ids.last { data.jobs[i].coverLetterPath = "/mock/cover_letters/\(id).md" }
             data.jobs[i].screenshotPath = MockFrames.preSubmitScreenshot(company: company, answers: answers, name: screenshotName(id, company))
                 ?? "/mock/screenshots/\(id)-pre.png"
             data.activity.append(ActivityEvent(id: (data.activity.last?.id ?? 0) + 1, ts: data.jobs[i].stateUpdatedAt ?? now, kind: "review",

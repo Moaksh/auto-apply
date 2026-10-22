@@ -147,6 +147,7 @@ private struct GeneralSettingsTab: View {
     @AppStorage(GeneralSettings.menuBarCounterKey) private var menuBarCounter = true
     @AppStorage(Sounds.levelKey) private var soundLevel = Sounds.level()
     @AppStorage(Haptics.settingsKey) private var haptics = true
+    @AppStorage(ApproveStyle.storageKey) private var approveStyle = ApproveStyle.ticket
     @State private var launchAtLogin = GeneralSettings.launchAtLogin
     @State private var loginError: String?
 
@@ -173,6 +174,13 @@ private struct GeneralSettingsTab: View {
             .fixedSize()
             .help("Moments only: an interview or offer, inbox zero and easter eggs. All: also every answer, move and approval.")
             Toggle("Trackpad haptics", isOn: $haptics)
+        }
+        SettingsRow("Review", help: "Ticket: tear the stub off to approve. Classic: the Approve & send button. Either way it waits \(Int(SendHoldTiming.seconds(SendHoldTiming.window))) seconds with Undo before anything is sent.") {
+            Picker("Approve style", selection: $approveStyle) {
+                ForEach(ApproveStyle.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .fixedSize()
         }
         UpdatesSettingsRow()
         FeedbackSettingsRow()

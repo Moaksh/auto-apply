@@ -5,6 +5,8 @@
 // skip reasons ask inline. Approving starts the send hold: the row shows "Sending in 5…" with
 // Undo (⌘Z) and nothing goes to the agent until the window closes. Keys: ↑↓/J K focus,
 // X select, ⌘A select all, A approve, S skip, F next flagged answer, Space Quick Look, ⌘Z undo.
+// Approve style (Settings ▸ General): Ticket (default) prints the focused job as a ticket whose
+// stub you tear to approve (ReviewTicket.swift; also ⌘↵); Classic is the button, as it was.
 import QuickLook
 import SwiftUI
 
@@ -22,8 +24,11 @@ struct ReviewQueueView: View {
     @FocusState private var listFocused: Bool
     @State private var quickLookURL: URL?
     @Namespace private var selectionNS
+    @AppStorage(ApproveStyle.storageKey) private var storedStyle = ApproveStyle.ticket
+    @Environment(\.approveStyleOverride) private var styleOverride
 
     private var model: ReviewModel { ReviewModel.shared(for: store) }
+    private var style: ApproveStyle { styleOverride ?? storedStyle }
 
     var body: some View {
         let model = self.model
@@ -47,14 +52,18 @@ struct ReviewQueueView: View {
                     list(model, queue: queue)
                         .frame(width: 320)
                     Divider()
-                    if let job = model.focusedJob {
-                        ReviewDetail(model: model, job: job, quickLookURL: $quickLookURL)
-                            .id(job.id)
-                            .transition(.opacity)
-                    } else {
-                        EmptyState(symbol: "rectangle.on.rectangle", title: "Select an application")
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    Group {
+                        if let job = model.focusedJob {
+                            ReviewDetail(model: model, job: job, style: style, quickLookURL: $quickLookURL)
+                                .id(job.id)
+                                .transition(.opacity)
+                        } else {
+                            EmptyState(symbol: "rectangle.on.rectangle", title: "Select an application")
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
                     }
+                    // Ticket: the next ticket cross-fades in while the torn one leaves (live at once).
+                    .motion(Motion.exit, value: style == .ticket ? model.focusedJobID : nil)
                 }
             }
         }
@@ -98,7 +107,7 @@ struct ReviewQueueView: View {
             ScrollView {
                 LazyVStack(spacing: 2) {
                     ForEach(queue) { job in
-                        ReviewRow(model: model, job: job,
+                        ReviewRow(model: model, job: job, style: style,
                                   isFocused: job.id == model.focusedJobID,
                                   isSelected: model.selection.contains(job.id),
                                   hold: model.sendHold.entry(for: job.id),
@@ -132,7 +141,12 @@ struct ReviewQueueView: View {
             .onKeyPress("k") { model.moveFocus(by: -1); return .handled }
             .onShortcut(.toggleSelection) { model.toggleFocusedSelection() }
             .onShortcut(.selectAll) { model.selectAll() }
-            .onShortcut(.approve) { model.requestApprove(undoManager: undoManager) }
+            .onShortcut(.approve) { approveKey(model) }
+            // ⌘↵ tears the focused ticket (Classic keeps A only).
+            .onShortcut(.submit) {
+                guard style == .ticket, let id = model.focusedJobID else { return }
+                model.tear(jobID: id, undoManager: undoManager)
+            }
             .onShortcut(.skip) { model.requestSkip() }
             .onKeyPress("f", phases: .down) { press in
                 guard press.modifiers.intersection([.command, .shift, .option, .control]).isEmpty else { return .ignored }
@@ -149,6 +163,17 @@ struct ReviewQueueView: View {
                 if let id { withMotion(Motion.snappy, reduceMotion: reduced) { proxy.scrollTo(id) } }
             }
             .onAppear { listFocused = true }
+        }
+    }
+
+    /// A: in ticket style with nothing ticked, tear the focused ticket (a ticket held for your
+    /// answer keeps the classic "Approve anyway?" question, the deliberate override). Otherwise
+    /// the classic approve of the selection / focused row.
+    private func approveKey(_ model: ReviewModel) {
+        if style == .ticket, model.selection.isEmpty, let job = model.focusedJob, !model.needsLook(job) {
+            model.tear(jobID: job.id, undoManager: undoManager)
+        } else {
+            model.requestApprove(undoManager: undoManager)
         }
     }
 
@@ -235,6 +260,7 @@ struct ReviewQueueView: View {
 private struct ReviewRow: View {
     var model: ReviewModel
     var job: JobItem
+    var style: ApproveStyle = .classic
     var isFocused: Bool
     var isSelected: Bool
     /// On the send hold: the row compresses to its name + "Sending in 5…  Undo".
@@ -271,8 +297,15 @@ private struct ReviewRow: View {
             }
             Spacer(minLength: Space.xs)
             if let hold {
-                SendHoldCapsule(entry: hold) { model.undoHold(jobID: job.id) }
-                    .transition(.opacity)
+                Group {
+                    if style == .ticket {
+                        // The torn stub's countdown, compact.
+                        SendHoldStubCountdown(entry: hold, compact: true) { model.undoHold(jobID: job.id) }
+                    } else {
+                        SendHoldCapsule(entry: hold) { model.undoHold(jobID: job.id) }
+                    }
+                }
+                .transition(.opacity)
             } else {
                 if flagged {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -280,7 +313,11 @@ private struct ReviewRow: View {
                         .help("\(model.flaggedAnswers(for: job).count) answer(s) need a look")
                         .accessibilityLabel("Needs a look")
                 }
-                if let score = job.score { Badge(score: score, threshold: store.preferences.matchThreshold) }
+                if style == .ticket {
+                    ReviewRowFacts(job: job, threshold: store.preferences.matchThreshold)
+                } else if let score = job.score {
+                    Badge(score: score, threshold: store.preferences.matchThreshold)
+                }
             }
         }
         .selectableRow(isSelected: isFocused)
@@ -296,35 +333,21 @@ private struct ReviewRow: View {
 private struct ReviewDetail: View {
     var model: ReviewModel
     var job: JobItem
+    var style: ApproveStyle = .classic
     @Binding var quickLookURL: URL?
     @Environment(AppStore.self) private var store
     @Environment(\.undoManager) private var undoManager
+    @Environment(\.reviewRenderProbe) private var probe
 
     var body: some View {
         VStack(alignment: .leading, spacing: Space.m) {
-            HStack(alignment: .firstTextBaseline, spacing: Space.s) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(job.company).font(Typography.title2)
-                    Text(job.title).font(Typography.body).foregroundStyle(Palette.textSecondary)
-                }
-                Spacer()
-                if let score = job.score { Badge(score: score, threshold: store.preferences.matchThreshold) }
-                Menu {
-                    Button("Use app setting (\(store.effectiveMode(for: withoutOverride(job)).rawValue.capitalized))") { Task { await model.setMode(nil, for: job) } }
-                    Button("Always Auto for this job") { Task { await model.setMode(.auto, for: job) } }
-                    Button("Always Review for this job") { Task { await model.setMode(.review, for: job) } }
-                } label: {
-                    Text(job.modeOverride.map { "This job: \($0.rawValue.capitalized)" } ?? "Mode: app setting")
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                if let url = (job.applyURL ?? job.sourceURL).flatMap(URL.init(string:)) {
-                    Button { NSWorkspace.shared.open(url) } label: { Image(systemName: "safari") }
-                        .buttonStyle(.borderless)
-                        .help("Open the posting")
-                }
+            if style == .ticket {
+                ReviewTicket(model: model, job: job)
+                ticketFooter
+            } else {
+                classicHeader
+                actions
             }
-            actions
             ReviewQAPanel(job: job, answers: model.answers(for: job), answersLoaded: model.answersLoaded(job),
                           jumpSerial: model.flaggedJumpSerial,
                           onEdit: { answer, text in await model.editAnswer(answer, to: text) },
@@ -332,6 +355,73 @@ private struct ReviewDetail: View {
         }
         .padding(Space.contentPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// Under the ticket: why it's held, Skip, the job's mode and the posting.
+    private var ticketFooter: some View {
+        let held = model.isHeld(job.id)
+        let flagged = !held && model.needsLook(job)
+        let keysMeanThisJob = model.selection.isEmpty
+        return HStack(spacing: Space.s) {
+            if model.sendHold.wasNotSent(job.id) { NotSentBadge() }
+            if flagged {
+                Text(model.answersLoaded(job) ? "Answer or edit the flagged ones to release it, or press A to approve anyway."
+                                              : "Answers are still loading.")
+                    .font(Typography.callout)
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            } else if held {
+                Text("Approved. If you quit before it sends, it won't be sent.")
+                    .font(Typography.callout)
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: Space.s)
+            modeMenu
+            postingLink
+            Button {
+                model.requestSkip(only: [job.id])
+            } label: {
+                HStack(spacing: Space.xs) { Text("Skip"); if keysMeanThisJob { KeyCap("S") } }
+            }
+            .buttonStyle(.secondaryLink)
+            .disabled(held)
+        }
+    }
+
+    private var classicHeader: some View {
+        HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(job.company).font(Typography.title2)
+                Text(job.title).font(Typography.body).foregroundStyle(Palette.textSecondary)
+            }
+            Spacer()
+            if let score = job.score { Badge(score: score, threshold: store.preferences.matchThreshold) }
+            modeMenu
+            postingLink
+        }
+    }
+
+    private var modeMenu: some View {
+        Menu {
+            Button("Use app setting (\(store.effectiveMode(for: withoutOverride(job)).rawValue.capitalized))") { Task { await model.setMode(nil, for: job) } }
+            Button("Always Auto for this job") { Task { await model.setMode(.auto, for: job) } }
+            Button("Always Review for this job") { Task { await model.setMode(.review, for: job) } }
+        } label: {
+            Text(job.modeOverride.map { "This job: \($0.rawValue.capitalized)" } ?? "Mode: app setting")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+    }
+
+    @ViewBuilder
+    private var postingLink: some View {
+        if let url = (job.applyURL ?? job.sourceURL).flatMap(URL.init(string:)) {
+            Button { NSWorkspace.shared.open(url) } label: { Image(systemName: "safari") }
+                .buttonStyle(.borderless)
+                .help("Open the posting")
+        }
     }
 
     /// This job's own Approve / Skip. Approve is the screen's primary pill only while the
@@ -355,6 +445,7 @@ private struct ReviewDetail: View {
     }
 
     private var approveActions: some View {
+        let _ = probe?.classic()
         let busy = model.isHeld(job.id)
         let flagged = model.needsLook(job)
         // The A / S keys act on the selection when there is one, so only hint them when they mean this job.

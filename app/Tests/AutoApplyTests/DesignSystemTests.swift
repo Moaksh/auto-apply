@@ -243,6 +243,19 @@ struct DesignSystemTests {
             #expect(spring.bounce == 0)
         }
         #expect(Motion.Springs.emphasize.bounce > 0 && Motion.Springs.celebrate.bounce > Motion.Springs.settle.bounce)
+        // The Review ticket: the tear and the tug back are responses (the tear flat, the tug with
+        // the paper's small give); the stamp lands 1.4 → 1 with a slight overshoot inside a
+        // response while the ticket dips ~2 pt; the next ticket is live within a response.
+        #expect(Motion.Springs.tear.duration <= Motion.Budget.response + 0.0001 && Motion.Springs.tear.bounce == 0)
+        #expect(Motion.Springs.tug.duration <= Motion.Budget.response + 0.0001)
+        #expect(Motion.Springs.tug.bounce > 0 && Motion.Springs.tug.bounce < Motion.Springs.emphasize.bounce)
+        #expect(Motion.Stamp.duration <= Motion.Budget.response)
+        #expect(Motion.Stamp.from == 1.4 && Motion.Stamp.overshoot < 1 && Motion.Stamp.overshoot >= 0.9)
+        #expect(Motion.Stamp.dip > 0 && Motion.Stamp.dip <= 2)
+        #expect(Motion.Budget.tearAdvance <= Motion.Budget.response)
+        #expect(Motion.Budget.tearCommit == 60)
+        #expect(Motion.resolve(Motion.tear, reduceMotion: true) == Motion.reducedFade)
+        #expect(Motion.resolve(Motion.tug, reduceMotion: true) == Motion.reducedFade)
         // Stagger: one leader, 30 ms apart, at most 8 staggered.
         #expect(Motion.staggerDelay(index: 0) == 0)
         #expect(abs(Motion.staggerDelay(index: 3) - 0.09) < 0.0001)

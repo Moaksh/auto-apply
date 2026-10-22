@@ -2,7 +2,8 @@
 // confidence) items sorted to the top, multi-selection, the floating bar's states (actions →
 // "include the flagged one?" safeguard → skip reason picker), approve through the send hold
 // (`SendHoldModel`: nothing is sent until its ≈5 s Undo window closes), reject with a reason,
-// jump to the next flagged answer (F), and inline answer edits.
+// jump to the next flagged answer (F), and inline answer edits. The ticket style's tear
+// (`tear`, `releaseStub`) is the same approve, for the one job on the ticket.
 import Foundation
 import Observation
 
@@ -51,6 +52,13 @@ final class ReviewModel {
     private(set) var loadedApplicationIDs: Set<Int> = []
     /// Bumped by F / "N need a look": the Q&A panel spotlights the next flagged answer.
     private(set) var flaggedJumpSerial = 0
+    /// Bumped when a held ticket refuses to tear: the ticket shakes.
+    private(set) var tearRefusals = 0
+    /// After an Undo: the job whose ticket re-attaches its stub (plays the tear backwards) when it
+    /// next shows. Taken by the ticket (`takeReattach`).
+    private(set) var reattachJobID: Int?
+
+    @ObservationIgnored private var advanceTask: Task<Void, Never>?
 
     @ObservationIgnored private var answerTasks: [Int: Task<Void, Never>] = [:]
 
@@ -200,7 +208,17 @@ final class ReviewModel {
 
     /// After an Undo, focus the first job put back so it can be fixed or approved again.
     func didUndo(_ jobIDs: [Int]) {
-        if let first = jobIDs.first(where: { id in queue.contains { $0.id == id } }) { focusedJobID = first }
+        if let first = jobIDs.first(where: { id in queue.contains { $0.id == id } }) {
+            focusedJobID = first
+            reattachJobID = first
+        }
+    }
+
+    /// The ticket showing `jobID` asks whether to play the re-attach (once).
+    func takeReattach(_ jobID: Int) -> Bool {
+        guard reattachJobID == jobID else { return false }
+        reattachJobID = nil
+        return true
     }
 
     /// Targets for an action: the selection when non-empty, else the focused row. Rows on hold
@@ -253,8 +271,10 @@ final class ReviewModel {
     func cancelBar() { barMode = .actions }
 
     /// Put the jobs on the send hold: each row shows "Sending in 5…" with Undo (⌘Z) and focus
-    /// moves on. The `approve` command goes out only when the window closes (`SendHoldModel`).
-    func approve(_ requested: [Int], undoManager: UndoManager? = nil) {
+    /// moves on (or stays, with `advanceFocus: false`: the ticket moves it after its stamp). The
+    /// `approve` command goes out only when the window closes (`SendHoldModel`). Returns the jobs held.
+    @discardableResult
+    func approve(_ requested: [Int], undoManager: UndoManager? = nil, advanceFocus: Bool = true) -> [Int] {
         // In-flight guard: a double press must not hold (and later send) the same rows twice.
         var jobIDs = requested.filter { !isHeld($0) }
         // The daemon allows one application per company per cooldown window and refuses the whole
@@ -277,14 +297,68 @@ final class ReviewModel {
         }
         let nextFocus = queue.first { !jobIDs.contains($0.id) && !isHeld($0.id) }?.id
         let holding = sendHold.hold(jobIDs: jobIDs, undoManager: undoManager)
-        guard !holding.isEmpty else { return }
+        guard !holding.isEmpty else { return [] }
         selection.subtract(holding)
-        if let f = focusedJobID, holding.contains(f), let nextFocus { focusedJobID = nextFocus }
+        if advanceFocus, let f = focusedJobID, holding.contains(f), let nextFocus { focusedJobID = nextFocus }
+        return holding
     }
 
     /// A row's Undo: the job stays in Review, focused, and nothing is sent.
     func undoHold(jobID: Int) {
-        if sendHold.undo(jobID: jobID) { focusedJobID = jobID }
+        if sendHold.undo(jobID: jobID) {
+            focusedJobID = jobID
+            reattachJobID = jobID
+        }
+    }
+
+    // MARK: Ticket (Settings ▸ General ▸ Approve style ▸ Ticket)
+
+    enum TearOutcome: Equatable, Sendable {
+        /// On the send hold (exactly `approve`: ≈5 s with Undo / ⌘Z before anything is sent).
+        case torn
+        /// Released short of the commit point: the stub springs back, nothing happens.
+        case springBack
+        /// Held for your answer (answers that need a look, or not loaded yet): nothing is held.
+        case refused
+        /// Already on hold, gone from Review, or nothing to approve.
+        case ignored
+    }
+
+    /// The stub let go after a drag of `translation` pt toward the trailing edge: past
+    /// `Motion.Budget.tearCommit` it tears (`tear`), short of it nothing happens. A held ticket
+    /// refuses whatever the distance.
+    @discardableResult
+    func releaseStub(jobID: Int, translation: CGFloat, undoManager: UndoManager? = nil) -> TearOutcome {
+        guard translation >= Motion.Budget.tearCommit else {
+            if let job = store.jobs.job(id: jobID), needsLook(job), !isHeld(jobID), translation > 0 { return refuse(jobID) }
+            return .springBack
+        }
+        return tear(jobID: jobID, undoManager: undoManager)
+    }
+
+    /// Tear the stub (a drag past the commit point, a click, ⌘↵ or A): consent to send this one
+    /// job. Exactly the Approve path (the per-company rule, then `SendHoldModel`'s hold with Undo),
+    /// except focus moves to the next ticket a beat later (`Motion.Budget.tearAdvance`) so the
+    /// stamp lands first. A job that needs a look refuses: nothing is held, the ticket shakes and
+    /// its next flagged answer is spotlit. (A keeps the classic "Approve anyway?" question.)
+    @discardableResult
+    func tear(jobID: Int, undoManager: UndoManager? = nil) -> TearOutcome {
+        guard !isHeld(jobID), let job = store.jobs.job(id: jobID), job.state == .awaitingReview else { return .ignored }
+        if needsLook(job) { return refuse(jobID) }
+        guard approve([jobID], undoManager: undoManager, advanceFocus: false) == [jobID] else { return .ignored }
+        advanceTask?.cancel()
+        advanceTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Motion.Budget.tearAdvance))
+            guard !Task.isCancelled, let self, self.focusedJobID == jobID, self.isHeld(jobID) else { return }
+            if let next = self.queue.first(where: { !self.isHeld($0.id) })?.id { self.focusedJobID = next }
+        }
+        return .torn
+    }
+
+    private func refuse(_ jobID: Int) -> TearOutcome {
+        tearRefusals += 1
+        if focusedJobID == jobID { jumpToNextFlagged() }
+        return .refused
     }
 
     // MARK: Skip

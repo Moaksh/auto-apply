@@ -10,8 +10,10 @@
 // - **Tier 0 · Still.** Reading surfaces (lists, Job detail, Settings, Profile, Library) are still
 //   at rest. Nothing loops, pulses or breathes there.
 // - **Tier 1 · Response.** Feedback to a user action or a real state change: hover, press,
-//   selection, a row arriving or leaving, a number rolling, a badge changing. ≤ 0.3 s
-//   (`Budget.response`), one element leads, never a loop. Allowed everywhere.
+//   selection, a row arriving or leaving, a number rolling, a badge changing, the Review
+//   ticket's tear and stamp (`tear`, `tug`, `Stamp`; the next ticket is live within
+//   `Budget.tearAdvance`). ≤ 0.3 s (`Budget.response`), one element leads, never a loop.
+//   Allowed everywhere.
 // - **Tier 2 · Live.** Continuous motion driven by a real event stream: the Dashboard hero (lively
 //   all the time, owner decision 2026-10-22), live agent activity (pipeline particles, the
 //   live Chrome frame, the step ticker, thinking dots), countdown rings that are really counting
@@ -50,6 +52,8 @@ enum Motion {
         static let flight = Spring(duration: 0.55, bounce: 0.05)
         static let flow = Spring(duration: 0.70, bounce: 0)
         static let celebrate = Spring(duration: 0.55, bounce: 0.32)
+        static let tear = Spring(duration: 0.22, bounce: 0)
+        static let tug = Spring(duration: 0.26, bounce: 0.18)
     }
 
     // MARK: Tier 1 · Response
@@ -70,6 +74,25 @@ enum Motion {
     static let fade = Animation.easeInOut(duration: 0.2)
     /// Paired with `.contentTransition(.numericText(value:))`.
     static let numeric = snappy
+
+    // MARK: Tier 1 · The Review ticket (tear = consent)
+
+    /// The stub coming off the ticket once it's past the commit point (a drag, a click, ⌘↵ or A):
+    /// quick and flat, because the decision is already made.
+    static let tear = Animation.spring(Springs.tear)
+    /// The stub springing back: a drag released short of the commit point, a held ticket refusing,
+    /// or Undo re-attaching it. The one bounce is the paper's give.
+    static let tug = Animation.spring(Springs.tug)
+
+    /// The stamp that lands on a torn ticket ("APPROVED"): it drops from `from`× to just under
+    /// size and settles at 1, while the ticket dips `dip` pt, all inside `duration` (≤ `Budget.response`).
+    /// Applied through `.stampLanding(_:)` and `.ticketDip(_:)`; Reduce Motion: a fade.
+    enum Stamp {
+        static let from: CGFloat = 1.4
+        static let overshoot: CGFloat = 0.96
+        static let duration: TimeInterval = 0.28
+        static let dip: CGFloat = 2
+    }
 
     // MARK: Larger movement and moments
 
@@ -116,6 +139,13 @@ enum Motion {
         static let rise: CGFloat = 8
         /// A screen in the detail column rises less than a row: it must never feel slow.
         static let screenRise: CGFloat = 6
+        /// The Review ticket's commit point: drag the stub this far toward the trailing edge to tear it.
+        static let tearCommit: CGFloat = 60
+        /// After a tear, the next ticket takes focus this soon (the stamp has landed; the torn ticket
+        /// finishes leaving at the same time). Must stay within `response`.
+        static let tearAdvance: TimeInterval = 0.24
+        /// Where a torn stub rests while its send hold counts down: off to the trailing side.
+        static let tornOffset: CGFloat = 28
     }
 
     /// Reduce-motion aware: returns a cross-fade instead of movement.
@@ -539,4 +569,59 @@ struct ErrorShake: ViewModifier {
 
 extension View {
     func errorShake(trigger: Int) -> some View { modifier(ErrorShake(trigger: trigger)) }
+}
+
+// MARK: - The Review ticket's stamp
+
+/// The stamp landing (`Motion.Stamp`) as `landed` turns true: scale 1.4 → 0.96 → 1 with the ink
+/// coming up at once. Turning false plays nothing (the caller fades the stamp away). The rest pose
+/// is the landed one, so a renderer that never animates draws it in place. Reduce Motion: the ink
+/// fades in (`reducedFade`'s 0.18 s), nothing scales.
+private struct StampLanding: ViewModifier {
+    var landed: Bool
+    @Environment(\.motionReduced) private var reduced
+
+    private struct Pose { var scale: CGFloat = 1; var opacity = 1.0 }
+
+    func body(content: Content) -> some View {
+        content.keyframeAnimator(initialValue: Pose(), trigger: landed) { view, pose in
+            view.scaleEffect(pose.scale).opacity(pose.opacity)
+        } keyframes: { _ in
+            KeyframeTrack(\.scale) {
+                MoveKeyframe(landed && !reduced ? Motion.Stamp.from : 1)
+                CubicKeyframe(landed && !reduced ? Motion.Stamp.overshoot : 1, duration: Motion.Stamp.duration * 0.6)
+                CubicKeyframe(1, duration: Motion.Stamp.duration * 0.4)
+            }
+            KeyframeTrack(\.opacity) {
+                MoveKeyframe(landed ? 0 : 1)
+                CubicKeyframe(1, duration: reduced ? 0.18 : Motion.Stamp.duration * 0.3)
+            }
+        }
+    }
+}
+
+/// The ticket giving under the stamp as `landed` turns true: down `Motion.Stamp.dip` pt and back.
+/// Nothing under Reduce Motion, nothing when the stamp comes off.
+private struct TicketDip: ViewModifier {
+    var landed: Bool
+    @Environment(\.motionReduced) private var reduced
+
+    func body(content: Content) -> some View {
+        content.keyframeAnimator(initialValue: 0.0, trigger: landed) { view, y in
+            view.offset(y: y)
+        } keyframes: { _ in
+            KeyframeTrack {
+                CubicKeyframe(landed && !reduced ? Motion.Stamp.dip : 0, duration: Motion.Stamp.duration * 0.4)
+                CubicKeyframe(0, duration: Motion.Stamp.duration * 0.6)
+            }
+        }
+    }
+}
+
+extension View {
+    /// A stamp landing on the Review ticket when `landed` turns true.
+    func stampLanding(_ landed: Bool) -> some View { modifier(StampLanding(landed: landed)) }
+
+    /// The ticket dipping under its stamp when `landed` turns true.
+    func ticketDip(_ landed: Bool) -> some View { modifier(TicketDip(landed: landed)) }
 }
