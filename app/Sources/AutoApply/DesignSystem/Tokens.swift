@@ -132,6 +132,10 @@ enum Typography {
     static let metricSmall = Font.system(size: 13, weight: .semibold, design: .rounded).monospacedDigit()
     static let mono = Font.system(size: 12, design: .monospaced)
     static let monoSmall = Font.system(size: 10.5, weight: .medium, design: .monospaced)
+    /// Ticket field label ("MATCH", "CLOSES"): SF Mono caps, wide tracking. Use via `TicketField`.
+    static let ticketLabel = Font.system(size: 10, weight: .medium, design: .monospaced)
+    /// Ticket field value ("92", "Fri 25"): mono, readable, numbers aligned.
+    static let ticketValue = Font.system(size: 13, weight: .medium, design: .monospaced).monospacedDigit()
 }
 
 extension Font {
