@@ -232,6 +232,8 @@ struct BoardView: View {
             .motion(Motion.flow, value: signature)
         }
         .focusable()
+        // The selected row / card shows keyboard focus; the system ring would outline the whole pane.
+        .focusEffectDisabled()
         .focused($boardFocused)
         .onKeyPress(phases: .down) { press in
             handleKey(press, visible: visible, byColumn: byColumn)

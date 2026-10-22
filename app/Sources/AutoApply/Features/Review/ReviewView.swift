@@ -116,6 +116,8 @@ struct ReviewQueueView: View {
                 .animation(Motion.resolve(Motion.settle, reduceMotion: reduced), value: queue.map(\.id))
             }
             .focusable()
+            // The selected row / card shows keyboard focus; the system ring would outline the whole pane.
+            .focusEffectDisabled()
             .focused($listFocused)
             .onKeyPress(.downArrow) { model.moveFocus(by: 1); return .handled }
             .onKeyPress(.upArrow) { model.moveFocus(by: -1); return .handled }

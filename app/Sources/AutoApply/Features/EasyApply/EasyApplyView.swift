@@ -165,6 +165,8 @@ private struct EasyApplyDetail: View {
                     }
                     .surface(cornerRadius: Radius.inner)
                     .focusable()
+                    // The selected row / card shows keyboard focus; the system ring would outline the whole pane.
+                    .focusEffectDisabled()
                     .focused($rowsFocused)
                     .onKeyPress(.downArrow) { model.moveFocusedRow(by: 1); return .handled }
                     .onKeyPress(.upArrow) { model.moveFocusedRow(by: -1); return .handled }

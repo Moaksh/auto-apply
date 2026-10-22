@@ -94,6 +94,8 @@ struct InboxView: View {
                 .animation(Motion.resolve(Motion.snappy, reduceMotion: reduced), value: model.clusters.map(\.jobCount))
             }
             .focusable()
+            // The selected row / card shows keyboard focus; the system ring would outline the whole pane.
+            .focusEffectDisabled()
             .focused($listFocused)
             .onKeyPress(.downArrow) { model.moveSelection(by: 1); return .handled }
             .onKeyPress(.upArrow) { model.moveSelection(by: -1); return .handled }

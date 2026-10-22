@@ -138,6 +138,8 @@ struct ScreenshotViewer: View {
         .onChange(of: highlighted?.id) { scrollToHighlight() }
         .quickLookPreview($quickLookURL)
         .focusable()
+        // The selected row / card shows keyboard focus; the system ring would outline the whole pane.
+        .focusEffectDisabled()
         .onKeyPress(.space) {
             openQuickLook()
             return .handled

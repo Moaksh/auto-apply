@@ -142,7 +142,13 @@ struct DesignSystemTests {
     @Test func flatSurfacesAndCalmMotion() {
         #expect(offenders(".shadow(").isEmpty, "no drop shadows")
         #expect(offenders(".breathe", allowedIn: ["Features/EasterEggs/"]).isEmpty, "nothing breathes at rest")
-        #expect(offenders("focusEffectDisabled", allowedIn: ["Features/Onboarding/Ignition/"]).isEmpty, "system focus rings stay on")
+        #expect(offenders("focusEffectDisabled", allowedIn: [
+            "Features/Onboarding/Ignition/",
+            // Whole-pane keyboard containers whose selected row / card already shows focus: the
+            // system ring would draw a stray outline across the window (e.g. a line under the header).
+            "Features/Board/BoardView.swift", "Features/Review/ReviewView.swift", "Features/Inbox/InboxView.swift",
+            "Features/EasyApply/EasyApplyView.swift", "Features/JobDetail/ScreenshotViewer.swift",
+        ]).isEmpty, "system focus rings stay on")
     }
 
     @Test func modeSwitchNeverApproves() {
