@@ -1163,6 +1163,20 @@ class InterviewDebrief(_P):
     tokens_out: int = 0
 
 
+class DraftAnswerResult(_P):
+    """``ack.result`` of ``draft_answer``: a grounded draft (or revision) for a Needs-You question.
+    Nothing is answered or saved; the user edits it and answers with ``answer_question``."""
+
+    cluster_id: str
+    job_id: int | None = Field(default=None, description="The job whose description the draft used (the cluster's first job by default).")
+    answer: str = Field(description="The draft. May contain {company} / {role} tokens when several companies ask the question.")
+    grounded: bool = Field(description="False when the fact check found claims that are not in the user's sources.")
+    unsupported_claims: list[str] = Field(default_factory=list, description="Claims not found in the profile, resume, stories, saved answers, job or the user's instructions.")
+    sources: list[str] = Field(default_factory=list, description="What the draft was written from, in words ('Profile', 'Resume', 'Story: …', 'Job: …', 'Your instructions').")
+    tokens_in: int = 0
+    tokens_out: int = 0
+
+
 class PerJobAnswer(_P):
     job_id: int
     answer: str
@@ -1669,6 +1683,16 @@ class GetInterviewPrepPayload(_P):
     application_id: int
 
 
+class DraftAnswerPayload(_P):
+    """Draft an answer for an open question cluster, or revise ``current_answer`` as ``instructions`` ask."""
+
+    cluster_id: str
+    job_id: int | None = Field(default=None, description="Write for this job (must be in the cluster); default: the cluster's first job.")
+    instructions: str | None = Field(default=None, max_length=1000,
+                                     description="What to change ('make it shorter'). Facts stated here count as the user's own.")
+    current_answer: str | None = Field(default=None, max_length=10000, description="The editor's text to revise (not a source of facts).")
+
+
 class InterviewDebriefPayload(_P):
     """Free-text notes written after an interview; returns a structured debrief and a thank-you draft."""
 
@@ -1761,6 +1785,7 @@ COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "generate_interview_prep": GenerateInterviewPrepPayload,
     "get_interview_prep": GetInterviewPrepPayload,
     "interview_debrief": InterviewDebriefPayload,
+    "draft_answer": DraftAnswerPayload,
     "get_voice_profile": GetVoiceProfilePayload,
     "update_voice_profile": UpdateVoiceProfilePayload,
 }
@@ -2144,6 +2169,7 @@ _EXTRA_DEFS: tuple[type[BaseModel], ...] = (
     InterviewPrepPack,
     InterviewDebrief,
     VoiceProfile,
+    DraftAnswerResult,
 )
 
 

@@ -1246,6 +1246,69 @@ extension DismissReplySuggestionPayload {
     }
 }
 
+/// Draft an answer for an open question cluster, or revise ``current_answer`` as ``instructions`` ask.
+struct DraftAnswerPayload: Codable, Sendable, Hashable {
+    var clusterId: String
+    var jobId: Int? = nil
+    var instructions: String? = nil
+    var currentAnswer: String? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case clusterId = "cluster_id"
+        case jobId = "job_id"
+        case instructions
+        case currentAnswer = "current_answer"
+    }
+}
+
+extension DraftAnswerPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        clusterId = try c.decode(String.self, forKey: .clusterId)
+        jobId = try c.decodeIfPresent(Int.self, forKey: .jobId)
+        instructions = try c.decodeIfPresent(String.self, forKey: .instructions)
+        currentAnswer = try c.decodeIfPresent(String.self, forKey: .currentAnswer)
+    }
+}
+
+/// ``ack.result`` of ``draft_answer``: a grounded draft (or revision) for a Needs-You question.
+/// Nothing is answered or saved; the user edits it and answers with ``answer_question``.
+struct DraftAnswerResult: Codable, Sendable, Hashable {
+    var clusterId: String
+    var jobId: Int? = nil
+    var answer: String
+    var grounded: Bool
+    var unsupportedClaims: [String] = []
+    var sources: [String] = []
+    var tokensIn: Int = 0
+    var tokensOut: Int = 0
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case clusterId = "cluster_id"
+        case jobId = "job_id"
+        case answer
+        case grounded
+        case unsupportedClaims = "unsupported_claims"
+        case sources
+        case tokensIn = "tokens_in"
+        case tokensOut = "tokens_out"
+    }
+}
+
+extension DraftAnswerResult {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        clusterId = try c.decode(String.self, forKey: .clusterId)
+        jobId = try c.decodeIfPresent(Int.self, forKey: .jobId)
+        answer = try c.decode(String.self, forKey: .answer)
+        grounded = try c.decode(Bool.self, forKey: .grounded)
+        unsupportedClaims = try c.decodeIfPresent([String].self, forKey: .unsupportedClaims) ?? []
+        sources = try c.decodeIfPresent([String].self, forKey: .sources) ?? []
+        tokensIn = try c.decodeIfPresent(Int.self, forKey: .tokensIn) ?? 0
+        tokensOut = try c.decodeIfPresent(Int.self, forKey: .tokensOut) ?? 0
+    }
+}
+
 struct DraftOutreachPayload: Codable, Sendable, Hashable {
     var contactId: Int
     var kind: OutreachKind = .application
@@ -4207,6 +4270,7 @@ enum Command: Sendable, Hashable {
     case generateInterviewPrep(GenerateInterviewPrepPayload)
     case getInterviewPrep(GetInterviewPrepPayload)
     case interviewDebrief(InterviewDebriefPayload)
+    case draftAnswer(DraftAnswerPayload)
     case getVoiceProfile(GetVoiceProfilePayload)
     case updateVoiceProfile(UpdateVoiceProfilePayload)
 
@@ -4297,6 +4361,7 @@ enum Command: Sendable, Hashable {
         case .generateInterviewPrep: "generate_interview_prep"
         case .getInterviewPrep: "get_interview_prep"
         case .interviewDebrief: "interview_debrief"
+        case .draftAnswer: "draft_answer"
         case .getVoiceProfile: "get_voice_profile"
         case .updateVoiceProfile: "update_voice_profile"
         }
@@ -4387,6 +4452,7 @@ enum Command: Sendable, Hashable {
         "generate_interview_prep",
         "get_interview_prep",
         "interview_debrief",
+        "draft_answer",
         "get_voice_profile",
         "update_voice_profile",
     ]
@@ -4580,6 +4646,7 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case "generate_interview_prep": command = .generateInterviewPrep(try c.decode(GenerateInterviewPrepPayload.self, forKey: .payload))
         case "get_interview_prep": command = .getInterviewPrep(try c.decode(GetInterviewPrepPayload.self, forKey: .payload))
         case "interview_debrief": command = .interviewDebrief(try c.decode(InterviewDebriefPayload.self, forKey: .payload))
+        case "draft_answer": command = .draftAnswer(try c.decode(DraftAnswerPayload.self, forKey: .payload))
         case "get_voice_profile": command = .getVoiceProfile(try c.decode(GetVoiceProfilePayload.self, forKey: .payload))
         case "update_voice_profile": command = .updateVoiceProfile(try c.decode(UpdateVoiceProfilePayload.self, forKey: .payload))
         default:
@@ -4677,6 +4744,7 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case .generateInterviewPrep(let p): try c.encode(p, forKey: .payload)
         case .getInterviewPrep(let p): try c.encode(p, forKey: .payload)
         case .interviewDebrief(let p): try c.encode(p, forKey: .payload)
+        case .draftAnswer(let p): try c.encode(p, forKey: .payload)
         case .getVoiceProfile(let p): try c.encode(p, forKey: .payload)
         case .updateVoiceProfile(let p): try c.encode(p, forKey: .payload)
         }

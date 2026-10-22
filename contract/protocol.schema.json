@@ -89,6 +89,7 @@
     "generate_interview_prep",
     "get_interview_prep",
     "interview_debrief",
+    "draft_answer",
     "get_voice_profile",
     "update_voice_profile"
   ],
@@ -1679,6 +1680,130 @@
         "reply_id"
       ],
       "title": "DismissReplySuggestionPayload",
+      "type": "object"
+    },
+    "DraftAnswerPayload": {
+      "additionalProperties": false,
+      "description": "Draft an answer for an open question cluster, or revise ``current_answer`` as ``instructions`` ask.",
+      "properties": {
+        "cluster_id": {
+          "title": "Cluster Id",
+          "type": "string"
+        },
+        "job_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Write for this job (must be in the cluster); default: the cluster's first job.",
+          "title": "Job Id"
+        },
+        "instructions": {
+          "anyOf": [
+            {
+              "maxLength": 1000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "What to change ('make it shorter'). Facts stated here count as the user's own.",
+          "title": "Instructions"
+        },
+        "current_answer": {
+          "anyOf": [
+            {
+              "maxLength": 10000,
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The editor's text to revise (not a source of facts).",
+          "title": "Current Answer"
+        }
+      },
+      "required": [
+        "cluster_id"
+      ],
+      "title": "DraftAnswerPayload",
+      "type": "object"
+    },
+    "DraftAnswerResult": {
+      "additionalProperties": false,
+      "description": "``ack.result`` of ``draft_answer``: a grounded draft (or revision) for a Needs-You question.\nNothing is answered or saved; the user edits it and answers with ``answer_question``.",
+      "properties": {
+        "cluster_id": {
+          "title": "Cluster Id",
+          "type": "string"
+        },
+        "job_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "The job whose description the draft used (the cluster's first job by default).",
+          "title": "Job Id"
+        },
+        "answer": {
+          "description": "The draft. May contain {company} / {role} tokens when several companies ask the question.",
+          "title": "Answer",
+          "type": "string"
+        },
+        "grounded": {
+          "description": "False when the fact check found claims that are not in the user's sources.",
+          "title": "Grounded",
+          "type": "boolean"
+        },
+        "unsupported_claims": {
+          "description": "Claims not found in the profile, resume, stories, saved answers, job or the user's instructions.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Unsupported Claims",
+          "type": "array",
+          "default": []
+        },
+        "sources": {
+          "description": "What the draft was written from, in words ('Profile', 'Resume', 'Story: …', 'Job: …', 'Your instructions').",
+          "items": {
+            "type": "string"
+          },
+          "title": "Sources",
+          "type": "array",
+          "default": []
+        },
+        "tokens_in": {
+          "default": 0,
+          "title": "Tokens In",
+          "type": "integer"
+        },
+        "tokens_out": {
+          "default": 0,
+          "title": "Tokens Out",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "cluster_id",
+        "answer",
+        "grounded"
+      ],
+      "title": "DraftAnswerResult",
       "type": "object"
     },
     "DraftOutreachPayload": {
@@ -9707,6 +9832,32 @@
       ],
       "additionalProperties": false
     },
+    "CommandDraftAnswer": {
+      "type": "object",
+      "title": "Command: draft_answer",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "draft_answer"
+        },
+        "payload": {
+          "$ref": "#/$defs/DraftAnswerPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
     "CommandGetVoiceProfile": {
       "type": "object",
       "title": "Command: get_voice_profile",
@@ -10643,6 +10794,9 @@
         },
         {
           "$ref": "#/$defs/CommandInterviewDebrief"
+        },
+        {
+          "$ref": "#/$defs/CommandDraftAnswer"
         },
         {
           "$ref": "#/$defs/CommandGetVoiceProfile"

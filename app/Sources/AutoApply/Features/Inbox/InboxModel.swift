@@ -67,6 +67,53 @@ struct AnswerDraft: Equatable, Sendable {
         let isNeverGuess = cluster.neverGuessKey != nil || cluster.reason == .neverGuess
         saveToProfile = isNeverGuess && cluster.neverGuessKey != nil
         saveToMemory = !saveToProfile && !cluster.isAction
+        // The agent's stored draft starts in the editor (labelled as its draft) for typed answers.
+        // Choice and yes/no questions keep it one click away instead: a pre-picked guess is too
+        // easy to send without reading.
+        if let suggestion = Self.prefill(for: cluster) { text = suggestion }
+    }
+
+    /// The agent's stored draft when it belongs in a text editor, else nil.
+    static func prefill(for cluster: QuestionCluster) -> String? {
+        guard let s = cluster.suggestedAnswer?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
+        switch AnswerKind(cluster: cluster) {
+        case .shortText, .longText, .number, .url, .email, .date: return s
+        case .yesNo, .choice, .action: return nil
+        }
+    }
+}
+
+/// "Draft with AI" for one cluster (protocol.md §5.5): what the agent last wrote, the
+/// instructions asked this session, and the editor's earlier versions for Undo. Lives only in
+/// this session, like the drafts themselves.
+struct AIDraftState: Equatable, Sendable {
+    enum Phase: Equatable, Sendable {
+        case idle
+        case drafting(revising: Bool)
+        case failed(String)
+    }
+
+    var phase: Phase = .idle
+    /// The "Tell the agent what to change…" field.
+    var instruction = ""
+    /// Instructions sent this session, oldest first.
+    var history: [String] = []
+    /// Editor texts replaced by the agent, oldest first ("Undo" pops the last).
+    var versions: [String] = []
+    /// The last result (grounding, sources); nil after Undo.
+    var result: DraftAnswerResult?
+
+    static let historyLimit = 8
+    static let versionLimit = 20
+
+    var isDrafting: Bool { if case .drafting = phase { true } else { false } }
+
+    var errorMessage: String? { if case .failed(let m) = phase { m } else { nil } }
+
+    /// Unsupported claims still present in `text` (a claim the user already removed stops warning).
+    func unsupportedClaims(in text: String) -> [String] {
+        guard let result, !result.grounded else { return [] }
+        return result.unsupportedClaims.filter { text.range(of: $0, options: .caseInsensitive) != nil }
     }
 }
 
@@ -338,6 +385,8 @@ final class InboxModel {
     /// The selected item in the Replies section (mutually exclusive with a selected cluster).
     var selectedReplyKey: NeedsYouReply.Key?
     private(set) var drafts: [String: AnswerDraft] = [:]
+    /// "Draft with AI" state per cluster (this session only).
+    private(set) var aiDrafts: [String: AIDraftState] = [:]
     private(set) var answered: [InboxAnsweredRecord] = []
     private(set) var seenClusterIDs: Set<String> = []
     /// Bumps on the transition to zero open clusters (drives the celebration once per transition).
@@ -468,6 +517,97 @@ final class InboxModel {
         return best
     }
 
+    // MARK: Draft with AI
+
+    /// Typed answers only. Never-guess / always-ask facts, choice and yes/no questions and agent
+    /// tasks don't offer it (the agent refuses those anyway).
+    func supportsAIDraft(_ cluster: QuestionCluster) -> Bool {
+        guard !cluster.isAction, cluster.neverGuessKey == nil, cluster.reason != .neverGuess, cluster.reason != .alwaysAsk else { return false }
+        switch kind(for: cluster) {
+        case .shortText, .longText: return true
+        default: return false
+        }
+    }
+
+    func aiDraft(for cluster: QuestionCluster) -> AIDraftState { aiDrafts[cluster.clusterId] ?? AIDraftState() }
+
+    func updateAIDraft(for cluster: QuestionCluster, _ body: (inout AIDraftState) -> Void) {
+        var s = aiDraft(for: cluster)
+        body(&s)
+        aiDrafts[cluster.clusterId] = s
+    }
+
+    /// "Draft with AI": a fresh draft from the profile, resume, stories and the job. Replaces the
+    /// editor text (the old text is kept for Undo). Never answers.
+    func draftWithAI(for cluster: QuestionCluster) async {
+        await requestAIDraft(for: cluster, instructions: nil)
+    }
+
+    /// Return in "Tell the agent what to change…": revise the editor's text as asked (a first
+    /// draft, guided by the instruction, when the editor is empty).
+    func reviseWithAI(for cluster: QuestionCluster) async {
+        let instruction = aiDraft(for: cluster).instruction.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !instruction.isEmpty else { return }
+        await requestAIDraft(for: cluster, instructions: instruction)
+    }
+
+    /// Put the editor back to the text before the agent's last change.
+    @discardableResult
+    func undoAIDraft(for cluster: QuestionCluster) -> Bool {
+        var s = aiDraft(for: cluster)
+        guard let previous = s.versions.popLast() else { return false }
+        s.result = nil
+        if case .failed = s.phase { s.phase = .idle }
+        aiDrafts[cluster.clusterId] = s
+        updateDraft(for: cluster) { $0.text = previous }
+        return true
+    }
+
+    private func requestAIDraft(for cluster: QuestionCluster, instructions: String?) async {
+        let id = cluster.clusterId
+        guard supportsAIDraft(cluster), !aiDraft(for: cluster).isDrafting,
+              store.inbox.clusters.contains(where: { $0.clusterId == id }) else { return }
+        let current = draft(for: cluster).text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let revising = instructions != nil && !current.isEmpty
+        updateAIDraft(for: cluster) { $0.phase = .drafting(revising: revising) }
+        let result = await store.draftAnswer(clusterID: id, instructions: instructions, currentAnswer: revising ? current : nil)
+        // Answered, skipped or resolved elsewhere while the agent was writing: drop the reply.
+        guard store.inbox.clusters.contains(where: { $0.clusterId == id }) else {
+            aiDrafts.removeValue(forKey: id)
+            return
+        }
+        switch result {
+        case .success(let reply):
+            let before = draft(for: cluster).text
+            updateAIDraft(for: cluster) { s in
+                s.phase = .idle
+                s.result = reply
+                if !before.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty, before != reply.answer {
+                    s.versions.append(before)
+                    if s.versions.count > AIDraftState.versionLimit { s.versions.removeFirst() }
+                }
+                if let instructions {
+                    s.history.removeAll { $0 == instructions }
+                    s.history.append(instructions)
+                    if s.history.count > AIDraftState.historyLimit { s.history.removeFirst() }
+                    s.instruction = ""
+                }
+            }
+            updateDraft(for: cluster) { $0.text = reply.answer }
+        case .failure(let error):
+            updateAIDraft(for: cluster) { $0.phase = .failed(Self.aiDraftErrorMessage(error)) }
+        }
+    }
+
+    static func aiDraftErrorMessage(_ error: DaemonClientError) -> String {
+        switch error {
+        case .daemon(let p): p.message
+        case .timeout: "The agent took too long to write a draft. Try again."
+        case .notConnected: "Can't reach the agent. Drafts need it running."
+        case .encoding, .decoding: "The agent's draft couldn't be read. Try again."
+        }
+    }
+
     // MARK: Selection
 
     /// Keep a valid selection: the first (highest impact) cluster when nothing valid is selected.
@@ -558,6 +698,7 @@ final class InboxModel {
         answered.insert(InboxAnsweredRecord(clusterID: id, question: title(for: cluster), jobCount: cluster.jobCount,
                                             status: answer == nil ? .skipped : .answered, at: Date(), isPending: true), at: 0)
         drafts.removeValue(forKey: id)
+        aiDrafts.removeValue(forKey: id)
         validationMessage = nil
         // Auto-advance to the next highest-impact cluster.
         select(clusters.first?.clusterId)

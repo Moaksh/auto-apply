@@ -384,6 +384,45 @@ struct DesignSystemTests {
         await store.stop()
     }
 
+    /// "Draft with AI" and "Tell the agent what to change…" are secondary: the composer's one
+    /// primary stays Answer in every state (idle, stored draft, drafted, not grounded, failed).
+    @Test func needsYouDraftWithAIKeepsOnePrimary() async throws {
+        #expect(offenders(".primaryPill").filter { $0.hasPrefix("Features/Inbox/AIDraftControls.swift") }.isEmpty)
+        let store = await makeStore(.idle)
+        let inbox = InboxModel.shared(for: store)
+        let why = try #require(store.inbox.clusters.first { $0.clusterId == "c_why" })
+        inbox.select(why.clusterId)
+        #expect(inbox.supportsAIDraft(why))
+        func composerCount() -> Int {
+            prominentCount(store: store, width: 900, height: 1200) {
+                AnswerComposer(model: inbox, cluster: why, undoManager: nil, embedded: true)
+            }
+        }
+        #expect(composerCount() == 1, "before drafting")
+        await inbox.draftWithAI(for: why)
+        #expect(!inbox.draft(for: why).text.isEmpty)
+        #expect(composerCount() == 1, "drafted")
+        inbox.updateAIDraft(for: why) { $0.instruction = "Add a metric" }
+        await inbox.reviseWithAI(for: why)
+        #expect(!inbox.aiDraft(for: why).unsupportedClaims(in: inbox.draft(for: why).text).isEmpty)
+        #expect(composerCount() == 1, "not grounded")
+        inbox.updateAIDraft(for: why) { $0.phase = .drafting(revising: true) }
+        #expect(composerCount() == 1, "drafting")
+        inbox.updateAIDraft(for: why) { $0.phase = .failed("The agent took too long to write a draft. Try again.") }
+        #expect(composerCount() == 1, "failed")
+        // A stored draft in the editor, labelled as the agent's.
+        var stored = why
+        stored.clusterId = "c_stored"
+        stored.reason = .lowConfidence
+        stored.suggestedAnswer = "I have worked remotely for three years."
+        stored.suggestedConfidence = 0.55
+        #expect(prominentCount(store: store, width: 900, height: 1200) {
+            AnswerComposer(model: inbox, cluster: stored, undoManager: nil, embedded: true)
+        } == 1, "stored draft")
+        #expect(prominentCount(store: store) { InboxView() } <= 1, "Needs You with Draft with AI")
+        await store.stop()
+    }
+
     @Test func needsYouRepliesKeepOnePrimary() async {
         let store = await makeStore(.idle)
         _ = await waitUntil { store.outreach.isLoaded && store.outreach.repliesLoaded }

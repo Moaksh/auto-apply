@@ -566,6 +566,9 @@ class AnswerResolver:
         note = str(data.get("gaps") or "").strip() or None
         if not data.get("grounded", False):
             conf = min(conf, 0.5)
+        if not answer:
+            # Nothing drafted: an "unknown", never a low-confidence question without a draft.
+            raise NeedsUser(q, QuestionReason.UNKNOWN, detail="empty generated answer", note=note)
         if q.options:
             opt = match_option(answer, q.options)
             if opt is None:

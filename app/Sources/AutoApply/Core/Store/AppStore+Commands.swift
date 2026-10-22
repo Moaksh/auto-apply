@@ -150,6 +150,28 @@ extension AppStore {
         return false
     }
 
+    /// A grounded draft for a question, or a revision of `currentAnswer` as `instructions` ask
+    /// (protocol.md §5.5). Answers nothing: the caller puts the text in the editor.
+    func draftAnswer(clusterID: String, jobID: Int? = nil, instructions: String? = nil,
+                     currentAnswer: String? = nil) async -> Result<DraftAnswerResult, DaemonClientError> {
+        let command = Command.draftAnswer(DraftAnswerPayload(clusterId: clusterID, jobId: jobID, instructions: instructions,
+                                                             currentAnswer: currentAnswer))
+        switch await perform(command, timeout: draftAnswerTimeout, silent: true) {
+        case .success(let reply):
+            guard case .ack(let ack) = reply.event else { return .failure(.decoding("no result")) }
+            do {
+                return .success(try JSONValue.object(ack.result ?? [:]).decode(DraftAnswerResult.self))
+            } catch {
+                return .failure(.decoding(String(describing: error)))
+            }
+        case .failure(let error):
+            return .failure(error)
+        }
+    }
+
+    /// One model call, sometimes two (a fact-check retry).
+    var draftAnswerTimeout: Duration { .seconds(120) }
+
     @discardableResult
     func skipQuestion(clusterID: String, reason: String? = nil) async -> Bool {
         var removed: QuestionCluster?

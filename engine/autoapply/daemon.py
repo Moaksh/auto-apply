@@ -1781,6 +1781,21 @@ class Daemon:
             raise CommandError(ErrorCode.UNAVAILABLE, str(e), application_id=p.application_id) from e
         return result.model_dump(mode="json")
 
+    async def _cmd_draft_answer(self, p: Any) -> dict[str, Any]:
+        """A grounded draft (or revision) for a Needs-You question. Nothing is answered or saved."""
+        from autoapply.answers import drafting
+
+        try:
+            result = await drafting.draft_answer(
+                self.llm, self.conn, p.cluster_id, job_id=p.job_id, instructions=p.instructions,
+                current_answer=p.current_answer,
+            )
+        except drafting.DraftRefused as e:
+            raise CommandError(ErrorCode.INVALID_PAYLOAD, e.message, details={"reason": e.reason}) from e
+        except drafting.DraftUnavailable as e:
+            raise CommandError(ErrorCode.UNAVAILABLE, str(e)) from e
+        return result.model_dump(mode="json")
+
     def _maybe_queue_interview_prep(self, application_id: int, status: Any) -> None:
         """A card reached Interview / Assessment: write its prep pack in the background, once
         (gated by ``interview.AUTO_ENABLED`` and the ``interview_prep_auto`` meta flag; not while paused)."""

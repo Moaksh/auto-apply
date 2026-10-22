@@ -183,4 +183,44 @@ struct RenderSmokeTests {
         #expect(palette != nil)
         await store.stop()
     }
+
+    /// The answer composer with "Draft with AI": a stored agent draft in the editor, a drafted
+    /// answer, the not-grounded warning, the drafting state (with and without Reduce Motion) and
+    /// an error, in light and dark.
+    @Test func answerComposerDraftWithAIRenders() async throws {
+        let store = await makeStore(.idle)
+        let inbox = InboxModel.shared(for: store)
+        let why = try #require(store.inbox.clusters.first { $0.clusterId == "c_why" })
+        var stored = why
+        stored.clusterId = "c_stored"
+        stored.reason = .lowConfidence
+        stored.suggestedAnswer = "I have worked remotely for three years and write things down."
+        stored.suggestedConfidence = 0.55
+        stored.suggestedNote = "Add how many time zones your team spans."
+        await inbox.draftWithAI(for: why)
+        inbox.updateAIDraft(for: why) { $0.instruction = "Add a metric" }
+        await inbox.reviseWithAI(for: why)
+        let states: [(String, AIDraftState.Phase?)] = [("drafted", nil), ("drafting", .drafting(revising: true)),
+                                                     ("failed", .failed("The agent took too long to write a draft. Try again."))]
+        for scheme in [ColorScheme.light, .dark] {
+            for (name, phase) in states {
+                if let phase { inbox.updateAIDraft(for: why) { $0.phase = phase } }
+                for reduce in [true, false] {
+                    let image = render("composer-ai-\(name)\(reduce ? "-reduced" : "")", width: 900, height: 1100, scheme: scheme) {
+                        AnswerComposer(model: inbox, cluster: why, undoManager: nil, embedded: true)
+                            .padding(Space.l)
+                            .appEnvironment(store, simulateReduceMotion: reduce)
+                    }
+                    #expect(image != nil, "\(name)")
+                }
+            }
+            #expect(render("composer-stored-draft", width: 900, height: 900, scheme: scheme) {
+                AnswerComposer(model: inbox, cluster: stored, undoManager: nil, embedded: true)
+                    .padding(Space.l)
+                    .appEnvironment(store, simulateReduceMotion: true)
+            } != nil)
+        }
+        #expect(inbox.draft(for: stored).text == stored.suggestedAnswer, "the stored draft starts in the editor")
+        await store.stop()
+    }
 }

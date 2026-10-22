@@ -1358,9 +1358,14 @@ class ScriptedFormAdapter:
         flagged = {v.question for v in violations}
         flagged_keys: set[str] = set()
         for v in violations:
-            q = next((a.question for a, _ in audit if a.question.label == v.question), None)
-            if q is not None:
-                result.unresolved.append(UnresolvedField(q, QuestionReason(v.reason).value))
+            hit = next((a for a, _ in audit if a.question.label == v.question), None)
+            if hit is not None:
+                q = hit.question
+                # A low-confidence generated answer goes to the inbox as the agent's draft, so the
+                # user sees what it wrote instead of an empty box.
+                draft = hit.answer if v.reason is QuestionReason.LOW_CONFIDENCE and hit.answer else None
+                result.unresolved.append(UnresolvedField(q, QuestionReason(v.reason).value, suggested_answer=draft,
+                                                         confidence=hit.confidence if draft else None))
                 flagged_keys.add(q.key)
         # A rejected answer must not be reused by the next fill (it would shadow the
         # user's inbox answer forever): drop its non-user audit row so the field is

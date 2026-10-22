@@ -467,6 +467,8 @@ enum MockCommandHandler {
              .addReferral, .draftReferral, .updateReferral, .setProviderKey, .acceptReplySuggestion, .dismissReplySuggestion,
              .markApplicationReplyRead:
             return MockOutreach.handle(command, world: world) ?? Handled(reply: ack())
+        case .draftAnswer(let p):
+            return MockDrafts.handle(p, world: world)
         case .generateInterviewPrep, .getInterviewPrep, .interviewDebrief:
             return MockCareer.handle(command, world: world)
         case .importLinkedinConnections:

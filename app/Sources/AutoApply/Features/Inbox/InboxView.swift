@@ -370,36 +370,36 @@ struct AnswerComposer: View {
                 }
             }
             jobContext
-            if let suggestion = cluster.suggestedAnswer, !suggestion.isEmpty {
+            if let suggestion = cluster.suggestedAnswer?.trimmingCharacters(in: .whitespacesAndNewlines), !suggestion.isEmpty {
                 if let note = cluster.suggestedNote, !note.isEmpty {
                     Label(note, systemImage: "lightbulb")
                         .font(Typography.callout).foregroundStyle(Palette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                         .help("What the agent couldn't find in your profile. Add it to your answer, or to your profile so future drafts include it.")
                 }
-                // The agent's own draft: shown so the user can accept it in one click or edit it.
-                VStack(alignment: .leading, spacing: Space.xs) {
-                    HStack(spacing: Space.s) {
-                        Text("Agent's draft").eyebrowStyle()
-                        if let c = cluster.suggestedConfidence {
-                            Text("\(Int((c * 100).rounded()))% sure").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
+                if AnswerDraft.prefill(for: cluster) != nil {
+                    // Typed answers: the draft is already in the editor below; say whose it is.
+                    agentDraftLabel(suggestion)
+                } else {
+                    // Choices and yes/no: shown here, one click to use.
+                    VStack(alignment: .leading, spacing: Space.xs) {
+                        HStack(spacing: Space.s) {
+                            Text("Agent's draft").eyebrowStyle()
+                            confidenceText
+                            Spacer()
+                            Button("Use draft") { useSuggestion(suggestion) }
+                                .buttonStyle(.secondaryLink)
+                                .help("Put the agent's draft in the answer box; edit it before you answer if needed")
                         }
-                        Spacer()
-                        Button("Use draft") { useSuggestion(suggestion) }
-                            .buttonStyle(.secondaryLink)
-                            .help("Put the agent's draft in the answer box; edit it before you answer if needed")
+                        Text(suggestion)
+                            .font(Typography.body)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
-                    Text(suggestion)
-                        .font(Typography.body)
-                        .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
+                    .padding(Space.m)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .well()
                 }
-                .padding(Space.m)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .well()
-            } else if cluster.reason == .lowConfidence {
-                Text("The agent drafted something but wasn't sure enough to send it.")
-                    .font(Typography.callout).foregroundStyle(Palette.textTertiary)
             }
         }
     }
@@ -443,6 +443,31 @@ struct AnswerComposer: View {
                 if jobs.count > 4 {
                     Text("+\(jobs.count - 4) more").font(Typography.callout).foregroundStyle(Palette.textTertiary)
                 }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var confidenceText: some View {
+        if let c = cluster.suggestedConfidence {
+            Text("\(Int((c * 100).rounded()))% sure").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
+        }
+    }
+
+    /// "Agent's draft · 62% sure" above an editor that starts with the agent's stored draft.
+    private func agentDraftLabel(_ suggestion: String) -> some View {
+        HStack(spacing: Space.s) {
+            Text("Agent's draft").eyebrowStyle()
+            confidenceText
+            Text(draft.text == suggestion ? "It wasn't sure enough to send this. Check it before answering."
+                                          : "You've edited the agent's draft.")
+                .font(Typography.callout).foregroundStyle(Palette.textSecondary)
+            Spacer()
+            if draft.text != suggestion {
+                Button("Restore draft") { useSuggestion(suggestion) }
+                    .buttonStyle(.secondaryLink)
+                    .font(Typography.callout)
+                    .help("Put the agent's draft back in the answer box")
             }
         }
     }
@@ -512,7 +537,11 @@ struct AnswerComposer: View {
                 .focused($editorFocused)
                 .onSubmit { model.submitSelected(undoManager: undoManager) }
         }
-        if let memory = model.memorySuggestion(for: cluster), draft.text.isEmpty, kind != .yesNo, kind != .action {
+        if model.supportsAIDraft(cluster) && !draft.perJob {
+            AIDraftControls(model: model, cluster: cluster)
+        }
+        if let memory = model.memorySuggestion(for: cluster), draft.text.isEmpty || draft.text == AnswerDraft.prefill(for: cluster),
+           kind != .yesNo, kind != .action {
             Button {
                 useSuggestion(memory.answer)
             } label: {

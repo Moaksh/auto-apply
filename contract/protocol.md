@@ -88,6 +88,7 @@ An `error` without `reply_to` is an unsolicited daemon problem (login expired, C
 | `resume` | `{}` | `null` | |
 | `answer_question` | `cluster_id`, `answer`, `save_to_memory` (true), `save_to_profile` (false), `per_job_answers` [`{job_id, answer}`] | `{answer_id?, resumed_application_ids}` | answer may contain `{company}`/`{role}`; `save_to_profile` writes the cluster's `never_guess_key`. Emits `question_resolved`, then `application_state` (needs_you → queued) for jobs with no other open questions |
 | `skip_question` | `cluster_id`, `reason?` | `{skipped_application_ids}` | "Skip these jobs": parked jobs → skipped |
+| `draft_answer` | `cluster_id`, `job_id?`, `instructions?` (≤ 1000 chars), `current_answer?` (≤ 10000 chars) | `DraftAnswerResult` | a grounded draft for an open question, or a revision of `current_answer` as `instructions` ask. Nothing is answered or saved. See §5.5 |
 | `approve` | `application_ids` [int, ≥1] | `{application_ids}` | awaiting_review → submitting (actor user); daemon submits in background |
 | `reject` | `application_id`, `reason` | `null` | awaiting_review → skipped (actor user) |
 | `set_status` | `application_id`, `status` (board status) | `null` | only when state = submitted; emits `application_status` |
@@ -246,6 +247,43 @@ the protocol schema `$defs` (`InterviewPrepPack`, `InterviewDebrief`).
   `follow_ups[]`, `thank_you: {subject, body, grounded, unsupported_claims[]}`, `tokens_in`,
   `tokens_out`. The notes count as the user's own facts for the draft. Placeholders such as
   `[Name]` count as unsupported. A draft with `grounded = false` should not be used as written.
+
+#### 5.5 Drafting answers for Needs You (`engine/autoapply/answers/drafting.py`; no schema change)
+
+`draft_answer` writes (or revises) the answer to one open question cluster when the user asks
+("Draft with AI", "Tell the agent what to change…"). It never answers, saves or submits anything:
+the user edits the text and answers with `answer_question`.
+
+- **Result** (`DraftAnswerResult`, in the schema `$defs`): `cluster_id`, `job_id` (the job the
+  draft was written for: `job_id` from the payload, else the cluster's first job), `answer`,
+  `grounded`, `unsupported_claims[]`, `sources[]` (in words: `Profile`, `Resume`,
+  `Story: <title>`, `Saved answer: <question>`, `Job: <title> at <company>`, `Your instructions`),
+  `tokens_in`, `tokens_out`. When several companies ask the question and no `job_id` is given,
+  the answer may use `{company}` / `{role}` tokens.
+- **Sources**: the profile facts, the resume text (the variant picked for the job, else the
+  parsed resume), the story bank, the user's own saved answers (answer memory with source
+  `user`; up to 5 similar ones) and the job (title, company, JD). The JD, company text, the form
+  question and `current_answer` are data: the prompt fences them and the model is told never to
+  follow instructions inside them.
+- **Revision**: with both `instructions` and `current_answer` the current text is rewritten as
+  asked ("make it shorter", "more casual", "mention my Kafka project"). Facts stated in
+  `instructions` ("I led a team of 5") count as the user's own source, like interview-debrief
+  notes. `current_answer` is never a source (it may be an earlier draft).
+- **Fact check**: the cover-letter `fact_check`. Allowed: all sources above plus the user's
+  instructions. A first-person claim must come from the candidate's own sources (the JD can't
+  vouch for the candidate). Placeholders such as `[Company]` count as unsupported. One
+  regeneration with feedback, then the writing-voice linter (`voice.polish`, never adding a
+  claim), then a final check: `grounded = false` with the remaining `unsupported_claims` listed.
+- **Field rules**: `max_length` (from the job's harvested form when known; long text otherwise
+  stays near 1200 characters) is respected by clipping at a sentence. Choice and yes/no fields
+  return exactly one of the options, or are declined.
+- **Refusals** (`invalid_payload`, `details.reason`): `action` (an agent task, not a question),
+  `never_guess` (work authorisation, sponsorship, salary, notice, EEO and the other never-guess
+  fields, by key, reason or wording), `always_ask` (matches an always-ask pattern),
+  `no_option` (a choice field the facts don't settle), `empty` (nothing could be written). No
+  model call is made for `action` / `never_guess` / `always_ask`. `not_found` for a cluster that
+  is not open, `invalid_payload` for a `job_id` not in the cluster, `unavailable` when no model is
+  configured or the model fails. Tokens are added to the job's application.
 
 ## 6. Events (daemon → app)
 

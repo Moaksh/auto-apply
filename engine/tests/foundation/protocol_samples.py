@@ -198,6 +198,8 @@ def samples() -> list[Envelope]:
     c("generate_interview_prep", {"application_id": 11, "force": False})
     c("get_interview_prep", {"application_id": 11})
     c("interview_debrief", {"application_id": 11, "notes": "Spoke with Priya (EM). Went deep on Kafka consumer lag; I froze on a sharding question."})
+    c("draft_answer", {"cluster_id": "c-async", "job_id": 11, "instructions": "Make it shorter and mention my Kafka work.",
+                       "current_answer": "I have worked remotely for three years across time zones."})
     c("get_voice_profile", {})
     c("update_voice_profile", {"sign_off": "Thanks", "formality": "neutral", "max_words": 180,
                                "avoid_phrases": ["circling back"], "writing_sample": "Hi Ravi, quick one about the Go role."})
