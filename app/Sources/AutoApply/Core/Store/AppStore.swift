@@ -126,9 +126,15 @@ final class AppStore {
         coalescer.start(client.events)
         subscribeRepository()
         if let observing = client as? any DaemonConnectionObserving {
+            // Each element is a "something changed" signal: apply the client's state as it is now,
+            // not the queued value. The stream is seeded with the state when it was read
+            // (`.disconnected`, before `connect()`), and on a busy main actor that seed can drain
+            // after the connect task below already set `.connected`, briefly showing "Can't reach
+            // the agent" over a live connection.
             let states = observing.connectionStates
+            let client = self.client
             streamTasks.append(Task { [weak self] in
-                for await state in states { self?.setConnection(state) }
+                for await _ in states { self?.setConnection(await client.connectionState) }
             })
         }
         // Poll 2 of 2 (documented, Rams audit #9): every 500 ms, drop finished pipeline-flow

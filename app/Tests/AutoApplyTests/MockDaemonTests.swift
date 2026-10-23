@@ -1,6 +1,7 @@
 // MockDaemonTests.swift — every scenario's setup and script outcomes, command semantics, and
 // end-to-end store wiring (MockDaemon → EventCoalescer → AppStore).
 import Foundation
+import Synchronization
 import Testing
 @testable import AutoApply
 
@@ -315,6 +316,20 @@ struct StoreMockIntegrationTests {
         await store.stop()
     }
 
+    @Test func staleSeededStateNeverOverridesALiveConnection() async throws {
+        let client = LateSeedClient(base: MockDaemon(scenario: .idle, speed: 50))
+        let store = AppStore(client: client, repository: client.base.repository)
+        store.start()
+        #expect(await waitUntil { store.isConnected && store.hasSnapshot })
+        client.releaseStaleSeed()
+        // Give the observer every chance to apply the stale `.disconnected`.
+        for _ in 0..<20 { await Task.yield() }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(store.isConnected)
+        #expect(store.agentStatus.kind != .disconnected)
+        await store.stop()
+    }
+
     @Test func daemonDownMarksUnreachableButKeepsDBData() async throws {
         let daemon = MockDaemon(scenario: .daemonDown, speed: 20)
         let store = AppStore(client: daemon, repository: daemon.repository)
@@ -338,5 +353,35 @@ struct StoreMockIntegrationTests {
         #expect(store.inbox.cluster(id: cluster.clusterId) == nil)
         #expect(await waitUntil { store.inbox.resolvedToday.contains { $0.clusterID == cluster.clusterId } })
         await store.stop()
+    }
+}
+
+/// MockDaemon whose connection-state stream holds back a stale `.disconnected` until released:
+/// the seed a real client yields at subscription, drained late on a busy main actor.
+final class LateSeedClient: DaemonConnecting, DaemonConnectionObserving {
+    let base: MockDaemon
+    private let pending = Mutex<AsyncStream<DaemonConnectionState>.Continuation?>(nil)
+
+    init(base: MockDaemon) { self.base = base }
+
+    func releaseStaleSeed() {
+        pending.withLock { $0?.yield(.disconnected) }
+    }
+
+    var connectionState: DaemonConnectionState { get async { await base.connectionState } }
+    var events: AsyncStream<EventEnvelope> { base.events }
+    var connectionStates: AsyncStream<DaemonConnectionState> {
+        let (stream, continuation) = AsyncStream<DaemonConnectionState>.makeStream()
+        pending.withLock { $0 = continuation }
+        return stream
+    }
+
+    @discardableResult
+    func connect() async throws -> SnapshotPayload { try await base.connect() }
+    func disconnect() async { await base.disconnect() }
+    @discardableResult
+    func send(_ command: Command) async throws -> String { try await base.send(command) }
+    func request(_ command: Command, timeout: Duration) async throws -> EventEnvelope {
+        try await base.request(command, timeout: timeout)
     }
 }
