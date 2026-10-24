@@ -443,6 +443,54 @@ extension AppStore {
         return true
     }
 
+    /// Startups near you: YC's directory now, funding news when the browser is free (unless YC only).
+    @discardableResult
+    func discoverStartups(location: String?, ycOnly: Bool, hiringOnly: Bool, stages: [FundingStage]) async -> Bool {
+        struct Reply: Decodable {
+            var location: String
+            var queuedGoogle: Bool
+            enum CodingKeys: String, CodingKey { case location; case queuedGoogle = "queued_google" }
+        }
+        let payload = DiscoverStartupsPayload(location: location.c3Trimmed, ycOnly: ycOnly, hiringOnly: hiringOnly, stages: stages)
+        guard let reply = await performResult(.discoverStartups(payload), as: Reply.self, timeout: .seconds(10)) else { return false }
+        toasts.show(reply.queuedGoogle
+                    ? "Looking for startups in \(reply.location): YC's directory now, funding news when the browser is free"
+                    : "Looking for startups in \(reply.location) on YC's directory",
+                    symbol: "sparkle.magnifyingglass", style: .info, duration: .seconds(4))
+        return true
+    }
+
+    /// Find people at the best-ranked companies, one after another. Returns how many were started.
+    @discardableResult
+    func scoutTopProspects(limit: Int) async -> Int? {
+        struct Company: Decodable {
+            var companyId: Int
+            var company: String
+            enum CodingKeys: String, CodingKey { case companyId = "company_id"; case company }
+        }
+        struct Skipped: Decodable {
+            var company: String
+            var reason: String
+        }
+        struct Reply: Decodable { var queued: [Company]; var skipped: [Skipped] }
+        guard let reply = await performResult(.scoutTopProspects(ScoutTopProspectsPayload(limit: limit)), as: Reply.self,
+                                              timeout: .seconds(10)) else { return nil }
+        for c in reply.queued {
+            outreach.beginScouting(companyID: c.companyId)
+            if let p = outreach.data.prospects.first(where: { $0.companyID == c.companyId }), p.status == .suggested {
+                outreach.mutateProspect(p.id) { $0.status = .shortlisted }
+            }
+        }
+        let skippedNote = reply.skipped.isEmpty ? "" : " · skipped \(reply.skipped.count) (\(reply.skipped[0].reason))"
+        if reply.queued.isEmpty {
+            toasts.show("No company to look at right now" + skippedNote, symbol: "person.2", style: .info, duration: .seconds(4))
+        } else {
+            toasts.show("Finding people at \(C3Format.plural(reply.queued.count, "company", "companies"))" + skippedNote,
+                        symbol: "person.2", style: .info, duration: .seconds(4))
+        }
+        return reply.queued.count
+    }
+
     @discardableResult
     func addProspect(name: String?, url: String?) async -> Bool {
         let result = await perform(.addProspect(AddProspectPayload(companyName: name.c3Trimmed, url: url.c3Trimmed)), timeout: .seconds(15))
@@ -468,10 +516,15 @@ extension AppStore {
     // MARK: Referrals
 
     @discardableResult
-    func suggestReferrers(companyID: Int, jobID: Int? = nil) async -> Bool {
-        let result = await perform(.suggestReferrers(SuggestReferrersPayload(companyId: companyID, jobId: jobID)), timeout: .seconds(10))
-        guard case .success = result else { return false }
-        toasts.show("Looking for people who could refer you (Google results only)", symbol: "person.2", style: .info, duration: .seconds(3))
+    func suggestReferrers(companyID: Int, jobID: Int? = nil, location: String? = nil) async -> Bool {
+        struct Reply: Decodable { var connections: Int? }
+        let payload = SuggestReferrersPayload(companyId: companyID, jobId: jobID, location: location.c3Trimmed)
+        guard let reply = await performResult(.suggestReferrers(payload), as: Reply.self, timeout: .seconds(10)) else { return false }
+        let near = location.c3Trimmed.map { " in \($0)" } ?? ""
+        let n = reply.connections ?? 0
+        let known = n == 0 ? "" : n == 1 ? " · 1 of your connections works there" : " · \(n) of your connections work there"
+        toasts.show("Looking for people\(near) who could refer you (Google results only)\(known)", symbol: "person.2", style: .info,
+                    duration: .seconds(3))
         return true
     }
 

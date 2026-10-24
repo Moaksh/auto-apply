@@ -71,6 +71,14 @@ struct ColdEmailWindowShots {
             let refer = ColdEmailModel(store: store)
             refer.showPeople(.couldRefer)
             await shoot("people-could-refer", store: store, scheme: scheme) { ColdEmailView(modelOverride: refer) }
+            // Startups near you: a YC startup with fresh funding, and one funded in rupees.
+            for name in ["Patang AI", "Ledgerline"] {
+                let startups = ColdEmailModel(store: store)
+                startups.tab = .prospects
+                startups.selectedProspectID = o.activeProspects.first { $0.company == name }?.id
+                await shoot("startup-\(name.lowercased().replacingOccurrences(of: " ", with: "-"))", store: store, scheme: scheme,
+                            height: 1100) { ColdEmailView(modelOverride: startups) }
+            }
         }
         // Up next, focused on each kind of item.
         let focused: [(String, (ColdEmailModel) -> Void)] = [

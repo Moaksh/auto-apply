@@ -331,11 +331,23 @@ final class GRDBRepository: AppRepository {
                 JOIN companies c ON c.id = r.company_id LEFT JOIN jobs j ON j.id = r.job_id
                 ORDER BY r.state_updated_at DESC, r.id DESC LIMIT 2000
                 """).map(Self.referralItem)
+            // Schema v14 adds company facts and the startup score / rank; an older DB has neither.
+            let hasFacts = try db.tableExists("company_facts")
             out.prospects = try Row.fetchAll(db, sql: """
                 SELECT p.*, c.name AS company_name, c.domain AS company_domain, c.watch AS company_watch FROM prospects p
                 JOIN companies c ON c.id = p.company_id
-                ORDER BY p.status = 'dismissed', p.fit_score IS NULL, p.fit_score DESC, p.updated_at DESC LIMIT 1000
+                ORDER BY p.status = 'dismissed', \(hasFacts ? "COALESCE(p.rank_score, p.fit_score)" : "p.fit_score") IS NULL,
+                         \(hasFacts ? "COALESCE(p.rank_score, p.fit_score)" : "p.fit_score") DESC, p.updated_at DESC LIMIT 1000
                 """).map(Self.prospectItem)
+            if hasFacts {
+                var facts: [Int: CompanyFactsItem] = [:]
+                for row in try Row.fetchAll(db, sql: """
+                    SELECT f.* FROM company_facts f JOIN prospects p ON p.company_id = f.company_id
+                    """) {
+                    facts[row["company_id"]] = Self.companyFacts(row)
+                }
+                for i in out.prospects.indices { out.prospects[i].facts = facts[out.prospects[i].companyID] }
+            }
             let meta = try String.fetchOne(db, sql: "SELECT value FROM meta WHERE key = 'mail_account'")
             if case .object(let o) = DBJSON.decode(JSONValue.self, from: meta, default: .null) {
                 if case .string(let email)? = o["email"] { out.mailAccount.email = email }
@@ -446,7 +458,55 @@ final class GRDBRepository: AppRepository {
                 }
             }
         }
+        // Schema v14 (absent columns read as nil / []).
+        item.startupScore = row["startup_score"]
+        item.startupConfidence = row["startup_confidence"]
+        item.rankScore = row["rank_score"]
+        if case .array(let parts) = DBJSON.decode(JSONValue.self, from: row["startup_reasons"], default: .array([])) {
+            item.startupReasons = parts.compactMap { part in
+                guard case .object(let o) = part, case .string(let key)? = o["key"], case .string(let reason)? = o["reason"] else { return nil }
+                func int(_ v: JSONValue?) -> Int {
+                    switch v {
+                    case .int(let i)?: i
+                    case .double(let d)?: Int(d.rounded())
+                    default: 0
+                    }
+                }
+                var label = key.capitalized
+                if case .string(let l)? = o["label"] { label = l }
+                var known = true
+                if case .bool(let b)? = o["known"] { known = b }
+                return StartupScoreReason(key: key, label: label, points: int(o["points"]), max: int(o["max"]), reason: reason, known: known)
+            }
+        }
         return item
+    }
+
+    static func companyFacts(_ row: Row) -> CompanyFactsItem {
+        var f = CompanyFactsItem(
+            hqCity: row["hq_city"], hqCountry: row["hq_country"], ycBatch: row["yc_batch"], ycURL: row["yc_url"], ycStatus: row["yc_status"],
+            industry: row["industry"], lastRoundStage: (row["last_round_stage"] as String?).flatMap(FundingStage.init(rawValue:)),
+            lastRoundAmount: row["last_round_amount"], lastRoundCurrency: row["last_round_currency"], lastRoundUSD: row["last_round_usd"],
+            lastRoundDate: row["last_round_date"], totalRaisedUSD: row["total_raised_usd"],
+            investors: DBJSON.decode([String].self, from: row["investors"], default: []), teamSize: row["team_size"],
+            isHiring: (row["is_hiring"] as Int?).map { $0 == 1 }, openRoles: row["open_roles"])
+        if case .array(let people) = DBJSON.decode(JSONValue.self, from: row["founders"], default: .array([])) {
+            f.founders = people.compactMap { p in
+                guard case .object(let o) = p, case .string(let name)? = o["name"] else { return nil }
+                if case .string(let title)? = o["title"] { return .init(name: name, title: title) }
+                return .init(name: name, title: nil)
+            }
+        }
+        if case .object(let sources) = DBJSON.decode(JSONValue.self, from: row["sources"], default: .object([:])) {
+            for (key, value) in sources {
+                guard case .object(let o) = value else { continue }
+                var s = CompanyFactsItem.Source()
+                if case .string(let url)? = o["url"] { s.url = url }
+                if case .string(let quote)? = o["quote"] { s.quote = quote }
+                f.sources[key] = s
+            }
+        }
+        return f
     }
 
 

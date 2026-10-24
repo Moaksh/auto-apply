@@ -51,6 +51,7 @@ from autoapply.enums import (
     ErrorCode,
     EvidenceKind,
     Formality,
+    FundingStage,
     MessageState,
     MxProvider,
     OutreachKind,
@@ -769,7 +770,7 @@ class Referral(RowModel):
 
 
 class Prospect(RowModel):
-    _json_fields = frozenset({"fit_reasons"})
+    _json_fields = frozenset({"fit_reasons", "startup_reasons"})
 
     id: int
     company_id: int
@@ -784,6 +785,39 @@ class Prospect(RowModel):
     cooldown_until: Timestamp | None = None
     created_at: Timestamp
     updated_at: Timestamp
+    startup_score: int | None = None
+    startup_confidence: int | None = None
+    startup_reasons: list[dict[str, Any]] = Field(default_factory=list)
+    rank_score: int | None = None
+
+
+class CompanyFacts(RowModel):
+    """What public sources say about a company (schema v14). ``sources`` maps a fact name to
+    ``{url, quote?, observed_at}``; a fact without a source stays None."""
+
+    _json_fields = frozenset({"investors", "founders", "sources"})
+    _bool_fields = frozenset({"is_hiring"})
+
+    company_id: int
+    hq_city: str | None = None
+    hq_country: str | None = None
+    yc_batch: str | None = None
+    yc_url: str | None = None
+    yc_status: str | None = None
+    industry: str | None = None
+    last_round_stage: FundingStage | None = None
+    last_round_amount: float | None = None
+    last_round_currency: str | None = None
+    last_round_usd: float | None = None
+    last_round_date: str | None = None
+    total_raised_usd: float | None = None
+    investors: list[str] = Field(default_factory=list)
+    team_size: int | None = None
+    is_hiring: bool | None = None
+    open_roles: int | None = None
+    founders: list[dict[str, Any]] = Field(default_factory=list)
+    sources: dict[str, Any] = Field(default_factory=dict)
+    updated_at: Timestamp | None = None
 
 
 class FormQuestion(BaseModel):
@@ -1675,9 +1709,30 @@ class UpdateProspectPayload(_P):
                                                      "(its jobs and history stay); null/absent leaves it as it is.")
 
 
+class DiscoverStartupsPayload(_P):
+    """Startups near you: YC's public directory (right away) and regional funding news (Google
+    results, when the browser is free). Results land in ``prospects`` with ``company_facts``."""
+
+    location: str | None = Field(default=None, description="City and/or country, e.g. 'Bengaluru, India'. "
+                                                           "Default: your profile location.")
+    yc_only: bool = Field(default=False, description="Only YC's directory (no funding-news search on Google).")
+    hiring_only: bool = Field(default=False, description="Only companies listed as hiring.")
+    stages: list[FundingStage] = Field(default_factory=list, description="Funding news: keep only these last-round stages.")
+    limit: int = Field(default=25, ge=1, le=50, description="At most this many startups from YC's directory.")
+
+
+class ScoutTopProspectsPayload(_P):
+    """Find people at the best-ranked open prospects (one after another). Guardrails apply:
+    excluded, applied, cooling down, 2 people already or an email out -> skipped with the reason."""
+
+    limit: int = Field(default=5, ge=1, le=10)
+
+
 class SuggestReferrersPayload(_P):
     company_id: int
     job_id: int | None = None
+    location: str | None = Field(default=None, description="Also look for people at the company in this city "
+                                                           "(site:linkedin.com/in results only).")
 
 
 class AddReferralPayload(_P):
@@ -1810,6 +1865,8 @@ COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "search_prospects": SearchProspectsPayload,
     "add_prospect": AddProspectPayload,
     "update_prospect": UpdateProspectPayload,
+    "discover_startups": DiscoverStartupsPayload,
+    "scout_top_prospects": ScoutTopProspectsPayload,
     "suggest_referrers": SuggestReferrersPayload,
     "add_referral": AddReferralPayload,
     "draft_referral": DraftReferralPayload,

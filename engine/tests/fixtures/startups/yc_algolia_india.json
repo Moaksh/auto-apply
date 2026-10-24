@@ -1,0 +1,122 @@
+{
+ "results": [
+  {
+   "hits": [
+    {
+     "id": 34828,
+     "name": "Kailash Labs",
+     "slug": "kailash-labs",
+     "website": "https://www.kailashlabs.com/",
+     "all_locations": "Bengaluru, KA, India",
+     "one_liner": "A factory for small and specialized video reasoning models",
+     "team_size": 2,
+     "industry": "B2B",
+     "launched_at": 1789754590,
+     "tags": [
+      "Deep Learning",
+      "Edge Computing Semiconductors"
+     ],
+     "isHiring": false,
+     "batch": "Fall 2026",
+     "status": "Active",
+     "industries": [
+      "B2B",
+      "Analytics"
+     ],
+     "regions": [
+      "India",
+      "South Asia"
+     ],
+     "stage": "Early",
+     "objectID": "34828"
+    },
+    {
+     "id": 32948,
+     "name": "Waybill",
+     "slug": "waybill",
+     "website": "https://www.waybill.to/",
+     "all_locations": "Bengaluru, KA, India",
+     "one_liner": "Agentic procurement & inventory for deep tech teams.",
+     "team_size": 3,
+     "industry": "B2B",
+     "launched_at": 1786690936,
+     "tags": [
+      "Logistics",
+      "Procurement",
+      "AI"
+     ],
+     "isHiring": false,
+     "batch": "Summer 2026",
+     "status": "Active",
+     "industries": [
+      "B2B",
+      "Supply Chain and Logistics"
+     ],
+     "regions": [
+      "India",
+      "South Asia"
+     ],
+     "stage": "Early",
+     "objectID": "32948"
+    },
+    {
+     "id": 31423,
+     "name": "BentoLabs AI",
+     "slug": "bentolabs-ai",
+     "website": "https://bentolabs.ai/",
+     "all_locations": "Bengaluru, KA, India",
+     "one_liner": "Monitoring and learning layer for long-running agents",
+     "team_size": 5,
+     "industry": "B2B",
+     "launched_at": 1779852780,
+     "tags": [],
+     "isHiring": false,
+     "batch": "Spring 2026",
+     "status": "Active",
+     "industries": [
+      "B2B"
+     ],
+     "regions": [
+      "India",
+      "South Asia"
+     ],
+     "stage": "Early",
+     "objectID": "31423"
+    },
+    {
+     "id": 31424,
+     "name": "Lab0",
+     "slug": "lab0",
+     "website": "https://lab0.ai",
+     "all_locations": "Bengaluru, KA, India",
+     "one_liner": "AI FDEs to make your B2B SaaS Go Live in Days, not Months",
+     "team_size": 7,
+     "industry": "B2B",
+     "launched_at": 1775188246,
+     "tags": [
+      "SaaS",
+      "B2B",
+      "Enterprise",
+      "AI"
+     ],
+     "isHiring": true,
+     "batch": "Spring 2026",
+     "status": "Active",
+     "industries": [
+      "B2B"
+     ],
+     "regions": [
+      "India",
+      "South Asia"
+     ],
+     "stage": "Early",
+     "objectID": "31424"
+    }
+   ],
+   "nbHits": 159,
+   "page": 0,
+   "nbPages": 2,
+   "hitsPerPage": 4
+  }
+ ]
+}

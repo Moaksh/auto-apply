@@ -20,7 +20,7 @@ import logging
 import re
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -73,6 +73,30 @@ def queue_search(conn: sqlite3.Connection, query: str, location: str | None) -> 
     return sid
 
 
+def queue_startup_search(conn: sqlite3.Connection, place: dict[str, str | None], label: str, *, yc_only: bool, hiring_only: bool,
+                         stages: list[str], limit: int) -> str:
+    """A "startups near you" search: YC's directory now (HTTP), funding news on Google later."""
+    sid = new_id()
+    items = list(db.get_meta(conn, META_SEARCHES, []) or [])
+    items.append({"id": sid, "kind": "startups", "query": f"Startups in {label}", "location": label, "place": place,
+                  "yc_only": yc_only, "hiring_only": hiring_only, "stages": stages, "limit": limit,
+                  "status": "running", "created_at": now_ts(), "found": 0})
+    db.set_meta(conn, META_SEARCHES, items[-30:])
+    return sid
+
+
+def get_search(conn: sqlite3.Connection, sid: str) -> dict[str, Any] | None:
+    return next((s for s in (db.get_meta(conn, META_SEARCHES, []) or []) if s.get("id") == sid), None)
+
+
+def update_search(conn: sqlite3.Connection, sid: str, **fields: Any) -> None:
+    items = list(db.get_meta(conn, META_SEARCHES, []) or [])
+    for s in items:
+        if s.get("id") == sid:
+            s.update(fields)
+    db.set_meta(conn, META_SEARCHES, items)
+
+
 def pending_searches(conn: sqlite3.Connection) -> list[dict[str, Any]]:
     return [s for s in (db.get_meta(conn, META_SEARCHES, []) or []) if s.get("status") == "queued"]
 
@@ -81,7 +105,8 @@ def finish_search(conn: sqlite3.Connection, sid: str, status: str, found: int) -
     items = list(db.get_meta(conn, META_SEARCHES, []) or [])
     for s in items:
         if s.get("id") == sid:
-            s.update(status=status, found=found, finished_at=now_ts())
+            s.update(status=status, found=int(s.get("found") or 0) + found if s.get("kind") == "startups" else found,
+                     finished_at=now_ts())
     db.set_meta(conn, META_SEARCHES, items)
 
 
@@ -264,7 +289,7 @@ def upsert(conn: sqlite3.Connection, company_id: int, *, status: ProspectStatus 
                 "search_query, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (company_id, (status or ProspectStatus.SUGGESTED).value, fit_score, db._j(fit_reasons or {}), summary, summary_url,
                  matching_roles, found_via, search_query, ts, ts))
-            return get(conn, int(c.lastrowid))
+            return rescore(conn, company_id) or get(conn, int(c.lastrowid))
         if cur.status is ProspectStatus.DISMISSED and status is not ProspectStatus.SHORTLISTED:
             return None
         fields: dict[str, Any] = {"updated_at": ts}
@@ -278,7 +303,33 @@ def upsert(conn: sqlite3.Connection, company_id: int, *, status: ProspectStatus 
             fields["status"] = status.value
         sql, params = db._update_sql("prospects", fields, "id = ?")
         conn.execute(sql, [*params, cur.id])
-    return get(conn, cur.id)
+    return rescore(conn, company_id) or get(conn, cur.id)
+
+
+def rescore(conn: sqlite3.Connection, company_id: int, *, today: date | None = None) -> Prospect | None:
+    """Recompute the prospect's startup score and rank from ``company_facts`` and its fit
+    (``outreach/startup_score.py``). None when the company has no prospect row."""
+    from autoapply.outreach import facts, startup_score
+
+    p = get_by_company(conn, company_id)
+    if p is None:
+        return None
+    f = facts.get(conn, company_id)
+    s = startup_score.score_startup(f, matching_roles=p.matching_roles, today=today or utcnow().date())
+    rank = startup_score.rank(s, p.fit_score)
+    with db.transaction(conn):
+        conn.execute("UPDATE prospects SET startup_score = ?, startup_confidence = ?, startup_reasons = ?, rank_score = ? "
+                     "WHERE id = ?", (s.score if s.confidence else None, s.confidence, db._j(s.reasons() if s.confidence else []),
+                                      rank, p.id))
+    return get(conn, p.id)
+
+
+def ranked(conn: sqlite3.Connection, *, limit: int | None = None) -> list[Prospect]:
+    """Prospects still open (suggested / shortlisted), best rank first."""
+    rows = conn.execute(
+        "SELECT * FROM prospects WHERE status IN ('suggested','shortlisted') "
+        "ORDER BY rank_score IS NULL, rank_score DESC, fit_score IS NULL, fit_score DESC, id" + (f" LIMIT {int(limit)}" if limit else ""))
+    return [Prospect.from_row(r) for r in rows]  # type: ignore[misc]
 
 
 def set_status(conn: sqlite3.Connection, prospect_id: int, status: ProspectStatus) -> Prospect:
@@ -343,6 +394,6 @@ def seed_from_watchlist(conn: sqlite3.Connection, now: datetime | None = None) -
 
 __all__ = [
     "COOLDOWN_DAYS", "Enrichment", "FoundCompany", "blocked_reason", "enrich", "extract_companies", "fallback_queries",
-    "finish_search", "get", "get_by_company", "has_application", "pending_searches", "prospect_fit", "prospect_queries",
-    "queue_search", "seed_from_watchlist", "set_status", "start_cooldown", "upsert", "verify_companies",
+    "finish_search", "get", "get_by_company", "get_search", "queue_startup_search", "update_search", "has_application", "pending_searches", "prospect_fit", "prospect_queries",
+    "queue_search", "ranked", "rescore", "seed_from_watchlist", "set_status", "start_cooldown", "upsert", "verify_companies",
 ]

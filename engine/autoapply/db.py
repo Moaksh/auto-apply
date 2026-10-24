@@ -99,7 +99,7 @@ from autoapply.models import (
 )
 
 #: Must equal MAX(version) seeded by contract/schema.sql.
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 
 #: Forward migrations: version -> SQL to go from (version-1) to version. Append-only.
 #: Version 1 is the baseline created by contract/schema.sql itself.
@@ -177,6 +177,9 @@ CREATE INDEX IF NOT EXISTS ix_application_replies_suggestion ON application_repl
     # v13: new installs start in Review (``preferences.mode`` column default 'auto' -> 'review').
     # The stored row is copied as is, so existing users keep the mode they had.
     13: "python:_migrate_v13",
+    # v14: startups by location. ``company_facts`` (YC directory + funding news, every fact with
+    # its source), the startup score / rank on ``prospects``, and the ``same_city`` referral basis.
+    14: "python:_migrate_v14",
 }
 
 
@@ -527,6 +530,74 @@ def _migrate_v13(conn: sqlite3.Connection) -> None:
             conn.execute("DROP TABLE preferences")
             conn.execute("ALTER TABLE preferences_v13 RENAME TO preferences")
         conn.execute("INSERT INTO schema_version(version) VALUES (13)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
+
+
+_V14_PROSPECT_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("startup_score", "INTEGER CHECK (startup_score IS NULL OR startup_score BETWEEN 0 AND 100)"),
+    ("startup_confidence", "INTEGER CHECK (startup_confidence IS NULL OR startup_confidence BETWEEN 0 AND 100)"),
+    ("startup_reasons", "TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(startup_reasons))"),
+    ("rank_score", "INTEGER CHECK (rank_score IS NULL OR rank_score BETWEEN 0 AND 100)"),
+)
+
+_V14_FACTS_DDL = """
+CREATE TABLE IF NOT EXISTS company_facts (
+    company_id          INTEGER PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+    hq_city             TEXT,
+    hq_country          TEXT,
+    yc_batch            TEXT,
+    yc_url              TEXT,
+    yc_status           TEXT,
+    industry            TEXT,
+    last_round_stage    TEXT CHECK (last_round_stage IS NULL OR last_round_stage IN
+                          ('pre_seed','seed','series_a','series_b','series_c','series_d_plus','other')),
+    last_round_amount   REAL CHECK (last_round_amount IS NULL OR last_round_amount >= 0),
+    last_round_currency TEXT,
+    last_round_usd      REAL CHECK (last_round_usd IS NULL OR last_round_usd >= 0),
+    last_round_date     TEXT,
+    total_raised_usd    REAL CHECK (total_raised_usd IS NULL OR total_raised_usd >= 0),
+    investors           TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(investors)),
+    team_size           INTEGER CHECK (team_size IS NULL OR team_size >= 0),
+    is_hiring           INTEGER CHECK (is_hiring IS NULL OR is_hiring IN (0, 1)),
+    open_roles          INTEGER CHECK (open_roles IS NULL OR open_roles >= 0),
+    founders            TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(founders)),
+    sources             TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(sources)),
+    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+)
+"""
+
+_V14_BASIS_CHECK = re.compile(r"(basis\s+TEXT\s+NOT\s+NULL\s+CHECK\s*\(\s*basis\s+IN\s*\([^)]*?'other')\)")
+
+
+def _migrate_v14(conn: sqlite3.Connection) -> None:
+    """v14: ``company_facts``, the startup score columns on ``prospects`` and the ``same_city``
+    referral basis. SQLite cannot widen a CHECK in place, so ``referrals`` is rebuilt from its own
+    stored definition with every row copied (as v13 does for ``preferences``). Idempotent."""
+    conn.execute("BEGIN")
+    try:
+        conn.execute(_V14_FACTS_DDL)
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(prospects)")}
+        for name, definition in _V14_PROSPECT_COLUMNS:
+            if name not in cols:
+                conn.execute(f"ALTER TABLE prospects ADD COLUMN {name} {definition}")
+        sql = conn.execute("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'referrals'").fetchone()[0]
+        if "'same_city'" not in sql:
+            new_sql, n = _V14_BASIS_CHECK.subn(r"\1,'same_city')", sql, count=1)
+            if n != 1:
+                raise DBError("v14: could not find the referrals.basis CHECK to widen")
+            indexes = [r[0] for r in conn.execute(
+                "SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = 'referrals' AND sql IS NOT NULL")]
+            names = ", ".join(f'"{r[1]}"' for r in conn.execute("PRAGMA table_info(referrals)"))
+            conn.execute(re.sub(r"^CREATE TABLE\s+(IF NOT EXISTS\s+)?\"?referrals\"?", "CREATE TABLE referrals_v14", new_sql, count=1))
+            conn.execute(f"INSERT INTO referrals_v14 ({names}) SELECT {names} FROM referrals")
+            conn.execute("DROP TABLE referrals")
+            conn.execute("ALTER TABLE referrals_v14 RENAME TO referrals")
+            for ddl in indexes:
+                conn.execute(ddl)
+        conn.execute("INSERT INTO schema_version(version) VALUES (14)")
         conn.execute("COMMIT")
     except BaseException:
         conn.execute("ROLLBACK")

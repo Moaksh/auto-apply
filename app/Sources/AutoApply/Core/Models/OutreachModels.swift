@@ -279,6 +279,7 @@ struct ReferralItem: Identifiable, Sendable, Hashable {
         case .alumni: return detail.map { "Alumni · \($0)" } ?? "Alumni"
         case .exColleague: return detail.map { "Ex-colleague · \($0)" } ?? "Ex-colleague"
         case .sameFunction: return detail.map { "Same team · \($0)" } ?? "Same kind of role"
+        case .sameCity: return detail.map { "Same city · \($0)" } ?? "Same city"
         case .user: return "You know them"
         case .other: return detail ?? "Other"
         }
@@ -366,13 +367,170 @@ struct ProspectItem: Identifiable, Sendable, Hashable {
     var cooldownUntil: Date?
     var watched = false
     var createdAt: Date
+    /// What public sources say about the company (`company_facts`, schema v14).
+    var facts: CompanyFactsItem?
+    /// The deterministic startup score (0–100) and its parts (`prospects.startup_*`).
+    var startupScore: Int?
+    var startupConfidence: Int?
+    var startupReasons: [StartupScoreReason] = []
+    /// Startup score and fit together: the list order (`prospects.rank_score`).
+    var rankScore: Int?
+
+    /// The score the list shows and sorts by: the rank, else the fit.
+    var score: Int? { rankScore ?? fitScore }
 
     var foundViaLabel: String {
         switch foundVia {
         case "search": searchQuery.map { "Company search: “\($0)”" } ?? "Company search"
+        case "startups": searchQuery.map { "Startups near you: \($0)" } ?? "Startups near you"
         case "watchlist": "Your watched companies"
         case "user": "Added by you"
         default: foundVia?.capitalized ?? "—"
+        }
+    }
+
+    /// Key facts for a row, most telling first: "Seed · $4M · Aug 2026 · YC W24 · Bengaluru".
+    var factsLine: String? {
+        guard let f = facts else { return nil }
+        let parts = [f.roundLabel, f.amountLabel, f.roundDateLabel, f.ycLabel, f.hqCity].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+}
+
+/// One part of the startup score (`prospects.startup_reasons[]`): "Raised a $4M seed round 2 months ago".
+struct StartupScoreReason: Identifiable, Sendable, Hashable {
+    var key: String
+    var label: String
+    var points: Int
+    var max: Int
+    var reason: String
+    /// False when the input wasn't found: it scores 0 and lowers the confidence.
+    var known: Bool
+
+    var id: String { key }
+}
+
+/// What public sources say about a company (`company_facts`, schema v14). Every fact has its
+/// source in `sources`; one nobody published stays nil.
+struct CompanyFactsItem: Sendable, Hashable {
+    struct Source: Sendable, Hashable {
+        var url: String?
+        var quote: String?
+    }
+
+    struct Founder: Sendable, Hashable {
+        var name: String
+        var title: String?
+    }
+
+    var hqCity: String?
+    var hqCountry: String?
+    var ycBatch: String?
+    var ycURL: String?
+    var ycStatus: String?
+    var industry: String?
+    var lastRoundStage: FundingStage?
+    var lastRoundAmount: Double?
+    var lastRoundCurrency: String?
+    var lastRoundUSD: Double?
+    /// YYYY-MM-DD: the announcement's date.
+    var lastRoundDate: String?
+    var totalRaisedUSD: Double?
+    var investors: [String] = []
+    var teamSize: Int?
+    var isHiring: Bool?
+    var openRoles: Int?
+    var founders: [Founder] = []
+    /// Fact name (`last_round_amount`, `yc_batch`, …) → where it was published.
+    var sources: [String: Source] = [:]
+
+    var ycLabel: String? { ycBatch.map { "YC \($0)" } }
+    var roundLabel: String? { lastRoundStage?.label }
+
+    /// "$4M", "₹35 crore"; nil when no amount was published.
+    var amountLabel: String? { Self.money(lastRoundAmount, currency: lastRoundCurrency) }
+
+    /// "≈ $4.2M" for an amount in another currency.
+    var usdNote: String? {
+        guard let usd = lastRoundUSD, (lastRoundCurrency ?? "USD").uppercased() != "USD" else { return nil }
+        return "≈ " + (Self.money(usd, currency: "USD") ?? "")
+    }
+
+    var roundDate: Date? {
+        guard let s = lastRoundDate else { return nil }
+        let f = DateFormatter()
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone(identifier: "UTC")
+        f.dateFormat = "yyyy-MM-dd"
+        return f.date(from: String(s.prefix(10)))
+    }
+
+    /// "Aug 2026".
+    var roundDateLabel: String? {
+        roundDate.map { $0.formatted(.dateTime.month(.abbreviated).year().locale(Locale(identifier: "en_US"))) }
+    }
+
+    var place: String? {
+        let parts = [hqCity, hqCountry].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: ", ")
+    }
+
+    /// Distinct source links, each with the facts it backs (in a stable order).
+    var sourceLinks: [(url: String, quote: String?, facts: [String])] {
+        var order: [String] = []
+        var byURL: [String: (quote: String?, facts: [String])] = [:]
+        for key in sources.keys.sorted() {
+            guard let s = sources[key], let url = s.url, !url.isEmpty else { continue }
+            if byURL[url] == nil { order.append(url); byURL[url] = (s.quote, []) }
+            byURL[url]?.facts.append(Self.factName(key))
+            if byURL[url]?.quote == nil { byURL[url]?.quote = s.quote }
+        }
+        return order.map { (url: $0, quote: byURL[$0]?.quote, facts: Array(Set(byURL[$0]?.facts ?? [])).sorted()) }
+    }
+
+    static func factName(_ key: String) -> String {
+        switch key {
+        case "last_round_stage", "last_round_amount", "last_round_currency", "last_round_usd", "last_round_date": "Last round"
+        case "investors": "Investors"
+        case "yc_batch", "yc_url", "yc_status": "YC batch"
+        case "hq_city", "hq_country": "Location"
+        case "team_size": "Team size"
+        case "is_hiring", "open_roles": "Open roles"
+        case "founders": "Founders"
+        case "industry": "Industry"
+        case "total_raised_usd": "Total raised"
+        default: key.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    static func money(_ amount: Double?, currency: String?) -> String? {
+        guard let amount, amount > 0 else { return nil }
+        func short(_ v: Double) -> String {
+            let s = String(format: "%.1f", v)
+            return s.hasSuffix(".0") ? String(s.dropLast(2)) : s
+        }
+        switch (currency ?? "USD").uppercased() {
+        case "INR":
+            return amount >= 1e7 ? "₹\(short(amount / 1e7)) crore" : "₹\(short(amount / 1e5)) lakh"
+        case let code:
+            let symbol = ["USD": "$", "EUR": "€", "GBP": "£"][code]
+            let (value, unit): (Double, String) = amount >= 1e9 ? (amount / 1e9, "B") : amount >= 1e6 ? (amount / 1e6, "M")
+                : (amount / 1e3, "K")
+            return symbol.map { "\($0)\(short(value))\(unit)" } ?? "\(short(value))\(unit) \(code)"
+        }
+    }
+}
+
+extension FundingStage {
+    var label: String {
+        switch self {
+        case .preSeed: "Pre-seed"
+        case .seed: "Seed"
+        case .seriesA: "Series A"
+        case .seriesB: "Series B"
+        case .seriesC: "Series C"
+        case .seriesDPlus: "Series D+"
+        case .other: "Other round"
         }
     }
 }

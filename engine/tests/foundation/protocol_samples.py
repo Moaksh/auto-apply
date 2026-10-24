@@ -198,7 +198,12 @@ def samples() -> list[Envelope]:
     c("add_prospect", {"company_name": "Acme", "url": "https://acme.com"})
     c("update_prospect", {"id": 2, "status": "shortlisted", "watch": True})
     c("update_prospect", {"id": 2, "watch": False})
+    c("discover_startups", {"location": "Bengaluru, India", "yc_only": False, "hiring_only": True, "stages": ["seed", "series_a"],
+                            "limit": 25})
+    c("discover_startups", {"location": "India", "yc_only": True, "hiring_only": False, "stages": [], "limit": 10})
+    c("scout_top_prospects", {"limit": 5})
     c("suggest_referrers", {"company_id": 1, "job_id": 11})
+    c("suggest_referrers", {"company_id": 2, "location": "Bengaluru"})
     c("add_referral", {"contact_id": 5, "basis": "alumni", "basis_detail": "IIT Madras"})
     c("draft_referral", {"id": 4})
     c("update_referral", {"id": 4, "state": "requested"})

@@ -131,10 +131,20 @@ PURPOSE_ORDER: dict[ScoutPurpose, tuple[RoleCategory, ...]] = {
 }
 
 
-def rank_key(c: Contact, purpose: ScoutPurpose, *, from_posting: bool = False) -> tuple:
+#: At a small startup (``SMALL_TEAM`` people or fewer) the founders and the CTO do the hiring:
+#: write to them first when reaching out without an application.
+SMALL_TEAM = 50
+SMALL_STARTUP_ORDER: tuple[RoleCategory, ...] = (
+    RoleCategory.FOUNDER, RoleCategory.ENG_LEADER, RoleCategory.HIRING_MANAGER, RoleCategory.RECRUITER,
+    RoleCategory.TALENT_LEAD, RoleCategory.ENGINEER, RoleCategory.ROLE_MAILBOX, RoleCategory.OTHER)
+
+
+def rank_key(c: Contact, purpose: ScoutPurpose, *, from_posting: bool = False, small_team: bool = False) -> tuple:
     """Sort key (ascending = best first): a recruiter named in the posting beats everyone for
-    applications; then role order for the purpose, role fit, email confidence."""
-    order = PURPOSE_ORDER[ScoutPurpose(purpose)]
+    applications; then role order for the purpose (founders first at a small startup when
+    prospecting), role fit, email confidence."""
+    small = small_team and ScoutPurpose(purpose) is ScoutPurpose.PROSPECT
+    order = SMALL_STARTUP_ORDER if small else PURPOSE_ORDER[ScoutPurpose(purpose)]
     cat = order.index(c.role_category) if c.role_category in order else len(order)
     posting = 0 if (from_posting and purpose is ScoutPurpose.APPLICATION) else 1
     return (posting, cat, -(c.role_fit if c.role_fit is not None else 50), -c.email_confidence, c.id)

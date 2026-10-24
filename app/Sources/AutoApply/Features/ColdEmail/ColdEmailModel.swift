@@ -41,6 +41,43 @@ enum PeopleFilter: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// Companies ▸ how to find them: startups in a place (YC's directory + funding news), or a typed search.
+enum ProspectFinder: String, CaseIterable, Identifiable, Sendable {
+    case startups, search
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .startups: "Startups near you"
+        case .search: "Search"
+        }
+    }
+}
+
+/// Companies ▸ Startups near you ▸ the last round to keep.
+enum StartupStageFilter: String, CaseIterable, Identifiable, Sendable {
+    case any, early, seriesA, later
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .any: "Any stage"
+        case .early: "Pre-seed or seed"
+        case .seriesA: "Series A"
+        case .later: "Series B or later"
+        }
+    }
+
+    var stages: [FundingStage] {
+        switch self {
+        case .any: []
+        case .early: [.preSeed, .seed]
+        case .seriesA: [.seriesA]
+        case .later: [.seriesB, .seriesC, .seriesDPlus]
+        }
+    }
+}
+
 /// Whether the outreach data is readable yet.
 enum ColdEmailPhase: Equatable, Sendable {
     case loading
@@ -101,10 +138,19 @@ final class ColdEmailModel {
     private(set) var enableState: EnableState = .idle
 
     // Prospects
+    var prospectFinder: ProspectFinder = .startups
     var prospectQuery = ""
     var prospectLocation = ""
     var newProspect = ""
     var selectedProspectID: Int?
+    /// Startups near you: the place (prefilled from your profile), and filters that shape the next
+    /// search and the list.
+    var startupLocation = ""
+    var startupsYCOnly = false
+    var startupsHiringOnly = false
+    var startupStage: StartupStageFilter = .any
+    /// "Find people at the top N".
+    static let topN = 5
 
     // Contacts
     var contactSearch = ""
@@ -437,10 +483,47 @@ final class ColdEmailModel {
 
     // MARK: Prospects
 
-    var selectedProspect: ProspectItem? { outreach.prospect(id: selectedProspectID) ?? outreach.activeProspects.first }
+    var selectedProspect: ProspectItem? { outreach.prospect(id: selectedProspectID) ?? visibleProspects.first }
+
+    /// Your own location: the profile's, else the first preferred place that isn't "Remote".
+    var homeLocation: String? {
+        if let loc = store.library.profile.location.c3Trimmed { return loc }
+        return store.preferences.locations.first { !$0.lowercased().contains("remote") }.c3Trimmed
+    }
+
+    /// Your city (the part before the first comma of your location), for "people near you".
+    var homeCity: String? {
+        homeLocation.flatMap { $0.split(separator: ",").first.map { String($0).trimmingCharacters(in: .whitespaces) } }.c3Trimmed
+    }
+
+    /// The prospects list: best score first; with Startups near you, the filters apply.
+    var visibleProspects: [ProspectItem] {
+        let all = outreach.activeProspects
+        guard prospectFinder == .startups else { return all }
+        return all.filter { p in
+            if startupsYCOnly && p.facts?.ycBatch == nil { return false }
+            if startupsHiringOnly && !(p.facts?.isHiring == true || (p.matchingRoles ?? 0) > 0) { return false }
+            if startupStage != .any && !startupStage.stages.contains(where: { $0 == p.facts?.lastRoundStage }) { return false }
+            return true
+        }
+    }
+
+    /// Fill the place from your profile the first time the finder shows.
+    func prefillStartupLocation() {
+        if startupLocation.trimmingCharacters(in: .whitespaces).isEmpty, let home = homeLocation { startupLocation = home }
+    }
 
     func search() async {
         guard await store.searchProspects(query: prospectQuery, location: prospectLocation) else { return }
+    }
+
+    func discoverStartups() async {
+        await store.discoverStartups(location: startupLocation.nonEmptyTrimmed ?? homeLocation, ycOnly: startupsYCOnly,
+                                     hiringOnly: startupsHiringOnly, stages: startupStage.stages)
+    }
+
+    func findPeopleAtTop() async {
+        await store.scoutTopProspects(limit: Self.topN)
     }
 
     func addProspect() async {

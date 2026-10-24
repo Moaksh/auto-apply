@@ -243,6 +243,16 @@ enum Formality: String, Codable, Sendable, CaseIterable, Hashable {
     case formal
 }
 
+enum FundingStage: String, Codable, Sendable, CaseIterable, Hashable {
+    case preSeed = "pre_seed"
+    case seed
+    case seriesA = "series_a"
+    case seriesB = "series_b"
+    case seriesC = "series_c"
+    case seriesDPlus = "series_d_plus"
+    case other
+}
+
 enum JobSource: String, Codable, Sendable, CaseIterable, Hashable {
     case greenhouse
     case lever
@@ -293,6 +303,7 @@ enum ReferralBasis: String, Codable, Sendable, CaseIterable, Hashable {
     case sameFunction = "same_function"
     case user
     case other
+    case sameCity = "same_city"
 }
 
 enum ReferralState: String, Codable, Sendable, CaseIterable, Hashable {
@@ -1288,6 +1299,35 @@ extension DiscardOutreachPayload {
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         threadId = try c.decode(Int.self, forKey: .threadId)
+    }
+}
+
+/// Startups near you: YC's public directory (right away) and regional funding news (Google
+/// results, when the browser is free). Results land in ``prospects`` with ``company_facts``.
+struct DiscoverStartupsPayload: Codable, Sendable, Hashable {
+    var location: String? = nil
+    var ycOnly: Bool = false
+    var hiringOnly: Bool = false
+    var stages: [FundingStage] = []
+    var limit: Int = 25
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case location
+        case ycOnly = "yc_only"
+        case hiringOnly = "hiring_only"
+        case stages
+        case limit
+    }
+}
+
+extension DiscoverStartupsPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        location = try c.decodeIfPresent(String.self, forKey: .location)
+        ycOnly = try c.decodeIfPresent(Bool.self, forKey: .ycOnly) ?? false
+        hiringOnly = try c.decodeIfPresent(Bool.self, forKey: .hiringOnly) ?? false
+        stages = try c.decodeIfPresent([FundingStage].self, forKey: .stages) ?? []
+        limit = try c.decodeIfPresent(Int.self, forKey: .limit) ?? 25
     }
 }
 
@@ -3259,6 +3299,23 @@ extension ScoutFinishedPayload {
     }
 }
 
+/// Find people at the best-ranked open prospects (one after another). Guardrails apply:
+/// excluded, applied, cooling down, 2 people already or an email out -> skipped with the reason.
+struct ScoutTopProspectsPayload: Codable, Sendable, Hashable {
+    var limit: Int = 5
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case limit
+    }
+}
+
+extension ScoutTopProspectsPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        limit = try c.decodeIfPresent(Int.self, forKey: .limit) ?? 5
+    }
+}
+
 struct SearchProspectsPayload: Codable, Sendable, Hashable {
     var query: String
     var location: String? = nil
@@ -3623,10 +3680,12 @@ extension SuggestPreferencesPayload {
 struct SuggestReferrersPayload: Codable, Sendable, Hashable {
     var companyId: Int
     var jobId: Int? = nil
+    var location: String? = nil
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case companyId = "company_id"
         case jobId = "job_id"
+        case location
     }
 }
 
@@ -3635,6 +3694,7 @@ extension SuggestReferrersPayload {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         companyId = try c.decode(Int.self, forKey: .companyId)
         jobId = try c.decodeIfPresent(Int.self, forKey: .jobId)
+        location = try c.decodeIfPresent(String.self, forKey: .location)
     }
 }
 
@@ -4389,6 +4449,8 @@ enum Command: Sendable, Hashable {
     case searchProspects(SearchProspectsPayload)
     case addProspect(AddProspectPayload)
     case updateProspect(UpdateProspectPayload)
+    case discoverStartups(DiscoverStartupsPayload)
+    case scoutTopProspects(ScoutTopProspectsPayload)
     case suggestReferrers(SuggestReferrersPayload)
     case addReferral(AddReferralPayload)
     case draftReferral(DraftReferralPayload)
@@ -4482,6 +4544,8 @@ enum Command: Sendable, Hashable {
         case .searchProspects: "search_prospects"
         case .addProspect: "add_prospect"
         case .updateProspect: "update_prospect"
+        case .discoverStartups: "discover_startups"
+        case .scoutTopProspects: "scout_top_prospects"
         case .suggestReferrers: "suggest_referrers"
         case .addReferral: "add_referral"
         case .draftReferral: "draft_referral"
@@ -4575,6 +4639,8 @@ enum Command: Sendable, Hashable {
         "search_prospects",
         "add_prospect",
         "update_prospect",
+        "discover_startups",
+        "scout_top_prospects",
         "suggest_referrers",
         "add_referral",
         "draft_referral",
@@ -4774,6 +4840,8 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case "search_prospects": command = .searchProspects(try c.decode(SearchProspectsPayload.self, forKey: .payload))
         case "add_prospect": command = .addProspect(try c.decode(AddProspectPayload.self, forKey: .payload))
         case "update_prospect": command = .updateProspect(try c.decode(UpdateProspectPayload.self, forKey: .payload))
+        case "discover_startups": command = .discoverStartups(try c.decode(DiscoverStartupsPayload.self, forKey: .payload))
+        case "scout_top_prospects": command = .scoutTopProspects(try c.decode(ScoutTopProspectsPayload.self, forKey: .payload))
         case "suggest_referrers": command = .suggestReferrers(try c.decode(SuggestReferrersPayload.self, forKey: .payload))
         case "add_referral": command = .addReferral(try c.decode(AddReferralPayload.self, forKey: .payload))
         case "draft_referral": command = .draftReferral(try c.decode(DraftReferralPayload.self, forKey: .payload))
@@ -4874,6 +4942,8 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case .searchProspects(let p): try c.encode(p, forKey: .payload)
         case .addProspect(let p): try c.encode(p, forKey: .payload)
         case .updateProspect(let p): try c.encode(p, forKey: .payload)
+        case .discoverStartups(let p): try c.encode(p, forKey: .payload)
+        case .scoutTopProspects(let p): try c.encode(p, forKey: .payload)
         case .suggestReferrers(let p): try c.encode(p, forKey: .payload)
         case .addReferral(let p): try c.encode(p, forKey: .payload)
         case .draftReferral(let p): try c.encode(p, forKey: .payload)

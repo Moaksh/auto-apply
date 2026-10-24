@@ -389,6 +389,8 @@ class ReferralBasis(StrEnum):
     SAME_FUNCTION = "same_function"
     USER = "user"
     OTHER = "other"
+    #: Works at the company in the user's own city (schema v14).
+    SAME_CITY = "same_city"
 
 
 class ProspectStatus(StrEnum):
@@ -396,6 +398,18 @@ class ProspectStatus(StrEnum):
     SHORTLISTED = "shortlisted"
     CONTACTED = "contacted"
     DISMISSED = "dismissed"
+
+
+class FundingStage(StrEnum):
+    """A startup's last priced round, normalised from funding news (schema v14 ``company_facts``)."""
+
+    PRE_SEED = "pre_seed"
+    SEED = "seed"
+    SERIES_A = "series_a"
+    SERIES_B = "series_b"
+    SERIES_C = "series_c"
+    SERIES_D_PLUS = "series_d_plus"
+    OTHER = "other"
 
 
 class MxProvider(StrEnum):

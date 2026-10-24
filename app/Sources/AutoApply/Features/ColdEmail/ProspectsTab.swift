@@ -1,8 +1,11 @@
 // ProspectsTab.swift — Cold Email ▸ Companies (prospects, plan §A.2–A.3): companies to reach out to without
-// an application. Search ("Series B fintech in Bangalore") runs on Google when the browser is
-// free; results come back scored for fit. Shortlist finds people, Watch adds the company to the
-// job watchlist, Dismiss hides it for good. The detail pane shows the company summary with its
-// source link, the fit reasons and the people found there. Search is the tab's one primary action.
+// an application. Two ways to find them: Startups near you (YC's public directory right away, regional
+// funding news from Google results when the browser is free; place prefilled from your profile) or a
+// typed search ("Series B fintech in Bangalore"). Rows are ranked by the startup score and your fit and
+// print the key facts (round, amount, date, YC batch, city). The detail pane shows what they do, the
+// Funding & signals breakdown with every source, why it fits, the people found there and people who
+// could refer you (your LinkedIn connections first, then people in your city). Find startups / Search
+// is the tab's one primary action; Find people at the top 5 is a link.
 import SwiftUI
 
 struct ProspectsTab: View {
@@ -13,8 +16,9 @@ struct ProspectsTab: View {
     var body: some View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
-                searchBar
+                finder
                 Divider()
+                listHeader
                 list
             }
             .frame(width: 420)
@@ -22,21 +26,20 @@ struct ProspectsTab: View {
             detail
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+        .onAppear { model.prefillStartupLocation() }
     }
 
-    private var searchBar: some View {
+    private var finder: some View {
         VStack(alignment: .leading, spacing: Space.s) {
-            TextField("Companies to look for, e.g. developer tools startups", text: $model.prospectQuery)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit { Task { await model.search() } }
-            HStack(spacing: Space.s) {
-                TextField("Location (optional)", text: $model.prospectLocation)
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit { Task { await model.search() } }
-                Button("Search") { Task { await model.search() } }
-                    .buttonStyle(.primaryPill)
-                    .disabled(model.prospectQuery.trimmingCharacters(in: .whitespaces).isEmpty || !store.isConnected)
-                    .help("Searches Google at a human pace when the browser is free (\(store.preferences.peopleFinderVisitsPerDay) result pages a day)")
+            Picker("Find", selection: $model.prospectFinder) {
+                ForEach(ProspectFinder.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            switch model.prospectFinder {
+            case .startups: startupsFinder
+            case .search: searchFinder
             }
             HStack(spacing: Space.s) {
                 TextField("Add a company by name or website", text: $model.newProspect)
@@ -50,12 +53,77 @@ struct ProspectsTab: View {
         .padding(Space.l)
     }
 
+    private var startupsFinder: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            HStack(spacing: Space.s) {
+                TextField("City and country, e.g. Bengaluru, India", text: $model.startupLocation)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { Task { await model.discoverStartups() } }
+                Button("Find startups") { Task { await model.discoverStartups() } }
+                    .buttonStyle(.primaryPill)
+                    .disabled((model.startupLocation.nonEmptyTrimmed ?? model.homeLocation) == nil || !store.isConnected)
+                    .help("I read YC's public directory now, and funding news from Google results when the browser is free")
+            }
+            HStack(spacing: Space.m) {
+                Toggle("YC only", isOn: $model.startupsYCOnly).toggleStyle(.checkbox)
+                    .help("Only YC's directory; no funding-news search")
+                Toggle("Hiring now", isOn: $model.startupsHiringOnly).toggleStyle(.checkbox)
+                Picker("Stage", selection: $model.startupStage) {
+                    ForEach(StartupStageFilter.allCases) { Text($0.title).tag($0) }
+                }
+                .labelsHidden()
+                .fixedSize()
+            }
+            .font(Typography.callout)
+            Text("I rank them by fresh funding, stage, investors, YC, team size and roles that match yours. Nothing is sent.")
+                .font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var searchFinder: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            TextField("Companies to look for, e.g. developer tools startups", text: $model.prospectQuery)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit { Task { await model.search() } }
+            HStack(spacing: Space.s) {
+                TextField("Location (optional)", text: $model.prospectLocation)
+                    .textFieldStyle(.roundedBorder)
+                    .onSubmit { Task { await model.search() } }
+                Button("Search") { Task { await model.search() } }
+                    .buttonStyle(.primaryPill)
+                    .disabled(model.prospectQuery.trimmingCharacters(in: .whitespaces).isEmpty || !store.isConnected)
+                    .help("Searches Google at a human pace when the browser is free (\(store.preferences.peopleFinderVisitsPerDay) result pages a day)")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var listHeader: some View {
+        let prospects = model.visibleProspects
+        if !prospects.isEmpty {
+            HStack(spacing: Space.s) {
+                Text(C3Format.plural(prospects.count, "company", "companies") + " · best first")
+                    .font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                Spacer()
+                Button("Find people at the top \(ColdEmailModel.topN)") { Task { await model.findPeopleAtTop() } }
+                    .buttonStyle(.secondaryLink)
+                    .disabled(!store.isConnected)
+                    .help("I look for founders, engineering leads and recruiters at the \(ColdEmailModel.topN) best-ranked companies, one after another. Companies you applied to, excluded, cooling down or already being emailed are skipped.")
+            }
+            .padding(.horizontal, Space.l)
+            .padding(.vertical, Space.s)
+        }
+    }
+
     @ViewBuilder
     private var list: some View {
-        let prospects = store.outreach.activeProspects
+        let prospects = model.visibleProspects
         if prospects.isEmpty {
-            EmptyState(symbol: "building.2", title: "No prospects yet",
-                       message: "Search for companies you'd like to work at, or add one. I read their site and score the fit. Nothing is sent.")
+            EmptyState(symbol: "building.2", title: store.outreach.activeProspects.isEmpty ? "No companies yet" : "None match these filters",
+                       message: store.outreach.activeProspects.isEmpty
+                        ? "Find startups near you or search for companies you'd like to work at. I read their pages and score them. Nothing is sent."
+                        : "Clear YC only, Hiring now or the stage to see the rest.")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView {
@@ -104,11 +172,14 @@ private struct ProspectRow: View {
                     if prospect.status != .suggested { Badge(prospect.status.label, tone: prospect.status == .shortlisted ? .accent : .neutral) }
                     if prospect.watched { Image(systemName: "eye").imageScale(.small).foregroundStyle(Palette.textSecondary).help("On your watch list") }
                 }
+                if let line = prospect.factsLine {
+                    Text(line).font(Typography.monoSmall).foregroundStyle(Palette.textSecondary).lineLimit(1)
+                }
                 Text(prospect.fitSummary ?? prospect.summary ?? prospect.foundViaLabel)
                     .font(Typography.callout).foregroundStyle(Palette.textSecondary).lineLimit(2)
             }
             Spacer(minLength: 0)
-            if let score = prospect.fitScore { Badge(score: score) }
+            if let score = prospect.score { Badge(score: score) }
         }
         .selectableRow(isSelected: isSelected)
         .accessibilityElement(children: .combine)
@@ -132,7 +203,7 @@ private struct ProspectDetail: View {
                     if let domain = prospect.domain { Text(domain).font(Typography.mono).foregroundStyle(Palette.textSecondary) }
                 }
                 Spacer()
-                if let score = prospect.fitScore { Badge(score: score) }
+                if let score = prospect.score { Badge(score: score) }
             }
             HStack(spacing: Space.l) {
                 if prospect.status != .shortlisted && prospect.status != .contacted {
@@ -159,6 +230,9 @@ private struct ProspectDetail: View {
                         Link("Source: \(prospect.summaryURL ?? "")", destination: url).font(Typography.callout).lineLimit(1).truncationMode(.middle)
                     }
                 }
+            }
+            if prospect.facts != nil || !prospect.startupReasons.isEmpty {
+                FundingSignals(prospect: prospect)
             }
             VStack(alignment: .leading, spacing: Space.xs) {
                 SectionHeader("Why it fits")
@@ -189,7 +263,9 @@ private struct ProspectDetail: View {
                     }
                 }
                 if contacts.isEmpty {
-                    Text("No one found yet. Shortlist or Find people to look on their site, GitHub and Google results.")
+                    Text(isSmallTeam
+                         ? "No one found yet. At a team this small I write to a founder or the CTO first; Find people looks on their site, YC's page, GitHub and Google results."
+                         : "No one found yet. Shortlist or Find people to look on their site, GitHub and Google results.")
                         .font(Typography.callout).foregroundStyle(Palette.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -216,14 +292,136 @@ private struct ProspectDetail: View {
                     .padding(.vertical, Space.xxs)
                 }
             }
+            LocalReferrals(prospect: prospect, model: model)
         }
     }
+
+    private var isSmallTeam: Bool { (prospect.facts?.teamSize ?? .max) <= 50 }
 
     private func act(_ op: @escaping () async -> Bool) {
         busy = true
         Task {
             _ = await op()
             busy = false
+        }
+    }
+}
+
+/// Funding & signals: the printed facts, the startup score's parts, and every source.
+private struct FundingSignals: View {
+    var prospect: ProspectItem
+
+    private var fields: [(label: String, value: String)] {
+        guard let f = prospect.facts else { return [] }
+        var out: [(String, String)] = []
+        if let r = f.roundLabel { out.append(("Round", r)) }
+        if let a = f.amountLabel { out.append(("Amount", a)) }
+        if let d = f.roundDateLabel { out.append(("Date", d)) }
+        if let y = f.ycBatch { out.append(("YC", y)) }
+        if let t = f.teamSize { out.append(("Team", "\(t)")) }
+        if let c = f.hqCity ?? f.hqCountry { out.append(("HQ", c)) }
+        return out
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            SectionHeader("Funding & signals")
+            if !fields.isEmpty {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: Space.l, alignment: .leading)], alignment: .leading,
+                          spacing: Space.m) {
+                    ForEach(fields, id: \.label) { TicketField(label: $0.label, value: $0.value) }
+                }
+            }
+            if let note = prospect.facts?.usdNote {
+                Text("\(note) at a fixed rate, for ranking").font(Typography.callout).foregroundStyle(Palette.textSecondary)
+            }
+            if let score = prospect.startupScore {
+                HStack(spacing: Space.s) {
+                    TicketField(label: "Startup score", value: "\(score)", tint: Palette.accent, axis: .horizontal)
+                    if let confidence = prospect.startupConfidence {
+                        Text("· I know \(confidence)% of what it weighs")
+                            .font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                    }
+                }
+            }
+            ForEach(prospect.startupReasons) { r in
+                HStack(alignment: .firstTextBaseline, spacing: Space.s) {
+                    Image(systemName: r.known ? "checkmark.circle" : "questionmark.circle")
+                        .imageScale(.small).foregroundStyle(r.known ? Palette.accent : Palette.textSecondary)
+                    Text(r.reason).font(Typography.callout)
+                        .foregroundStyle(r.known ? Palette.textPrimary : Palette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: Space.s)
+                    Text("\(r.points)/\(r.max)").font(Typography.monoSmall).foregroundStyle(Palette.textSecondary)
+                }
+                .accessibilityElement(children: .combine)
+            }
+            if let f = prospect.facts {
+                if !f.investors.isEmpty { ColdEmailFact("Investors", f.investors.joined(separator: ", ")) }
+                if !f.founders.isEmpty {
+                    ColdEmailFact("Founders", f.founders.map { [$0.name, $0.title].compactMap { $0 }.joined(separator: ", ") }.joined(separator: " · "))
+                }
+                ForEach(f.sourceLinks, id: \.url) { s in
+                    VStack(alignment: .leading, spacing: Space.xxs) {
+                        if let url = URL(string: s.url) {
+                            Link("\(s.facts.joined(separator: ", ")): \(url.host() ?? s.url)", destination: url)
+                                .font(Typography.callout).lineLimit(1).truncationMode(.middle)
+                        }
+                        if let quote = s.quote {
+                            Text("“\(quote)”").font(Typography.callout).foregroundStyle(Palette.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true).textSelection(.enabled)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// People who could refer you at this company: your LinkedIn connections first, then people in your city.
+private struct LocalReferrals: View {
+    var prospect: ProspectItem
+    var model: ColdEmailModel
+    @Environment(AppStore.self) private var store
+    @State private var busy = false
+
+    var body: some View {
+        let refs = store.outreach.referrals(companyID: prospect.companyID)
+        let city = model.homeCity
+        VStack(alignment: .leading, spacing: Space.xs) {
+            SectionHeader("Could refer you") {
+                Button(city.map { "Find people in \($0)" } ?? "Find people who could refer you") {
+                    busy = true
+                    Task {
+                        await store.suggestReferrers(companyID: prospect.companyID, location: city)
+                        busy = false
+                    }
+                }
+                .buttonStyle(.secondaryLink)
+                .disabled(busy || !store.isConnected)
+                .help("I read Google results for people at \(prospect.company)\(city.map { " in \($0)" } ?? "") and check your imported LinkedIn connections. LinkedIn itself is never opened.")
+            }
+            if refs.isEmpty {
+                Text("No one yet. Your LinkedIn connections who work here show up first.")
+                    .font(Typography.callout).foregroundStyle(Palette.textSecondary)
+            }
+            ForEach(refs.prefix(8)) { r in
+                HStack(spacing: Space.s) {
+                    Text([r.personName, r.title].compactMap { $0 }.joined(separator: ", ")).font(Typography.callout).lineLimit(1)
+                    if r.basis == .user {
+                        Badge("Your connection", symbol: "person.crop.circle.badge.checkmark", tone: .accent)
+                    } else {
+                        Badge(r.basisLabel)
+                    }
+                    Spacer()
+                    Badge(r.state.label)
+                }
+                .padding(.vertical, Space.xxs)
+            }
+            if refs.count > 8 {
+                Button("See all in People ▸ Could refer you") { model.showPeople(.couldRefer) }
+                    .buttonStyle(.secondaryLink)
+            }
         }
     }
 }

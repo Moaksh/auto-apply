@@ -33,6 +33,8 @@ log = logging.getLogger("autoapply.outreach.referrals")
 ASK_AFTER_DAYS = 2
 NO_RESPONSE_AFTER_DAYS = 14
 MAX_QUERIES = 4
+#: With ``local`` the city query comes first and one more query is allowed.
+MAX_LOCAL_QUERIES = 5
 #: Suggested connection requests per day (advice shown in the UI, not enforced automation).
 SUGGESTED_DAILY_REQUESTS = 5
 
@@ -142,9 +144,14 @@ class ReferrerQuery:
     detail: str  # the school / employer / function text that must appear in the result
 
 
-def referrer_queries(profile: Profile, company: str, *, function: str | None = None, city: str | None = None) -> list[ReferrerQuery]:
-    """Queries from the user's own profile, most promising first (employer, school, function)."""
+def referrer_queries(profile: Profile, company: str, *, function: str | None = None, city: str | None = None,
+                     local: bool = False) -> list[ReferrerQuery]:
+    """Queries from the user's own profile, most promising first (employer, school, function).
+    ``local``: also people at the company in ``city`` (``site:linkedin.com/in "<company>" "<city>"``),
+    asked first; startups near you are small, so the city alone is a useful basis."""
     out: list[ReferrerQuery] = []
+    if local and city:
+        out.append(ReferrerQuery(f'site:linkedin.com/in "{company}" "{city}"', ReferralBasis.SAME_CITY, city))
     for w in profile.work_history:
         emp = (w.company or "").strip()
         if emp and emp.lower() != company.lower():
@@ -158,7 +165,7 @@ def referrer_queries(profile: Profile, company: str, *, function: str | None = N
         out.append(ReferrerQuery(f'site:linkedin.com/in "{company}" "{function}"{loc}', ReferralBasis.SAME_FUNCTION, function))
     seen: set[str] = set()
     uniq = [q for q in out if not (q.query in seen or seen.add(q.query))]
-    return uniq[:MAX_QUERIES]
+    return uniq[:MAX_LOCAL_QUERIES if local and city else MAX_QUERIES]
 
 
 @dataclass(slots=True)
@@ -193,8 +200,9 @@ def candidates_from_results(hits: list[SerpHit], q: ReferrerQuery, company: str)
         if at and comp not in _squash(at):
             continue  # works somewhere else now
         if q.basis is not ReferralBasis.SAME_FUNCTION and _squash(q.detail) not in _squash(text):
-            continue  # no evidence for the basis: not kept
-        basis_rank = {ReferralBasis.EX_COLLEAGUE: 0, ReferralBasis.ALUMNI: 1, ReferralBasis.SAME_FUNCTION: 2}.get(q.basis, 3)
+            continue  # no evidence for the basis (school, employer, city): not kept
+        basis_rank = {ReferralBasis.EX_COLLEAGUE: 0, ReferralBasis.ALUMNI: 1, ReferralBasis.SAME_CITY: 2,
+                      ReferralBasis.SAME_FUNCTION: 3}.get(q.basis, 4)
         senior = 1 if title and _SENIOR_EXEC.search(title) else 0
         out.append(Candidate(name, title, h.url.split("?")[0], q.basis, q.detail, f"{h.title} — {h.snippet}"[:280], (basis_rank, senior)))
     return out
@@ -208,6 +216,11 @@ def basis_sentence(r: Referral, profile: Profile) -> str | None:
         return f"We both worked at {r.basis_detail}."
     if r.basis is ReferralBasis.SAME_FUNCTION and r.basis_detail:
         return f"We both work in {r.basis_detail}."
+    if r.basis is ReferralBasis.SAME_CITY and r.basis_detail:
+        from autoapply.outreach.startups import parse_location, same_city
+
+        mine = parse_location(profile.location).city if profile.location else None
+        return f"We're both in {r.basis_detail}." if same_city(mine, r.basis_detail) else f"They work in {r.basis_detail}."
     return r.basis_detail
 
 

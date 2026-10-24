@@ -215,8 +215,31 @@ final class OutreachStore {
         return n > 0 ? .contactsFound(n) : .noContact
     }
 
-    /// Prospects not dismissed, best fit first.
-    var activeProspects: [ProspectItem] { data.prospects.filter { $0.status != .dismissed } }
+    /// Prospects not dismissed, best score first (the rank, else the fit; unscored last, newest first).
+    var activeProspects: [ProspectItem] {
+        data.prospects.filter { $0.status != .dismissed }.sorted { a, b in
+            switch (a.score, b.score) {
+            case let (x?, y?) where x != y: return x > y
+            case (.some, nil): return true
+            case (nil, .some): return false
+            default: return a.createdAt > b.createdAt
+            }
+        }
+    }
+
+    /// Referral suggestions at one company: your connections first, then people in your city, then the rest.
+    func referrals(companyID: Int) -> [ReferralItem] {
+        func rank(_ r: ReferralItem) -> Int {
+            switch r.basis {
+            case .user: 0
+            case .sameCity: 1
+            case .exColleague, .alumni: 2
+            default: 3
+            }
+        }
+        return data.referrals.filter { $0.companyID == companyID && $0.state != .dismissed }
+            .sorted { (rank($0), $1.createdAt) < (rank($1), $0.createdAt) }
+    }
 
     /// Referrals grouped by state in display order (dismissed hidden), each group newest first.
     var referralGroups: [(state: ReferralState, items: [ReferralItem])] {

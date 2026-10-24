@@ -216,6 +216,9 @@ enum MockOutreach {
             }
         }
 
+        // Startups near you (made-up Indian startups with facts, the score's reasons and sources).
+        MockStartups.seed(&o, now: now)
+
         // Do-not-contact list.
         o.suppression = [
             SuppressionItem(id: 1, emailNorm: "careers@example-ltd.com", reason: .optOut, source: "reply", createdAt: now.addingTimeInterval(-86_400 * 9)),
@@ -646,13 +649,68 @@ enum MockOutreach {
             }
             return Handled(reply: found ? ack() : error(.notFound, "prospect \(p.id) not found"))
 
+        case .discoverStartups(let p):
+            let place = p.location.c3Trimmed ?? MockFixtures.profile.location ?? "Bengaluru, India"
+            return Handled(reply: ack(["search_id": .string("mockstartups"), "location": .string(place),
+                                       "queued_google": .bool(!p.ycOnly)])) { world in
+                await world.sleep(2)
+                world.repository.update { data in _ = MockStartups.discover(&data, payload: p, label: place) }
+            }
+
+        case .scoutTopProspects(let p):
+            let (queued, skipped) = repo.read { MockStartups.topProspects($0, limit: p.limit) }
+            repo.update { data in
+                for q in queued {
+                    if let i = data.outreach.prospects.firstIndex(where: { $0.id == q.id }), data.outreach.prospects[i].status == .suggested {
+                        data.outreach.prospects[i].status = .shortlisted
+                    }
+                }
+            }
+            let reply = ack([
+                "queued": .array(queued.map { .object(["company_id": .int($0.companyID), "company": .string($0.company)]) }),
+                "skipped": .array(skipped.map { .object(["company_id": .int($0.0.companyID), "company": .string($0.0.company),
+                                                         "reason": .string($0.1)]) }),
+                "queued_google": .bool(!queued.isEmpty),
+            ])
+            return Handled(reply: reply) { world in
+                for q in queued {
+                    await world.sleep(1)
+                    world.repository.update { data in
+                        guard !data.outreach.contacts.contains(where: { $0.companyID == q.companyID }) else { return }
+                        let domain = q.domain ?? "\(q.company.lowercased().filter(\.isLetter)).example"
+                        for person in MockStartups.people(for: q) {
+                            let id = (data.outreach.contacts.map(\.id).max() ?? 0) + 1
+                            let first = person.0.lowercased().split(separator: " ")[0]
+                            data.outreach.contacts.append(ContactItem(
+                                id: id, companyID: q.companyID, company: q.company, fullName: person.0, title: person.1, roleCategory: person.2,
+                                email: "\(first)@\(domain)", emailStatus: "pattern", emailConfidence: 72, origin: .scout, createdAt: Date()))
+                            data.contactEvidence.append(ContactEvidenceItem(
+                                id: (data.contactEvidence.map(\.id).max() ?? 0) + 1, contactID: id, kind: "company_page", field: "name",
+                                url: q.facts?.ycURL ?? "https://\(domain)/about", snippet: "\(person.0), \(person.1)", observedAt: Date()))
+                        }
+                        data.log("outreach", "found people at \(q.company)")
+                    }
+                    world.emit(.scoutFinished(ScoutFinishedPayload(companyId: q.companyID, purpose: .prospect, found: 2, withEmail: 2,
+                                                                   bestConfidence: 72, queuedGoogle: false)))
+                }
+            }
+
         case .suggestReferrers(let p):
-            return Handled(reply: ack(["queued_google": .bool(true)])) { world in
+            return Handled(reply: ack(["queued_google": .bool(true), "connections": .int(0)])) { world in
                 await world.sleep(2)
                 world.repository.update { data in
                     let id = (data.outreach.referrals.map(\.id).max() ?? 0) + 1
+                    let company = companyName(data, p.companyId)
+                    if let city = p.location.c3Trimmed {
+                        data.outreach.referrals.append(ReferralItem(
+                            id: id, companyID: p.companyId, company: company, jobID: p.jobId, personName: "Rohan Gupta",
+                            title: "Platform Engineer", linkedinURL: "https://www.linkedin.com/in/rohan-gupta-example", basis: .sameCity,
+                            basisDetail: city, evidenceSnippet: "Rohan Gupta – Platform Engineer – \(company) · \(city)", state: .suggested,
+                            stateUpdatedAt: Date(), createdAt: Date()))
+                        return
+                    }
                     data.outreach.referrals.append(ReferralItem(
-                        id: id, companyID: p.companyId, company: companyName(data, p.companyId), jobID: p.jobId, personName: "Aditi Sharma",
+                        id: id, companyID: p.companyId, company: company, jobID: p.jobId, personName: "Aditi Sharma",
                         title: "Software Engineer", linkedinURL: "https://www.linkedin.com/in/aditi-sharma", basis: .alumni,
                         basisDetail: "IIT Madras", evidenceSnippet: "Aditi Sharma – Software Engineer · IIT Madras", state: .suggested,
                         stateUpdatedAt: Date(), createdAt: Date()))

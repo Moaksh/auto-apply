@@ -536,8 +536,45 @@ def import_connections(conn: sqlite3.Connection, file_path: str | Path) -> Impor
     return report
 
 
+def _connection_company(notes: str | None) -> str | None:
+    """The employer text in a note we wrote (``LinkedIn connection · Position at Company · connected ...``)."""
+    parts = [p.strip() for p in (notes or "").split(" · ")]
+    if len(parts) < 2 or parts[0] != NOTE_PREFIX or parts[1].startswith("connected "):
+        return None
+    return parts[1].rsplit(" at ", 1)[-1].strip() or None
+
+
+def match_connections(conn: sqlite3.Connection, company_id: int) -> int:
+    """Imported LinkedIn connections who work at ``company_id`` (a company found after the import,
+    e.g. a startup near you) become referral suggestions there, once per person. Returns how many
+    new suggestions were made. Uses the same conservative name matching as the import."""
+    company = db.get_company(conn, company_id)
+    if _domain_suppressed(conn, company.domain):
+        return 0
+    index = CompanyIndex([Target(company.id, company.name, company.domain, None, "prospect")])
+    made = 0
+    with db.transaction(conn):
+        rows = conn.execute("SELECT * FROM contacts WHERE origin = 'import' AND (company_id IS NULL OR company_id = ?)",
+                            (company_id,)).fetchall()
+        for r in rows:
+            if r["company_id"] != company_id:
+                if index.match(_connection_company(r["notes"])) is None:
+                    continue
+                conn.execute("UPDATE contacts SET company_id = ?, updated_at = ? WHERE id = ?", (company_id, now_ts(), r["id"]))
+            if r["email_norm"] and suppression.check(conn, r["email_norm"]) is not None:
+                continue
+            evidence = "From your LinkedIn export: " + (str(r["notes"]).split(" · ", 1)[-1] if r["notes"] else r["full_name"])
+            _ref, created = referrals.add(
+                conn, company_id=company_id, person_name=r["full_name"], basis=ReferralBasis.USER, contact_id=int(r["id"]),
+                title=r["title"], linkedin_url=r["linkedin_url"], basis_detail=BASIS_DETAIL, evidence_snippet=evidence,
+                state=ReferralState.SUGGESTED,
+            )
+            made += int(created)
+    return made
+
+
 __all__ = [
     "BASIS_DETAIL", "CompanyIndex", "Connection", "ImportReport", "ParseResult", "Target", "company_key",
-    "distinctive_tokens", "import_connections", "match_tier", "normalize_linkedin_url", "parse_connected_on",
+    "distinctive_tokens", "import_connections", "match_connections", "match_tier", "normalize_linkedin_url", "parse_connected_on",
     "parse_connections", "read_connections", "targets_of_interest",
 ]

@@ -1741,8 +1741,17 @@ class Daemon:
     async def _cmd_update_prospect(self, p: Any) -> None:
         await self._out.update_prospect(p.id, p.status, p.watch)
 
+    async def _cmd_discover_startups(self, p: Any) -> dict[str, Any]:
+        out = self._out.discover_startups(p.location, yc_only=p.yc_only, hiring_only=p.hiring_only, stages=list(p.stages),
+                                          limit=p.limit)
+        self._spawn(self.outreach_google_if_idle(), name="outreach-google")
+        return out
+
+    async def _cmd_scout_top_prospects(self, p: Any) -> dict[str, Any]:
+        return self._out.scout_top_prospects(p.limit)
+
     async def _cmd_suggest_referrers(self, p: Any) -> dict[str, Any]:
-        out = self._out.suggest_referrers(p.company_id, p.job_id)
+        out = self._out.suggest_referrers(p.company_id, p.job_id, p.location)
         self._spawn(self.outreach_google_if_idle(), name="outreach-google")
         return out
 

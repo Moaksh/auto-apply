@@ -76,6 +76,8 @@
     "search_prospects",
     "add_prospect",
     "update_prospect",
+    "discover_startups",
+    "scout_top_prospects",
     "suggest_referrers",
     "add_referral",
     "draft_referral",
@@ -1813,6 +1815,56 @@
       "title": "DiscardOutreachPayload",
       "type": "object"
     },
+    "DiscoverStartupsPayload": {
+      "additionalProperties": false,
+      "description": "Startups near you: YC's public directory (right away) and regional funding news (Google\nresults, when the browser is free). Results land in ``prospects`` with ``company_facts``.",
+      "properties": {
+        "location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "City and/or country, e.g. 'Bengaluru, India'. Default: your profile location.",
+          "title": "Location"
+        },
+        "yc_only": {
+          "default": false,
+          "description": "Only YC's directory (no funding-news search on Google).",
+          "title": "Yc Only",
+          "type": "boolean"
+        },
+        "hiring_only": {
+          "default": false,
+          "description": "Only companies listed as hiring.",
+          "title": "Hiring Only",
+          "type": "boolean"
+        },
+        "stages": {
+          "description": "Funding news: keep only these last-round stages.",
+          "items": {
+            "$ref": "#/$defs/FundingStage"
+          },
+          "title": "Stages",
+          "type": "array",
+          "default": []
+        },
+        "limit": {
+          "default": 25,
+          "description": "At most this many startups from YC's directory.",
+          "maximum": 50,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "title": "DiscoverStartupsPayload",
+      "type": "object"
+    },
     "DismissAutonomySuggestionPayload": {
       "additionalProperties": false,
       "description": "\"Not now\" for a site's Auto suggestion: it is not offered again. Modes stay the user's choice.",
@@ -2375,6 +2427,20 @@
         "formal"
       ],
       "title": "Formality",
+      "type": "string"
+    },
+    "FundingStage": {
+      "description": "A startup's last priced round, normalised from funding news (schema v14 ``company_facts``).",
+      "enum": [
+        "pre_seed",
+        "seed",
+        "series_a",
+        "series_b",
+        "series_c",
+        "series_d_plus",
+        "other"
+      ],
+      "title": "FundingStage",
       "type": "string"
     },
     "GenerateInterviewPrepPayload": {
@@ -5520,7 +5586,8 @@
         "ex_colleague",
         "same_function",
         "user",
-        "other"
+        "other",
+        "same_city"
       ],
       "title": "ReferralBasis",
       "type": "string"
@@ -6201,6 +6268,21 @@
       "title": "ScoutPurpose",
       "type": "string"
     },
+    "ScoutTopProspectsPayload": {
+      "additionalProperties": false,
+      "description": "Find people at the best-ranked open prospects (one after another). Guardrails apply:\nexcluded, applied, cooling down, 2 people already or an email out -> skipped with the reason.",
+      "properties": {
+        "limit": {
+          "default": 5,
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "title": "ScoutTopProspectsPayload",
+      "type": "object"
+    },
     "SearchProspectsPayload": {
       "additionalProperties": false,
       "properties": {
@@ -6817,6 +6899,19 @@
           ],
           "default": null,
           "title": "Job Id"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Also look for people at the company in this city (site:linkedin.com/in results only).",
+          "title": "Location"
         }
       },
       "required": [
@@ -9706,6 +9801,58 @@
       ],
       "additionalProperties": false
     },
+    "CommandDiscoverStartups": {
+      "type": "object",
+      "title": "Command: discover_startups",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "discover_startups"
+        },
+        "payload": {
+          "$ref": "#/$defs/DiscoverStartupsPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
+    "CommandScoutTopProspects": {
+      "type": "object",
+      "title": "Command: scout_top_prospects",
+      "properties": {
+        "v": {
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "scout_top_prospects"
+        },
+        "payload": {
+          "$ref": "#/$defs/ScoutTopProspectsPayload"
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "type",
+        "payload"
+      ],
+      "additionalProperties": false
+    },
     "CommandSuggestReferrers": {
       "type": "object",
       "title": "Command: suggest_referrers",
@@ -11049,6 +11196,12 @@
         },
         {
           "$ref": "#/$defs/CommandUpdateProspect"
+        },
+        {
+          "$ref": "#/$defs/CommandDiscoverStartups"
+        },
+        {
+          "$ref": "#/$defs/CommandScoutTopProspects"
         },
         {
           "$ref": "#/$defs/CommandSuggestReferrers"

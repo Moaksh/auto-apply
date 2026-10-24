@@ -505,7 +505,7 @@ async def test_referrers_from_google_results_only(world: World):
     co = db.get_company_by_name(world.conn, "Acme")
     page = _Page({"google.com/search": fixture("google_people.html")})
     world.daemon.outreach._browser_factory = _browser(page)
-    assert (await world.ok("suggest_referrers", {"company_id": co.id})) == {"queued_google": True}
+    assert (await world.ok("suggest_referrers", {"company_id": co.id})) == {"queued_google": True, "connections": 0}
     done = await world.daemon.outreach.run_google_work()
     assert done["referrers"] == 1
     from autoapply.outreach import referrals

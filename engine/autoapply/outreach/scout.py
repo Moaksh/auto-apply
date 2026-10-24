@@ -266,6 +266,11 @@ class ContactScout:
                 mx_ok = report.mx is not MxProvider.NONE  # None = lookup failed: keep going
             people: list[Person] = []
             samples: list[dict] = []
+            # #1b founders from public facts (YC's page), when reaching out to a startup
+            if purpose is ScoutPurpose.PROSPECT:
+                people += founders_as_people(self.conn, company)
+                if people:
+                    report.sources.append("yc_page")
             # #2 the posting
             if job is not None and job.description:
                 found, left = await posting.from_posting(job.description, company=company.name, domain=domain, url=job.apply_url,
@@ -383,7 +388,34 @@ def best_contact(conn: sqlite3.Connection, company_id: int, purpose: ScoutPurpos
         return None
     posting_ids = {int(r[0]) for r in conn.execute(
         "SELECT DISTINCT contact_id FROM contact_evidence WHERE kind = 'job_posting' AND field = 'name'")}
-    return sorted(rows, key=lambda c: contacts.rank_key(c, purpose, from_posting=c.id in posting_ids))[0]
+    small = is_small_team(conn, company_id)
+    return sorted(rows, key=lambda c: contacts.rank_key(c, purpose, from_posting=c.id in posting_ids, small_team=small))[0]
 
 
-__all__ = ["ContactScout", "ScoutReport", "best_contact", "google_queue", "mark_scouted", "pop_google", "queue_google", "recently_scouted"]
+def is_small_team(conn: sqlite3.Connection, company_id: int) -> bool:
+    """A startup of at most ``contacts.SMALL_TEAM`` people (team size from public facts)."""
+    from autoapply.outreach import facts
+
+    f = facts.get(conn, company_id)
+    return bool(f and f.team_size and f.team_size <= contacts.SMALL_TEAM)
+
+
+def founders_as_people(conn: sqlite3.Connection, company: Company) -> list[Person]:
+    """Founders listed on the company's YC page (``company_facts.founders``), as scout people."""
+    from autoapply.outreach import facts
+
+    f = facts.get(conn, company.id)
+    out: list[Person] = []
+    for x in (f.founders if f else []):
+        name = str(x.get("name") or "").strip()
+        if not name:
+            continue
+        title = str(x.get("title") or "").strip() or "Founder"
+        url = x.get("url") or (f.yc_url if f else None)
+        out.append(Person(name=name, title=title, url=url, kind=EvidenceKind.COMPANY_PAGE, linkedin_url=x.get("linkedin_url"),
+                          snippet=f"{name}, {title}: listed on Y Combinator's page for {company.name}"))
+    return out
+
+
+__all__ = ["ContactScout", "ScoutReport", "best_contact", "founders_as_people", "google_queue", "is_small_team", "mark_scouted",
+           "pop_google", "queue_google", "recently_scouted"]

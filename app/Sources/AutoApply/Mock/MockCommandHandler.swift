@@ -464,7 +464,8 @@ enum MockCommandHandler {
         case .scoutContacts, .addContact, .updateContact, .deleteContact, .deleteContacts, .importContacts, .draftOutreach,
              .editOutreachDraft, .approveOutreach, .cancelOutreach, .discardOutreach, .resolveOutreachUnknown, .markReplyRead,
              .acceptOutreachSuggestion, .dismissOutreachSuggestion, .setThreadOutcome,
-             .suppress, .unsuppress, .enableSending, .searchProspects, .addProspect, .updateProspect, .suggestReferrers,
+             .suppress, .unsuppress, .enableSending, .searchProspects, .addProspect, .updateProspect, .discoverStartups,
+             .scoutTopProspects, .suggestReferrers,
              .addReferral, .draftReferral, .updateReferral, .setProviderKey, .acceptReplySuggestion, .dismissReplySuggestion,
              .markApplicationReplyRead:
             return MockOutreach.handle(command, world: world) ?? Handled(reply: ack())

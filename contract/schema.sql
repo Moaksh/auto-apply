@@ -590,7 +590,7 @@ CREATE TABLE IF NOT EXISTS referrals (
     person_name        TEXT NOT NULL,
     title              TEXT,
     linkedin_url       TEXT,
-    basis              TEXT NOT NULL CHECK (basis IN ('alumni','ex_colleague','same_function','user','other')),
+    basis              TEXT NOT NULL CHECK (basis IN ('alumni','ex_colleague','same_function','user','other','same_city')),
     basis_detail       TEXT,
     evidence_url       TEXT,
     evidence_snippet   TEXT,
@@ -619,9 +619,43 @@ CREATE TABLE IF NOT EXISTS prospects (
     search_query    TEXT,
     cooldown_until  TEXT,                                   -- no new prospect thread before this
     created_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
-    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    updated_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    -- v14: the deterministic startup score (outreach/startup_score.py) and the rank it makes
+    -- with fit_score. startup_reasons = [{key, label, points, max, reason, known}].
+    startup_score      INTEGER CHECK (startup_score IS NULL OR startup_score BETWEEN 0 AND 100),
+    startup_confidence INTEGER CHECK (startup_confidence IS NULL OR startup_confidence BETWEEN 0 AND 100),
+    startup_reasons    TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(startup_reasons)),
+    rank_score         INTEGER CHECK (rank_score IS NULL OR rank_score BETWEEN 0 AND 100)
 );
 CREATE INDEX IF NOT EXISTS ix_prospects_status ON prospects(status);
+
+-- company_facts (v14): what public sources say about a company (YC's directory, funding news).
+-- Every fact has its source in `sources` ({fact: {url, quote?, observed_at}}); a fact with no
+-- source is left NULL, never guessed. Amounts are as reported; last_round_usd converts them
+-- at fixed, documented rates (outreach/startups.py USD_RATES).
+CREATE TABLE IF NOT EXISTS company_facts (
+    company_id          INTEGER PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+    hq_city             TEXT,
+    hq_country          TEXT,
+    yc_batch            TEXT,                               -- short code: W24, S25, X25 (spring), F24 (fall)
+    yc_url              TEXT,
+    yc_status           TEXT,                               -- Active | Public | Acquired | Inactive (YC's label)
+    industry            TEXT,
+    last_round_stage    TEXT CHECK (last_round_stage IS NULL OR last_round_stage IN
+                          ('pre_seed','seed','series_a','series_b','series_c','series_d_plus','other')),
+    last_round_amount   REAL CHECK (last_round_amount IS NULL OR last_round_amount >= 0),
+    last_round_currency TEXT,                               -- ISO 4217 (USD, INR, EUR, ...)
+    last_round_usd      REAL CHECK (last_round_usd IS NULL OR last_round_usd >= 0),
+    last_round_date     TEXT,                               -- YYYY-MM-DD (the announcement's date)
+    total_raised_usd    REAL CHECK (total_raised_usd IS NULL OR total_raised_usd >= 0),
+    investors           TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(investors)),
+    team_size           INTEGER CHECK (team_size IS NULL OR team_size >= 0),
+    is_hiring           INTEGER CHECK (is_hiring IS NULL OR is_hiring IN (0, 1)),
+    open_roles          INTEGER CHECK (open_roles IS NULL OR open_roles >= 0),
+    founders            TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(founders)),  -- [{name, title, url}] from YC's page
+    sources             TEXT NOT NULL DEFAULT '{}' CHECK (json_valid(sources)),
+    updated_at          TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
 
 -- =====================================================================================
 -- Employer replies (v11). engine/autoapply/mail/replywatch.py reads the connected mailbox
@@ -676,3 +710,4 @@ INSERT OR IGNORE INTO schema_version (version) VALUES (10);
 INSERT OR IGNORE INTO schema_version (version) VALUES (11);
 INSERT OR IGNORE INTO schema_version (version) VALUES (12);
 INSERT OR IGNORE INTO schema_version (version) VALUES (13);
+INSERT OR IGNORE INTO schema_version (version) VALUES (14);

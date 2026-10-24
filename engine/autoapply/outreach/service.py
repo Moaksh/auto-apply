@@ -62,7 +62,7 @@ from autoapply.models import (
     parse_ts,
     utcnow,
 )
-from autoapply.outreach import contacts, domains, drafts, mailwatch, prospects, referrals, sender, suppression, threads
+from autoapply.outreach import contacts, domains, drafts, mailwatch, prospects, referrals, sender, startups, suppression, threads
 from autoapply.outreach.contacts import NewEvidence
 from autoapply.outreach.scout import ContactScout, best_contact, google_queue, pop_google, recently_scouted
 from autoapply.outreach.sources import google_people
@@ -127,6 +127,7 @@ class OutreachService:
         pacer: Any = None,
         now: Callable[[], datetime] | None = None,
         rng: random.Random | None = None,
+        sleep: Callable[[float], Awaitable[None]] | None = None,
     ) -> None:
         from autoapply.mail import imap_codes
         from autoapply.outreach.providers import base as providers
@@ -148,6 +149,7 @@ class OutreachService:
         self.pacer = pacer
         self.now = now or utcnow
         self.rng = rng or random.Random()
+        self.sleep = sleep or asyncio.sleep
         self._last_scan: datetime | None = None
         self._google_lock = asyncio.Lock()
         self._verify_lock = asyncio.Lock()
@@ -858,15 +860,242 @@ class OutreachService:
             db.log_event(self.conn, "user", f"removed {company.name} from the watched companies", actor=Actor.USER)
 
     # =================================================================================
+    # Startups near you
+    # =================================================================================
+
+    def discover_startups(self, location: str | None, *, yc_only: bool, hiring_only: bool, stages: list[Any],
+                          limit: int) -> dict[str, Any]:
+        """Queue a "startups near you" search: YC's directory right away over HTTP, funding news on
+        Google when the browser is free (unless ``yc_only``)."""
+        text = (location or "").strip() or startups.user_location(db.get_profile(self.conn), db.get_preferences(self.conn))
+        place = startups.parse_location(text)
+        if place.country is None:
+            raise ValueError("I couldn't tell which country that is. Type a city and country, e.g. 'Bengaluru, India'."
+                             if text else "Add your location in Profile, or type a city and country to look in.")
+        stage_values = [getattr(x, "value", x) for x in stages]
+        sid = prospects.queue_startup_search(self.conn, place.as_dict(), place.label, yc_only=yc_only, hiring_only=hiring_only,
+                                             stages=stage_values, limit=limit)
+        db.log_event(self.conn, "user", f"startup search queued: {place.label}", actor=Actor.USER)
+        self.spawn(self._discover_yc(sid), f"outreach-startups-{sid}")
+        return {"search_id": sid, "location": place.label, "queued_google": not yc_only}
+
+    async def _discover_yc(self, sid: str) -> int:
+        """The YC half of a startup search (HTTP only; no browser). Returns prospects saved."""
+        s = prospects.get_search(self.conn, sid)
+        if s is None or self.is_paused():
+            return 0
+        place = startups.Place(**(s.get("place") or {}))
+        prefs = db.get_preferences(self.conn)
+        limit = int(s.get("limit") or 25)
+        n = 0
+        try:
+            async with self.http_factory() as http:
+                yc = startups.YCDirectory(self.conn, http, sleep=self.sleep, now=self.now)
+                try:
+                    found = await yc.search(place.country or "", hiring_only=bool(s.get("hiring_only")), limit=max(limit * 2, 20))
+                except startups.YCUnavailable as e:
+                    log.info("YC directory unavailable, falling back to Google results: %s", e)
+                    prospects.update_search(self.conn, sid, yc_fallback=True, status="queued")
+                    return 0
+                # Same city first, then YC's own order (newest batch first).
+                found.sort(key=lambda c: 0 if startups.same_city(c.city, place.city) else 1)
+                saved: list[int] = []
+                for i, c in enumerate(found[:limit]):
+                    if self.is_paused():
+                        break
+                    if i < startups.YC_PAGES_PER_SEARCH:
+                        page = await yc.company_page(c.slug)
+                        if page is not None:
+                            c.founders, c.job_titles = page.founders, page.job_titles
+                            c.city = c.city or page.city
+                    cid = self._save_yc(c, label=str(s.get("location") or place.label), prefs=prefs)
+                    if cid is not None:
+                        saved.append(cid)
+                n = len(saved)
+                await self._rate_fits(saved, prefs)
+        except Exception:  # noqa: BLE001 - background work: log, never crash the daemon
+            log.exception("startup search %s (YC) failed", sid)
+        prospects.update_search(self.conn, sid, found=n, yc_done=True, status="done" if s.get("yc_only") else "queued")
+        db.log_event(self.conn, "outreach", f"startups in {place.label}: {n} from YC's directory", payload={"search_id": sid})
+        return n
+
+    def _save_yc(self, c: startups.YCCompany, *, label: str, prefs: Any) -> int | None:
+        updates, sources = startups.yc_updates(c)
+        matching = sum(1 for t in c.job_titles if prospects._matches_roles(t, prefs.roles)) if c.job_titles and prefs.roles else None
+        return self._save_startup(c.name, domains.domain_from_url(c.website), summary=c.one_liner, summary_url=c.url,
+                                  updates=updates, sources=sources, label=label, prefs=prefs, matching_roles=matching)
+
+    def _save_startup(self, name: str, domain: str | None, *, summary: str | None, summary_url: str | None,
+                      updates: dict[str, Any], sources: dict[str, Any], label: str, prefs: Any,
+                      matching_roles: int | None = None, evidence: str | None = None, evidence_url: str | None = None) -> int | None:
+        """Store a discovered startup (deduped by domain, then name) with its facts. None when the
+        user excluded or dismissed it."""
+        from autoapply.outreach import facts, linkedin_export
+
+        if prospects.excluded(prefs, name) or db.company_dismissed(self.conn, name):
+            return None
+        cid = startups.save_company(self.conn, name, domain)
+        existing = prospects.get_by_company(self.conn, cid)
+        if existing is not None and existing.status is ProspectStatus.DISMISSED:
+            return None
+        facts.upsert(self.conn, cid, updates, sources)
+        reasons = None
+        if evidence and (existing is None or not existing.fit_reasons.get("evidence")):
+            reasons = {**(existing.fit_reasons if existing else {}), "evidence": evidence, "evidence_url": evidence_url}
+        p = prospects.upsert(self.conn, cid, summary=None if existing is not None and existing.summary else summary,
+                             summary_url=None if existing is not None and existing.summary_url else summary_url,
+                             matching_roles=matching_roles, fit_reasons=reasons,
+                             found_via=None if existing is not None else "startups",
+                             search_query=None if existing is not None else label)
+        if p is None:
+            return None
+        try:
+            linkedin_export.match_connections(self.conn, cid)
+        except Exception:  # noqa: BLE001
+            log.exception("matching LinkedIn connections at company %s failed", cid)
+        return cid
+
+    async def _rate_fits(self, company_ids: list[int], prefs: Any, *, limit: int = 12) -> None:
+        """Fit (one model call each) for the best-scored new startups that have none yet."""
+        if self.llm is None or not company_ids:
+            return
+        profile = db.get_profile(self.conn)
+        todo = [p for p in (prospects.get_by_company(self.conn, c) for c in dict.fromkeys(company_ids))
+                if p is not None and p.fit_score is None]
+        todo.sort(key=lambda p: -(p.startup_score or 0))
+        for p in todo[:limit]:
+            if self.is_paused():
+                return
+            company = db.get_company(self.conn, p.company_id)
+            fit, reasons = await prospects.prospect_fit(self.llm, company=company.name, summary=p.summary,
+                                                         matching_roles=p.matching_roles, profile=profile, prefs=prefs)
+            if fit is not None:
+                prospects.upsert(self.conn, p.company_id, fit_score=fit, fit_reasons={**p.fit_reasons, **reasons})
+
+    async def _run_startup_news(self, s: dict[str, Any], reader: google_people.GoogleReader, prefs: Any) -> int:
+        """The Google half of a startup search: funding news, and YC pages when the index failed."""
+        from autoapply.outreach.sources.extract import page_text
+
+        place = startups.Place(**(s.get("place") or {}))
+        stages = set(s.get("stages") or [])
+        queries = [] if s.get("yc_only") else startups.funding_queries(place, self.now().date())
+        if s.get("yc_fallback"):
+            queries.insert(0, startups.yc_fallback_query(place))
+        rounds: dict[str, startups.FundingRound] = {}
+        yc_found: list[startups.YCCompany] = []
+        saved: list[int] = []
+        label = str(s.get("location") or place.label)
+        async with self.http_factory() as http:
+            yc = startups.YCDirectory(self.conn, http, sleep=self.sleep, now=self.now)
+            for q in queries:
+                hits = await reader.read(q)
+                if hits is None:
+                    break
+                is_yc = q.startswith("site:ycombinator.com")
+                for h in hits[: startups.YC_PAGES_PER_SEARCH if is_yc else prospects.MAX_RESULT_PAGES_PER_QUERY]:
+                    if google_people.is_linkedin_profile(h.url) or any(b in h.url for b in google_people.NEVER_OPEN):
+                        continue
+                    slug = startups.yc_slug(h.url)
+                    if slug is not None:
+                        page = await yc.company_page(slug)
+                        if page is not None and page.country in (None, place.country) and not any(x.slug == slug for x in yc_found):
+                            yc_found.append(page)
+                        continue
+                    if is_yc or self.llm is None:  # a directory listing, not an article
+                        continue
+                    try:
+                        r = await http.get(h.url, headers={"User-Agent": domains.USER_AGENT}, follow_redirects=True, timeout=15)
+                    except httpx.HTTPError:
+                        continue
+                    if r.status_code >= 400 or "html" not in r.headers.get("content-type", "html"):
+                        continue
+                    for fr in await startups.extract_rounds(self.llm, page_text(r.text), str(r.url), startups.published_date(r.text)):
+                        if not startups.in_place(fr.city, place):
+                            continue
+                        if stages and (fr.stage is None or fr.stage.value not in stages):
+                            continue
+                        cur = rounds.get(fr.company.lower())
+                        if cur is None or (fr.has_facts and not cur.has_facts):
+                            rounds[fr.company.lower()] = fr
+                    if len(rounds) >= prospects.MAX_COMPANIES_PER_SEARCH:
+                        break
+            for c in yc_found:
+                if s.get("hiring_only") and c.is_hiring is not True:
+                    continue
+                cid = self._save_yc(c, label=label, prefs=prefs)
+                if cid is not None:
+                    saved.append(cid)
+            for fr in list(rounds.values())[: prospects.MAX_COMPANIES_PER_SEARCH]:
+                if self.is_paused():
+                    break
+                en = await prospects.enrich(http, url=fr.website, prefs=prefs) if fr.website else prospects.Enrichment()
+                updates, sources = startups.round_updates(fr)
+                if fr.city:
+                    updates["hq_country"] = startups.country_of(fr.city) or place.country
+                    sources["hq_country"] = sources.get("hq_city") or {}
+                if en.open_roles is not None:
+                    updates["open_roles"] = en.open_roles
+                    updates["is_hiring"] = en.open_roles > 0
+                    sources["open_roles"] = sources["is_hiring"] = {"url": en.summary_url, "observed_at": now_ts()}
+                if s.get("hiring_only") and en.open_roles == 0:
+                    continue
+                cid = self._save_startup(fr.company, en.domain, summary=en.summary, summary_url=en.summary_url, updates=updates,
+                                         sources=sources, label=label, prefs=prefs, matching_roles=en.matching_roles,
+                                         evidence=fr.quote, evidence_url=fr.source_url)
+                if cid is not None:
+                    saved.append(cid)
+            await self._rate_fits(saved, prefs)
+        db.log_event(self.conn, "outreach", f"startups in {place.label}: {len(saved)} from Google results",
+                     payload={"search_id": s["id"]})
+        return len(saved)
+
+    def scout_top_prospects(self, limit: int) -> dict[str, Any]:
+        """Find people at the best-ranked open prospects, one company after another. A company the
+        guardrails block (excluded, applied, cooling down, 2 people already, an email out) is
+        skipped with the reason."""
+        prefs = db.get_preferences(self.conn)
+        queued: list[dict[str, Any]] = []
+        skipped: list[dict[str, Any]] = []
+        for p in prospects.ranked(self.conn):
+            if len(queued) >= limit:
+                break
+            company = db.get_company(self.conn, p.company_id)
+            why = prospects.blocked_reason(self.conn, p.company_id, prefs, now=self.now())
+            if why is not None:
+                skipped.append({"company_id": p.company_id, "company": company.name, "reason": why})
+                continue
+            if p.status is ProspectStatus.SUGGESTED:
+                prospects.set_status(self.conn, p.id, ProspectStatus.SHORTLISTED)
+            queued.append({"company_id": p.company_id, "company": company.name})
+        if queued:
+            self.spawn(self._scout_many([q["company_id"] for q in queued]), "outreach-scout-top")
+            db.log_event(self.conn, "user", f"finding people at the top {len(queued)} companies", actor=Actor.USER)
+        return {"queued": queued, "skipped": skipped,
+                "queued_google": bool(queued) and prefs.people_finder_visits_per_day > 0}
+
+    async def _scout_many(self, company_ids: list[int]) -> None:
+        """One company after another (never a burst of parallel scouts)."""
+        for cid in company_ids:
+            if self.is_paused():
+                return
+            await self.scout_and_draft(cid, ScoutPurpose.PROSPECT, force=not recently_scouted(self.conn, cid))
+
+    # =================================================================================
     # Referrals
     # =================================================================================
 
-    def suggest_referrers(self, company_id: int, job_id: int | None) -> dict[str, Any]:
+    def suggest_referrers(self, company_id: int, job_id: int | None, location: str | None = None) -> dict[str, Any]:
+        """Queue a referrer search (Google results only). Your imported LinkedIn connections who work
+        there become suggestions right away. ``location``: also look for people there in that city."""
+        from autoapply.outreach import linkedin_export
+
         db.get_company(self.conn, company_id)
+        connections = linkedin_export.match_connections(self.conn, company_id)
         items = [i for i in (db.get_meta(self.conn, META_REFERRER_QUEUE, []) or []) if i.get("company_id") != company_id]
-        items.append({"company_id": company_id, "job_id": job_id, "queued_at": now_ts()})
+        items.append({"company_id": company_id, "job_id": job_id, "location": (location or "").strip() or None,
+                      "queued_at": now_ts()})
         db.set_meta(self.conn, META_REFERRER_QUEUE, items[-30:])
-        return {"queued_google": True}
+        return {"queued_google": True, "connections": connections}
 
     def add_referral(self, p: Any) -> dict[str, Any]:
         contact = contacts.get_contact(self.conn, p.contact_id) if p.contact_id is not None else None
@@ -1186,7 +1415,7 @@ class OutreachService:
                 for item in list(db.get_meta(self.conn, META_REFERRER_QUEUE, []) or []):
                     if not people.available():
                         break
-                    await self._find_referrers(int(item["company_id"]), item.get("job_id"), people)
+                    await self._find_referrers(int(item["company_id"]), item.get("job_id"), people, location=item.get("location"))
                     rest = [i for i in (db.get_meta(self.conn, META_REFERRER_QUEUE, []) or []) if i.get("company_id") != item["company_id"]]
                     db.set_meta(self.conn, META_REFERRER_QUEUE, rest)
                     done["referrers"] += 1
@@ -1201,22 +1430,32 @@ class OutreachService:
                     for s in searches:
                         if not reader.available():
                             break
-                        found = await self._run_search(s, reader, prefs)
+                        found = (await self._run_startup_news(s, reader, prefs) if s.get("kind") == "startups"
+                                 else await self._run_search(s, reader, prefs))
                         prospects.finish_search(self.conn, s["id"], "done", found)
                         done["searches"] += 1
                 finally:
                     await reader.close()
         return done
 
-    async def _find_referrers(self, company_id: int, job_id: int | None, reader: google_people.GoogleReader) -> int:
+    async def _find_referrers(self, company_id: int, job_id: int | None, reader: google_people.GoogleReader, *,
+                              location: str | None = None) -> int:
         company = db.get_company(self.conn, company_id)
         profile = db.get_profile(self.conn)
         prefs = db.get_preferences(self.conn)
         job = db.get_job(self.conn, job_id) if job_id else None
         function = (job.title if job else (prefs.roles[0] if prefs.roles else None))
-        city = (prefs.locations[0].split(",")[0] if prefs.locations else None)
+        mine = startups.parse_location(startups.user_location(profile, prefs))
+        if location:
+            place = startups.parse_location(location)
+            city, local = place.city or place.country, True
+        elif prospects.get_by_company(self.conn, company_id) is not None and mine.city:
+            # A company you're prospecting: people there in your own city are worth asking too.
+            city, local = mine.city, True
+        else:
+            city, local = (prefs.locations[0].split(",")[0] if prefs.locations else None), False
         cands: list[referrals.Candidate] = []
-        for q in referrals.referrer_queries(profile, company.name, function=function, city=city):
+        for q in referrals.referrer_queries(profile, company.name, function=function, city=city, local=local):
             hits = await reader.read(q.query)
             if hits is None:
                 break
