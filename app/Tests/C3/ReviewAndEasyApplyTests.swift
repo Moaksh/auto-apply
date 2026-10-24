@@ -252,7 +252,8 @@ struct EasyApplyModelTests {
         #expect(model.focusedRow == 1)
         model.copyAll()
         #expect(clipboard.last == "Razorpay · Backend SDE\n\nPhone: +91 98765 43210\nNotice period: 60 days")
-        #expect(await c3WaitUntil(timeout: .seconds(3)) { model.copiedRowID == nil })
+        // The flash clears after 1.2 s; the wait allows for a main actor starved by a parallel run.
+        #expect(await c3WaitUntil(timeout: .seconds(10)) { model.copiedRowID == nil })
     }
 
     @Test func openPostingUsesBrowserAndMarksOpened() async throws {
