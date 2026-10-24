@@ -297,7 +297,7 @@ struct OutreachActivity: Sendable, Hashable {
     // MARK: Copy (the agent speaks as "I" and says what happens next)
 
     static func waitText(_ wait: OutreachWork.Wait?, now: Date, calendar: Calendar = .current) -> String {
-        guard let wait else { return "next, after the Google results I'm reading now" }
+        guard let wait else { return "queued, after what I'm doing now" }
         switch wait.reason {
         case .nextTurn: return "waiting for the browser, I'll start when it's free"
         case .browserBusy: return "waiting while I use the browser to apply, then I'll start"

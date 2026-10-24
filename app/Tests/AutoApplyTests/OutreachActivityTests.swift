@@ -134,7 +134,7 @@ struct OutreachActivityTests {
         #expect(derive(w).lines[0].text == "Searching for “devtools”: waiting for the browser, I'll start when it's free")
         // Behind other Google work right now: it's simply next.
         w.google = .init(state: .running, active: .people(companyID: 7), updatedAt: now)
-        #expect(derive(w).lines.first { $0.id == "q" }?.text == "Searching for “devtools”: next, after the Google results I'm reading now")
+        #expect(derive(w).lines.first { $0.id == "q" }?.text == "Searching for “devtools”: queued, after what I'm doing now")
         w.searches = [search("q", kind: .companies, status: .running, stage: "search", step: 1, steps: 4)]
         w.google = .init(state: .running, active: .search(id: "q"), updatedAt: now)
         #expect(derive(w).lines[0].text == "Searching for “devtools” · reading Google results (1 of 4)")
@@ -151,7 +151,7 @@ struct OutreachActivityTests {
         #expect(a.scouts == [7: .googleRunning, 8: .site, 9: .googleQueued(nil)])
         #expect(a.lines.first { $0.id == "people-working" }?.text == "Finding people at Lab0 and Patang AI")
         #expect(a.lines.first { $0.id == "people-queued" }?.text
-                == "Google results for people at Waybill: next, after the Google results I'm reading now")
+                == "Google results for people at Waybill: queued, after what I'm doing now")
         #expect(a.lines.first?.phase == .working, "work in progress is listed first")
 
         w.google = .init(state: .waiting, people: .init(reason: .paused))
