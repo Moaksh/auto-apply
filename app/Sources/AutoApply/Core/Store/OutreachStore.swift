@@ -55,6 +55,8 @@ final class OutreachStore {
     private(set) var scouting: Set<Int> = []
     /// The last scout result per company (this session).
     private(set) var lastScout: [Int: ScoutFinishedPayload] = [:]
+    /// When a site scout ended with its Google half queued (bridges the moment before the DB shows the queue).
+    private(set) var googleQueuedAt: [Int: Date] = [:]
     /// Board moves suggested by `outreach_reply` events, per thread, until the DB row (v12
     /// `outreach_threads.suggested_status`) arrives. Only ever a suggestion.
     private(set) var replyMoves: [Int: BoardStatus] = [:]
@@ -278,6 +280,7 @@ final class OutreachStore {
         case .scoutFinished(let p):
             scouting.remove(p.companyId)
             lastScout[p.companyId] = p
+            if p.queuedGoogle { googleQueuedAt[p.companyId] = Date() } else { googleQueuedAt.removeValue(forKey: p.companyId) }
         case .applicationReply(let p):
             guard !replies.contains(where: { $0.id == p.replyId }) else { return }
             let state: ApplicationReplyItem.SuggestionState = (p.suggestedStatus != nil && !p.ambiguous) ? .pending : .none
@@ -354,5 +357,25 @@ final class OutreachStore {
     }
 
     func beginScouting(companyID: Int) { scouting.insert(companyID) }
+
+    // MARK: Activity (what outreach is doing right now)
+
+    /// Searches, people and referrer searches in progress, in words (OutreachActivity.swift).
+    func activity(now: Date = Date()) -> OutreachActivity {
+        OutreachActivity.derive(work: data.work, scouting: scouting, recentlyQueued: googleQueuedAt,
+                                companyName: { [weak self] in self?.companyName(id: $0) }, now: now)
+    }
+
+    func companyName(id: Int) -> String? {
+        data.prospects.first { $0.companyID == id }?.company ?? data.work.companyNames[id] ?? contacts(companyID: id).first?.company
+    }
+
+    /// True while the app shows "Finding people" for this company (its site, or its queued Google
+    /// results), so a `scout_finished` for it is news worth a toast.
+    func isFollowingScout(companyID: Int) -> Bool {
+        if scouting.contains(companyID) || data.work.googleQueue.contains(companyID) || googleQueuedAt[companyID] != nil { return true }
+        if case .people(let id)? = data.work.google.active { return id == companyID }
+        return false
+    }
     func endScouting(companyID: Int) { scouting.remove(companyID) }
 }

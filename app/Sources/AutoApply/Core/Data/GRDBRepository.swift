@@ -353,6 +353,23 @@ final class GRDBRepository: AppRepository {
                 if case .string(let email)? = o["email"] { out.mailAccount.email = email }
                 if case .bool(let on)? = o["send_enabled"] { out.mailAccount.sendEnabled = on }
             }
+            // What outreach is doing: searches, the Google queues and why they wait.
+            var work = [String: String]()
+            for row in try Row.fetchAll(db, sql: """
+                SELECT key, value FROM meta WHERE key IN ('outreach_prospect_searches', 'outreach_google_queue',
+                                                          'outreach_referrer_queue', 'outreach_google_status')
+                """) {
+                work[row["key"]] = row["value"]
+            }
+            out.work = OutreachWork.decode(searches: work["outreach_prospect_searches"], googleQueue: work["outreach_google_queue"],
+                                           referrerQueue: work["outreach_referrer_queue"], status: work["outreach_google_status"])
+            let ids = out.work.queuedCompanyIDs
+            if !ids.isEmpty {
+                let list = ids.sorted().map(String.init).joined(separator: ",")
+                for row in try Row.fetchAll(db, sql: "SELECT id, name FROM companies WHERE id IN (\(list))") {
+                    out.work.companyNames[row["id"]] = row["name"]
+                }
+            }
             return out
         }
     }

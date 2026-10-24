@@ -295,8 +295,11 @@ enum MockOutreach {
                     data.log("outreach", "found 2 people at \(name)")
                     return people.count
                 }
+                // The site half is done; the Google half waits for the browser (as autoapplyd does).
+                MockActivity.queueGooglePeople(world, companyID: companyID)
                 world.emit(.scoutFinished(ScoutFinishedPayload(companyId: companyID, purpose: p.purpose, applicationId: p.applicationId,
                                                                found: found, withEmail: found, bestConfidence: 86, queuedGoogle: true)))
+                await MockActivity.runGooglePeople(world, companyIDs: [companyID], purpose: p.purpose, applicationID: p.applicationId)
             }
 
         case .addContact(let p):
@@ -613,10 +616,12 @@ enum MockOutreach {
             return Handled(reply: ack(["send_enabled": .bool(true), "test_sent_to": .string(email)]))
 
         case .searchProspects(let p):
-            return Handled(reply: ack(["search_id": .string("mocksearch")])) { world in
-                await world.sleep(2)
-                world.repository.update { data in
+            let sid = MockActivity.newSearchID("mocksearch")
+            repo.update { MockActivity.addSearch(&$0, id: sid, kind: .companies, query: p.query, location: p.location, status: .queued, stage: nil) }
+            return Handled(reply: ack(["search_id": .string(sid)])) { world in
+                await MockActivity.runGoogleSearch(world, id: sid, stage: "search") { data in
                     let start = (data.outreach.prospects.map(\.id).max() ?? 0) + 1
+                    var added = 0
                     for (k, name) in ["Clickhouse", "Temporal"].enumerated() where !data.outreach.prospects.contains(where: { $0.company == name }) {
                         let company = MockFixtures.companies.first { $0.name == name }
                         data.outreach.prospects.append(ProspectItem(
@@ -624,7 +629,9 @@ enum MockOutreach {
                             fitScore: 79 - k * 6, fitSummary: "Matches “\(p.query)”.", summary: "\(name) builds developer infrastructure.",
                             summaryURL: company.map { "https://\($0.domain)" }, matchingRoles: 1, foundVia: "search", searchQuery: p.query,
                             createdAt: Date()))
+                        added += 1
                     }
+                    return added
                 }
             }
 
@@ -651,10 +658,23 @@ enum MockOutreach {
 
         case .discoverStartups(let p):
             let place = p.location.c3Trimmed ?? MockFixtures.profile.location ?? "Bengaluru, India"
-            return Handled(reply: ack(["search_id": .string("mockstartups"), "location": .string(place),
+            let sid = MockActivity.newSearchID("mockstartups")
+            repo.update { MockActivity.addSearch(&$0, id: sid, kind: .startups, query: "Startups in \(place)", location: place,
+                                                 status: .running, stage: "yc", ycOnly: p.ycOnly) }
+            return Handled(reply: ack(["search_id": .string(sid), "location": .string(place),
                                        "queued_google": .bool(!p.ycOnly)])) { world in
+                // YC's directory over HTTP right away, then funding news when the browser is free.
                 await world.sleep(2)
-                world.repository.update { data in _ = MockStartups.discover(&data, payload: p, label: place) }
+                let found = world.repository.update { data in MockStartups.discover(&data, payload: p, label: place) }
+                MockActivity.updateSearch(world, id: sid) { s in
+                    s.found = found
+                    s.ycDone = true
+                    s.stage = nil
+                    s.status = p.ycOnly ? .done : .queued
+                    if p.ycOnly { s.finishedAt = Date() }
+                }
+                guard !p.ycOnly else { return }
+                await MockActivity.runGoogleSearch(world, id: sid, stage: "news") { _ in 0 }
             }
 
         case .scoutTopProspects(let p):
@@ -690,9 +710,11 @@ enum MockOutreach {
                         }
                         data.log("outreach", "found people at \(q.company)")
                     }
+                    MockActivity.queueGooglePeople(world, companyID: q.companyID)
                     world.emit(.scoutFinished(ScoutFinishedPayload(companyId: q.companyID, purpose: .prospect, found: 2, withEmail: 2,
-                                                                   bestConfidence: 72, queuedGoogle: false)))
+                                                                   bestConfidence: 72, queuedGoogle: true)))
                 }
+                await MockActivity.runGooglePeople(world, companyIDs: queued.map(\.companyID), purpose: .prospect)
             }
 
         case .suggestReferrers(let p):

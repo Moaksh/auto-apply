@@ -978,9 +978,17 @@ class Daemon:
 
         if not outreach_service.AUTO_ENABLED:
             return False
-        if self.outreach is None or self.pipeline is None or self.paused or not self.outreach.has_google_work():
+        if self.outreach is None or self.pipeline is None or self.outreach.google_running:
+            return False
+        if not self.outreach.has_google_work():
+            self.outreach.note_google_waiting(None)  # nothing left: the app stops showing a wait
+            return False
+        # The app shows why queued Google work waits (paused, the browser busy, today's limit).
+        if self.paused:
+            self.outreach.note_google_waiting("paused")
             return False
         if (self.coordinator and self.coordinator.busy) or self.pipeline.browser_lock.locked():
+            self.outreach.note_google_waiting("browser_busy")
             return False
         async with self.pipeline.browser_lock:
             await self.outreach.run_google_work()

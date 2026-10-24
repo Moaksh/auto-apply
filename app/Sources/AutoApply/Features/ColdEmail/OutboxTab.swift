@@ -468,7 +468,8 @@ struct AppliedJobPanel: View {
 
     var body: some View {
         let contacts = store.outreach.contacts(companyID: job.companyID)
-        let scouting = store.outreach.scouting.contains(job.companyID)
+        let phase = store.outreach.activity().scouts[job.companyID]
+        let scouting = phase?.working == true
         VStack(alignment: .leading, spacing: Space.l) {
             VStack(alignment: .leading, spacing: Space.xs) {
                 Text("Applied, no note yet").eyebrowStyle()
@@ -491,6 +492,9 @@ struct AppliedJobPanel: View {
                     .help("Looks on \(job.company)'s site, GitHub and Google results at a human pace")
                 }
                 .padding(.bottom, Space.s)
+                if let phase, !phase.working {
+                    ScoutPhaseNote(phase: phase, company: job.company).padding(.bottom, Space.s)
+                }
                 if contacts.isEmpty {
                     Text(scouting ? "Looking on \(job.company)'s site, GitHub and Google results…"
                          : "No one found yet. The agent looks for a recruiter named in the posting, then the hiring manager.")

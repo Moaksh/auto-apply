@@ -239,6 +239,12 @@ final class AppStore {
         }
         live.apply(event, replyTo: envelope.replyTo, now: now)
         inbox.apply(event, now: now)
+        // A people search the app shows as in progress ended: say what it found (before the reducer forgets it).
+        if case .scoutFinished(let p) = event, outreach.isFollowingScout(companyID: p.companyId) {
+            let company = outreach.companyName(id: p.companyId) ?? jobs.all.first { $0.companyID == p.companyId }?.company ?? "the company"
+            toasts.show(OutreachActivity.scoutResult(p, company: company), symbol: p.withEmail > 0 ? "person.2.fill" : "person.2",
+                        style: p.withEmail > 0 ? .success : .info, duration: .seconds(4))
+        }
         outreach.apply(event)
         AppNotifier.shared.handle(event, store: self)
         switch event {

@@ -115,4 +115,42 @@ struct ColdEmailWindowShots {
         await shoot("empty-could-refer", store: empty) { ColdEmailView(modelOverride: emptyRefer) }
         await empty.stop()
     }
+
+    /// Companies while I work: a startup search reading funding news, a company search waiting on
+    /// today's limit, people being found at one company and Google results queued at another.
+    @Test(.enabled(if: outDir != nil)) func companiesWhileWorking() async {
+        let store = await mockStore()
+        let repo = store.repository as? InMemoryRepository
+        let ids = store.outreach.activeProspects.prefix(2).map(\.companyID)
+        repo?.update { data in
+            data.outreach.work.searches = [
+                OutreachWork.Search(id: "c", kind: .companies, query: "developer tools", location: "Bengaluru", status: .queued, createdAt: Date()),
+                OutreachWork.Search(id: "s", kind: .startups, query: "Startups in Bengaluru, India", location: "Bengaluru, India",
+                                    status: .running, stage: "news", step: 2, steps: 3, found: 12, ycDone: true, createdAt: Date()),
+            ]
+            data.outreach.work.googleQueue = Array(ids.dropFirst())
+            data.outreach.work.google = .init(state: .running, active: .search(id: "s"), updatedAt: Date())
+        }
+        if let first = ids.first { store.outreach.beginScouting(companyID: first) }
+        _ = await waitUntil { !store.outreach.data.work.searches.isEmpty }
+        for scheme in [ColorScheme.light, .dark] {
+            let model = ColdEmailModel(store: store)
+            model.tab = .prospects
+            model.selectedProspectID = store.outreach.activeProspects.first?.id
+            await shoot("companies-working", store: store, scheme: scheme) { ColdEmailView(modelOverride: model) }
+        }
+        repo?.update { data in
+            data.outreach.work.searches = [OutreachWork.Search(id: "s", kind: .startups, query: "Startups in Bengaluru, India",
+                                                               location: "Bengaluru, India", status: .done, found: 14, ycDone: true,
+                                                               createdAt: Date(), finishedAt: Date())]
+            data.outreach.work.googleQueue = []
+            data.outreach.work.google = .init()
+        }
+        if let first = ids.first { store.outreach.endScouting(companyID: first) }
+        _ = await waitUntil { store.outreach.data.work.googleQueue.isEmpty }
+        let done = ColdEmailModel(store: store)
+        done.tab = .prospects
+        await shoot("companies-found", store: store) { ColdEmailView(modelOverride: done) }
+        await store.stop()
+    }
 }

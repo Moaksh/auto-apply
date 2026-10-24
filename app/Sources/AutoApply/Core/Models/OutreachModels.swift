@@ -552,6 +552,8 @@ struct OutreachData: Sendable, Hashable {
     var referrals: [ReferralItem] = []
     var prospects: [ProspectItem] = []
     var mailAccount = MailAccountInfo()
+    /// Searches and Google work in progress (meta; OutreachActivity.swift).
+    var work = OutreachWork()
 }
 
 // MARK: - Employer replies

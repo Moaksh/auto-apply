@@ -97,7 +97,7 @@ async def test_yc_directory_startups_land_with_facts_and_a_rank(world: World):
     assert "regions%3AIndia" in params and "status%3AActive" in params and "hitsPerPage=40" in params
     assert route.calls[0].request.headers["user-agent"].startswith("AutoApply/")
     s = prospects.get_search(world.conn, res["search_id"])
-    assert s["status"] == "done" and s["found"] == 4
+    assert s["status"] == "done" and s["found"] == 4 and s["finished_at"] and s.get("stage") is None
 
 
 @respx.mock

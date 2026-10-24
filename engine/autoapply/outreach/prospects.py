@@ -42,6 +42,11 @@ MAX_PEOPLE_PER_COMPANY = 2
 MAX_RESULT_PAGES_PER_QUERY = 3
 MAX_COMPANIES_PER_SEARCH = 15
 META_SEARCHES = "outreach_prospect_searches"
+# A search's ``stage`` while it runs (the app prints it): "yc" (YC's directory over HTTP), then the
+# Google half: "news" / "search" (reading result pages, ``step`` of ``steps``) and "saving" (reading
+# and scoring the companies found). A search left ``running`` in a Google stage was interrupted (the
+# daemon stopped mid-way) and is picked up again.
+GOOGLE_STAGES = ("news", "search", "saving")
 
 QUERIES_SCHEMA = {"type": "object", "properties": {"queries": {"type": "array", "items": {"type": "string"}, "maxItems": 4}},
                   "required": ["queries"]}
@@ -80,7 +85,7 @@ def queue_startup_search(conn: sqlite3.Connection, place: dict[str, str | None],
     items = list(db.get_meta(conn, META_SEARCHES, []) or [])
     items.append({"id": sid, "kind": "startups", "query": f"Startups in {label}", "location": label, "place": place,
                   "yc_only": yc_only, "hiring_only": hiring_only, "stages": stages, "limit": limit,
-                  "status": "running", "created_at": now_ts(), "found": 0})
+                  "status": "running", "stage": "yc", "created_at": now_ts(), "found": 0})
     db.set_meta(conn, META_SEARCHES, items[-30:])
     return sid
 
@@ -98,7 +103,9 @@ def update_search(conn: sqlite3.Connection, sid: str, **fields: Any) -> None:
 
 
 def pending_searches(conn: sqlite3.Connection) -> list[dict[str, Any]]:
-    return [s for s in (db.get_meta(conn, META_SEARCHES, []) or []) if s.get("status") == "queued"]
+    """Searches waiting for Google: queued, or interrupted in a Google stage."""
+    return [s for s in (db.get_meta(conn, META_SEARCHES, []) or [])
+            if s.get("status") == "queued" or (s.get("status") == "running" and s.get("stage") in GOOGLE_STAGES)]
 
 
 def finish_search(conn: sqlite3.Connection, sid: str, status: str, found: int) -> None:
@@ -106,7 +113,7 @@ def finish_search(conn: sqlite3.Connection, sid: str, status: str, found: int) -
     for s in items:
         if s.get("id") == sid:
             s.update(status=status, found=int(s.get("found") or 0) + found if s.get("kind") == "startups" else found,
-                     finished_at=now_ts())
+                     finished_at=now_ts(), stage=None, step=None, steps=None)
     db.set_meta(conn, META_SEARCHES, items)
 
 

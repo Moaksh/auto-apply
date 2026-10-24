@@ -76,6 +76,13 @@ DELIVERED_AFTER_H = 72
 META_REFERRER_QUEUE = "outreach_referrer_queue"
 META_DRAFTS_NOTIFIED = "outreach_drafts_notified"
 META_DAILY_DONE = "outreach_daily_maintenance"
+# What the queued Google work is doing (the app shows it): {"state": "running"|"waiting"|"idle",
+# "active": {"kind": "people"|"referrers"|"search", "company_id"|"search_id"} | None,
+# "people" / "searches": {"reason", "resumes_at"} | None (why that lane waits), "updated_at"}.
+# Reasons: paused, browser_busy (a run holds the agent's browser), daily_limit (today's Google
+# result pages are used; resumes at local midnight), resting (Google showed a security check),
+# off (the people finder's daily limit is 0), next_turn (it runs the next time the browser is free).
+META_GOOGLE_STATUS = "outreach_google_status"
 
 EmitFn = Callable[[str, Any], Awaitable[None]]
 SpawnFn = Callable[[Coroutine[Any, Any, Any], str], Any]
@@ -895,7 +902,7 @@ class OutreachService:
                     found = await yc.search(place.country or "", hiring_only=bool(s.get("hiring_only")), limit=max(limit * 2, 20))
                 except startups.YCUnavailable as e:
                     log.info("YC directory unavailable, falling back to Google results: %s", e)
-                    prospects.update_search(self.conn, sid, yc_fallback=True, status="queued")
+                    prospects.update_search(self.conn, sid, yc_fallback=True, status="queued", stage=None)
                     return 0
                 # Same city first, then YC's own order (newest batch first).
                 found.sort(key=lambda c: 0 if startups.same_city(c.city, place.city) else 1)
@@ -911,11 +918,15 @@ class OutreachService:
                     cid = self._save_yc(c, label=str(s.get("location") or place.label), prefs=prefs)
                     if cid is not None:
                         saved.append(cid)
+                        prospects.update_search(self.conn, sid, found=len(saved))
                 n = len(saved)
                 await self._rate_fits(saved, prefs)
         except Exception:  # noqa: BLE001 - background work: log, never crash the daemon
             log.exception("startup search %s (YC) failed", sid)
-        prospects.update_search(self.conn, sid, found=n, yc_done=True, status="done" if s.get("yc_only") else "queued")
+        if s.get("yc_only"):
+            prospects.update_search(self.conn, sid, found=n, yc_done=True, status="done", stage=None, finished_at=now_ts())
+        else:
+            prospects.update_search(self.conn, sid, found=n, yc_done=True, status="queued", stage=None)
         db.log_event(self.conn, "outreach", f"startups in {place.label}: {n} from YC's directory", payload={"search_id": sid})
         return n
 
@@ -987,7 +998,8 @@ class OutreachService:
         label = str(s.get("location") or place.label)
         async with self.http_factory() as http:
             yc = startups.YCDirectory(self.conn, http, sleep=self.sleep, now=self.now)
-            for q in queries:
+            for i, q in enumerate(queries):
+                prospects.update_search(self.conn, s["id"], status="running", stage="news", step=i + 1, steps=len(queries))
                 hits = await reader.read(q)
                 if hits is None:
                     break
@@ -1019,6 +1031,7 @@ class OutreachService:
                             rounds[fr.company.lower()] = fr
                     if len(rounds) >= prospects.MAX_COMPANIES_PER_SEARCH:
                         break
+            prospects.update_search(self.conn, s["id"], status="running", stage="saving", step=None, steps=None)
             for c in yc_found:
                 if s.get("hiring_only") and c.is_hiring is not True:
                     continue
@@ -1383,6 +1396,11 @@ class OutreachService:
 
     # ---- Google work (agent Chrome) ----------------------------------------------------------
 
+    @property
+    def google_running(self) -> bool:
+        """A turn of Google work is under way (it records its own status)."""
+        return self._google_lock.locked()
+
     def has_google_work(self) -> bool:
         return bool(google_queue(self.conn) or db.get_meta(self.conn, META_REFERRER_QUEUE, []) or prospects.pending_searches(self.conn))
 
@@ -1393,50 +1411,106 @@ class OutreachService:
         if self.is_paused() or not self.has_google_work() or self._google_lock.locked():
             return done
         async with self._google_lock:
-            prefs = db.get_preferences(self.conn)
-            people = google_people.GoogleReader(self.conn, self.browser_factory(), budget_key=google_people.PEOPLE_KEY,
-                                                limit=lambda: db.get_preferences(self.conn).people_finder_visits_per_day,
-                                                pacer=self.pacer, is_paused=self.is_paused)
             try:
-                for item in google_queue(self.conn):
-                    if not people.available():
-                        break
-                    purpose = ScoutPurpose(item.get("purpose") or "application")
-                    try:
-                        await self.scout.scout_google(int(item["company_id"]), purpose, people, job_id=item.get("job_id"))
-                    except google_people.NavigationRefused:
-                        raise
-                    except db.NotFound:
-                        pop_google(self.conn, int(item["company_id"]), purpose.value)
-                        continue
-                    done["scouts"] += 1
-                    if purpose is ScoutPurpose.APPLICATION and item.get("application_id"):
-                        await self._auto_draft(int(item["company_id"]), int(item["application_id"]))
-                for item in list(db.get_meta(self.conn, META_REFERRER_QUEUE, []) or []):
-                    if not people.available():
-                        break
-                    await self._find_referrers(int(item["company_id"]), item.get("job_id"), people, location=item.get("location"))
-                    rest = [i for i in (db.get_meta(self.conn, META_REFERRER_QUEUE, []) or []) if i.get("company_id") != item["company_id"]]
-                    db.set_meta(self.conn, META_REFERRER_QUEUE, rest)
-                    done["referrers"] += 1
+                await self._run_google_work(done)
             finally:
-                await people.close()
-            searches = prospects.pending_searches(self.conn)
-            if searches:
-                reader = google_people.GoogleReader(self.conn, self.browser_factory(), budget_key=google_people.PROSPECT_KEY,
-                                                    limit=lambda: google_people.PROSPECT_VISITS_PER_DAY, pacer=self.pacer,
-                                                    is_paused=self.is_paused)
-                try:
-                    for s in searches:
-                        if not reader.available():
-                            break
-                        found = (await self._run_startup_news(s, reader, prefs) if s.get("kind") == "startups"
-                                 else await self._run_search(s, reader, prefs))
-                        prospects.finish_search(self.conn, s["id"], "done", found)
-                        done["searches"] += 1
-                finally:
-                    await reader.close()
+                self.note_google_waiting(None)
         return done
+
+    async def _run_google_work(self, done: dict[str, int]) -> None:
+        prefs = db.get_preferences(self.conn)
+        people = google_people.GoogleReader(self.conn, self.browser_factory(), budget_key=google_people.PEOPLE_KEY,
+                                            limit=lambda: db.get_preferences(self.conn).people_finder_visits_per_day,
+                                            pacer=self.pacer, is_paused=self.is_paused)
+        try:
+            for item in google_queue(self.conn):
+                if not people.available():
+                    break
+                purpose = ScoutPurpose(item.get("purpose") or "application")
+                self._google_active({"kind": "people", "company_id": int(item["company_id"])})
+                try:
+                    await self.scout.scout_google(int(item["company_id"]), purpose, people, job_id=item.get("job_id"))
+                except google_people.NavigationRefused:
+                    raise
+                except db.NotFound:
+                    pop_google(self.conn, int(item["company_id"]), purpose.value)
+                    continue
+                done["scouts"] += 1
+                thread_id = None
+                if purpose is ScoutPurpose.APPLICATION and item.get("application_id"):
+                    thread_id = await self._auto_draft(int(item["company_id"]), int(item["application_id"]))
+                # The Google half is done too: the app's "Finding people" ends with the result.
+                found, with_email, best = self._company_summary(int(item["company_id"]))
+                await self.emit("scout_finished", ScoutFinishedPayload(
+                    company_id=int(item["company_id"]), purpose=purpose, application_id=item.get("application_id"), found=found,
+                    with_email=with_email, best_confidence=best, queued_google=False, thread_id=thread_id))
+            for item in list(db.get_meta(self.conn, META_REFERRER_QUEUE, []) or []):
+                if not people.available():
+                    break
+                self._google_active({"kind": "referrers", "company_id": int(item["company_id"])})
+                await self._find_referrers(int(item["company_id"]), item.get("job_id"), people, location=item.get("location"))
+                rest = [i for i in (db.get_meta(self.conn, META_REFERRER_QUEUE, []) or []) if i.get("company_id") != item["company_id"]]
+                db.set_meta(self.conn, META_REFERRER_QUEUE, rest)
+                done["referrers"] += 1
+        finally:
+            await people.close()
+        searches = prospects.pending_searches(self.conn)
+        if searches:
+            reader = google_people.GoogleReader(self.conn, self.browser_factory(), budget_key=google_people.PROSPECT_KEY,
+                                                limit=lambda: google_people.PROSPECT_VISITS_PER_DAY, pacer=self.pacer,
+                                                is_paused=self.is_paused)
+            try:
+                for s in searches:
+                    if not reader.available():
+                        break
+                    self._google_active({"kind": "search", "search_id": s["id"]})
+                    found = (await self._run_startup_news(s, reader, prefs) if s.get("kind") == "startups"
+                             else await self._run_search(s, reader, prefs))
+                    prospects.finish_search(self.conn, s["id"], "done", found)
+                    done["searches"] += 1
+            finally:
+                await reader.close()
+
+    # ---- what the Google work is doing (META_GOOGLE_STATUS) ------------------------------------
+
+    def _set_google_status(self, value: dict[str, Any]) -> None:
+        """Write the status only when it changed (every write wakes the app's readers)."""
+        cur = db.get_meta(self.conn, META_GOOGLE_STATUS, None) or {}
+        if {k: v for k, v in cur.items() if k != "updated_at"} == value:
+            return
+        db.set_meta(self.conn, META_GOOGLE_STATUS, {**value, "updated_at": now_ts()})
+
+    def _google_active(self, active: dict[str, Any]) -> None:
+        self._set_google_status({"state": "running", "active": active, "people": None, "searches": None})
+
+    def note_google_waiting(self, blocker: str | None) -> None:
+        """Record why queued Google work is waiting (or that none is left). ``blocker``: what keeps
+        the browser right now ("paused", "browser_busy"), None after a turn that ran. A lane out of
+        its daily pages, or Google's rest, outranks the blocker: freeing the browser won't start it."""
+        people_work = bool(google_queue(self.conn) or db.get_meta(self.conn, META_REFERRER_QUEUE, []))
+        search_work = bool(prospects.pending_searches(self.conn))
+        if not people_work and not search_work:
+            self._set_google_status({"state": "idle", "active": None, "people": None, "searches": None})
+            return
+        rest = db.get_meta(self.conn, google_people._REST_META, None)
+        resting = bool(rest and str(rest) > utcnow().isoformat())
+        tomorrow = format_ts(db.local_day_start(self.now()) + timedelta(days=1))
+
+        def lane(key: str, limit: int) -> dict[str, Any]:
+            if resting:
+                return {"reason": "resting", "resumes_at": format_ts(parse_ts(rest))}
+            if limit <= 0 and key == google_people.PEOPLE_KEY:
+                return {"reason": "off", "resumes_at": None}
+            if db.get_source_sessions(self.conn, key) >= limit:
+                return {"reason": "daily_limit", "resumes_at": tomorrow}
+            return {"reason": blocker or "next_turn", "resumes_at": None}
+
+        prefs = db.get_preferences(self.conn)
+        self._set_google_status({
+            "state": "waiting", "active": None,
+            "people": lane(google_people.PEOPLE_KEY, prefs.people_finder_visits_per_day) if people_work else None,
+            "searches": lane(google_people.PROSPECT_KEY, google_people.PROSPECT_VISITS_PER_DAY) if search_work else None,
+        })
 
     async def _find_referrers(self, company_id: int, job_id: int | None, reader: google_people.GoogleReader, *,
                               location: str | None = None) -> int:
@@ -1476,7 +1550,8 @@ class OutreachService:
         queries = await prospects.prospect_queries(self.llm, s["query"], s.get("location"), prefs)
         found: dict[str, prospects.FoundCompany] = {}
         async with self.http_factory() as http:
-            for q in queries:
+            for i, q in enumerate(queries):
+                prospects.update_search(self.conn, s["id"], status="running", stage="search", step=i + 1, steps=len(queries))
                 hits = await reader.read(q)
                 if hits is None:
                     break
@@ -1495,6 +1570,7 @@ class OutreachService:
                         found.setdefault(fc.name.lower(), fc)
                     if len(found) >= prospects.MAX_COMPANIES_PER_SEARCH:
                         break
+            prospects.update_search(self.conn, s["id"], status="running", stage="saving", step=None, steps=None)
             n = 0
             for fc in list(found.values())[: prospects.MAX_COMPANIES_PER_SEARCH]:
                 if prospects.excluded(prefs, fc.name) or db.company_dismissed(self.conn, fc.name):

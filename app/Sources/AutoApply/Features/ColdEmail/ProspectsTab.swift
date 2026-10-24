@@ -5,7 +5,9 @@
 // print the key facts (round, amount, date, YC batch, city). The detail pane shows what they do, the
 // Funding & signals breakdown with every source, why it fits, the people found there and people who
 // could refer you (your LinkedIn connections first, then people in your city). Find startups / Search
-// is the tab's one primary action; Find people at the top 5 is a link.
+// is the tab's one primary action; Find people at the top 5 is a link. Under the finder, the activity
+// strip says what I'm doing (searches by stage, people being found, why Google work waits) and a
+// finished search's result; each row shows its own "Finding people…" (OutreachActivityViews.swift).
 import SwiftUI
 
 struct ProspectsTab: View {
@@ -17,6 +19,7 @@ struct ProspectsTab: View {
         HStack(spacing: 0) {
             VStack(alignment: .leading, spacing: 0) {
                 finder
+                OutreachActivityStrip()
                 Divider()
                 listHeader
                 list
@@ -126,10 +129,11 @@ struct ProspectsTab: View {
                         : "Clear YC only, Hiring now or the stage to see the rest.")
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
+            let scouts = store.outreach.activity().scouts
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Space.xxs) {
                     ForEach(prospects) { p in
-                        ProspectRow(prospect: p, isSelected: model.selectedProspect?.id == p.id)
+                        ProspectRow(prospect: p, isSelected: model.selectedProspect?.id == p.id, phase: scouts[p.companyID])
                             .onTapGesture { model.selectedProspectID = p.id }
                             .motionTransition(.row)
                     }
@@ -161,6 +165,8 @@ struct ProspectsTab: View {
 private struct ProspectRow: View {
     var prospect: ProspectItem
     var isSelected: Bool
+    /// People being found here ("Find people", "Find people at the top 5", Shortlist).
+    var phase: OutreachActivity.ScoutPhase?
     @Environment(AppStore.self) private var store
 
     var body: some View {
@@ -177,6 +183,10 @@ private struct ProspectRow: View {
                 }
                 Text(prospect.fitSummary ?? prospect.summary ?? prospect.foundViaLabel)
                     .font(Typography.callout).foregroundStyle(Palette.textSecondary).lineLimit(2)
+                if let phase {
+                    ScoutPhaseTag(phase: phase)
+                        .motionTransition(.fade)
+                }
             }
             Spacer(minLength: 0)
             if let score = prospect.score { Badge(score: score) }
@@ -256,11 +266,8 @@ private struct ProspectDetail: View {
                     .buttonStyle(.secondaryLink)
                     .disabled(busy || !store.isConnected)
                 }
-                if store.outreach.scouting.contains(prospect.companyID) {
-                    HStack(spacing: Space.s) {
-                        ProgressView().controlSize(.small)
-                        Text("Finding people…").font(Typography.callout).foregroundStyle(Palette.textSecondary)
-                    }
+                if let phase = store.outreach.activity().scouts[prospect.companyID] {
+                    ScoutPhaseNote(phase: phase, company: prospect.company)
                 }
                 if contacts.isEmpty {
                     Text(isSmallTeam
