@@ -1859,14 +1859,28 @@ class RecoveryReport:
     outreach_unknown: list[OutreachTransition] = field(default_factory=list)  # emails left in 'sending'
 
 
-def recover_interrupted_submissions(conn: sqlite3.Connection) -> list[Transition]:
-    """Every application left in ``submitting`` -> ``unknown_verify`` (never auto-retried)."""
+def recover_interrupted_submissions(
+    conn: sqlite3.Connection, *, older_than: datetime | None = None, keep: Iterable[int] = (),
+    reason: str = "crash_during_submit",
+) -> list[Transition]:
+    """Every application left in ``submitting`` -> ``unknown_verify`` (never auto-retried).
+
+    With ``older_than`` (the live daemon's sweep, ``Pipeline.expire_stale_submits``): only rows
+    that entered ``submitting`` before then, minus ``keep`` (submits this process still owns,
+    e.g. approved ones waiting for the browser behind a run). A ``submitting`` row nobody owns
+    would otherwise hold its company's cooldown (and the daily cap) with no end."""
+    keep_ids = set(keep)
+    sql = "SELECT id FROM applications WHERE state = 'submitting'"
+    args: tuple[Any, ...] = ()
+    if older_than is not None:
+        sql += " AND state_updated_at < ?"
+        args = (format_ts(older_than),)
     out: list[Transition] = []
     with transaction(conn):
-        for r in conn.execute("SELECT id FROM applications WHERE state = 'submitting'").fetchall():
-            out.append(
-                transition(conn, int(r["id"]), AppState.UNKNOWN_VERIFY, reason="crash_during_submit", actor=Actor.SYSTEM)
-            )
+        for r in conn.execute(sql, args).fetchall():
+            if int(r["id"]) in keep_ids:
+                continue
+            out.append(transition(conn, int(r["id"]), AppState.UNKNOWN_VERIFY, reason=reason, actor=Actor.SYSTEM))
     return out
 
 
@@ -2002,6 +2016,112 @@ def company_attempt_at(
         (company_id, -1 if exclude_application_id is None else exclude_application_id, since),
     ).fetchone()
     return parse_ts(row[0]) if row is not None and row[0] else None
+
+
+#: ``CompanyHold.kind`` (protocol.md ``approve``): why an application can't be sent now.
+HOLD_COOLDOWN = "cooldown"  # we applied to this company within the cooldown window
+HOLD_UNCONFIRMED = "unconfirmed_attempt"  # another application here is mid-submit or unverified
+HOLD_SAME_BATCH = "same_batch"  # another job at this company goes first (same approve / Review)
+
+
+@dataclass(slots=True)
+class CompanyHold:
+    """Why one application can't be sent now because of its company (the per-company cooldown).
+
+    ``other_*`` name the application holding the company (``None`` when the cooldown comes from
+    ``companies.last_applied_at`` with no matching application); ``since`` is when that attempt
+    happened; ``resets_at`` when this one may be sent."""
+
+    kind: str
+    company_id: int
+    company: str
+    since: datetime | None
+    resets_at: datetime | None
+    cooldown_days: int
+    other_application_id: int | None = None
+    other_job_id: int | None = None
+    other_state: str | None = None
+
+    def to_dict(self, application_id: int | None = None, job_id: int | None = None) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        if application_id is not None:
+            out["application_id"] = application_id
+            out["job_id"] = job_id
+        out.update({
+            "kind": self.kind, "company_id": self.company_id, "company": self.company,
+            "since": format_ts(self.since) if self.since else None,
+            "resets_at": format_ts(self.resets_at) if self.resets_at else None,
+            "cooldown_days": self.cooldown_days, "other_application_id": self.other_application_id,
+            "other_job_id": self.other_job_id, "other_state": self.other_state,
+        })
+        return out
+
+
+def company_hold(
+    conn: sqlite3.Connection, company_id: int, cooldown_days: int, now: datetime | None = None,
+    *, exclude_application_id: int | None = None,
+) -> CompanyHold | None:
+    """What holds this company right now, if anything: a recent application (``cooldown``) or
+    another one mid-submit / unverified (``unconfirmed_attempt``). Exactly the two company checks
+    the submit gate makes, with the details the app needs to explain them."""
+    if cooldown_days <= 0:
+        return None
+    now = now or utcnow()
+    row = _one(conn, "SELECT name, last_applied_at FROM companies WHERE id = ?", (company_id,))
+    if row is None:
+        return None
+    exclude = -1 if exclude_application_id is None else exclude_application_id
+    window = timedelta(days=cooldown_days)
+    last = parse_ts(row["last_applied_at"]) if row["last_applied_at"] else None
+    if last is not None and now - last < window:
+        other = conn.execute(
+            "SELECT a.id, a.job_id, a.state FROM applications a JOIN jobs j ON j.id = a.job_id "
+            "WHERE j.company_id = ? AND a.id <> ? AND a.submitted_at IS NOT NULL "
+            "ORDER BY a.submitted_at DESC LIMIT 1",
+            (company_id, exclude),
+        ).fetchone()
+        return CompanyHold(
+            HOLD_COOLDOWN, company_id, row["name"], last, last + window, cooldown_days,
+            other_application_id=int(other["id"]) if other else None,
+            other_job_id=int(other["job_id"]) if other else None,
+            other_state=other["state"] if other else None,
+        )
+    other = conn.execute(
+        "SELECT a.id, a.job_id, a.state, a.state_updated_at FROM applications a JOIN jobs j ON j.id = a.job_id "
+        "WHERE j.company_id = ? AND a.id <> ? AND (a.state = 'submitting' OR "
+        "(a.state = 'unknown_verify' AND a.state_updated_at >= ?)) "
+        "ORDER BY a.state_updated_at DESC LIMIT 1",
+        (company_id, exclude, format_ts(now - window)),
+    ).fetchone()
+    if other is None or not other["state_updated_at"]:
+        return None
+    at = min(parse_ts(other["state_updated_at"]), now)
+    return CompanyHold(
+        HOLD_UNCONFIRMED, company_id, row["name"], at, at + window, cooldown_days,
+        other_application_id=int(other["id"]), other_job_id=int(other["job_id"]), other_state=other["state"],
+    )
+
+
+def review_sendability(
+    conn: sqlite3.Connection, cooldown_days: int, now: datetime | None = None,
+) -> dict[int, CompanyHold]:
+    """Every application awaiting review that the submit gate would refuse now, by application
+    id, with why (``cooldown`` / ``unconfirmed_attempt``). Two jobs at one company both waiting
+    are each sendable on their own; approving them together sends one and holds the other
+    (``same_batch``, see the ``approve`` command). The app computes the same answer from the
+    same columns (``ReviewSendability`` in Swift) before it starts the send hold."""
+    now = now or utcnow()
+    out: dict[int, CompanyHold] = {}
+    if cooldown_days <= 0:
+        return out
+    rows = conn.execute(
+        "SELECT a.id, j.company_id FROM applications a JOIN jobs j ON j.id = a.job_id WHERE a.state = 'awaiting_review'"
+    ).fetchall()
+    for r in rows:
+        hold = company_hold(conn, int(r["company_id"]), cooldown_days, now, exclude_application_id=int(r["id"]))
+        if hold is not None:
+            out[int(r["id"])] = hold
+    return out
 
 
 def ghost_stale_applications(conn: sqlite3.Connection, ghost_after_days: int, now: datetime | None = None) -> list[ApplicationStatusPayload]:

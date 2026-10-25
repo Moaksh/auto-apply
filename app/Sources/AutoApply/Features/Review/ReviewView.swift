@@ -78,7 +78,9 @@ struct ReviewQueueView: View {
     // MARK: Header
 
     private func header(_ model: ReviewModel, count: Int) -> some View {
-        ScreenHeader("Review", summary: "\(count) ready · \(model.modeSummary)") {
+        // Jobs the agent can't send yet (their company) aren't "ready": they're waiting.
+        let waiting = model.queue.filter { model.isBlocked($0.id) }.count
+        return ScreenHeader("Review", summary: "\(count - waiting) ready\(waiting > 0 ? " · \(waiting) waiting" : "") · \(model.modeSummary)") {
             if count > 1 {
                 Text(model.selection.isEmpty ? "Tick jobs to approve several at once" : "\(model.selection.count) of \(count) selected")
                     .font(Typography.callout)
@@ -272,6 +274,8 @@ private struct ReviewRow: View {
 
     var body: some View {
         let flagged = model.isFlagged(job)
+        let block = hold == nil ? model.sendBlock(for: job.id) : nil
+        let blocked = block?.blocksSend == true
         HStack(spacing: Space.s) {
             if hold == nil {
                 Button {
@@ -306,6 +310,10 @@ private struct ReviewRow: View {
                     }
                 }
                 .transition(.opacity)
+            } else if let block, block.blocksSend {
+                // Can't be sent yet: say until when (or that it needs your word) instead of the score.
+                SendBlockRowMark(block: block)
+                    .help(ReviewSendability.message(block, in: store.jobs.all))
             } else {
                 if flagged {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -324,7 +332,7 @@ private struct ReviewRow: View {
         .opacity(hold?.isSending == true ? 0.6 : 1)
         .animation(Motion.resolve(Motion.snappy, reduceMotion: reduced), value: hold)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(job.displayName)\(hold != nil ? ", approved, sending soon" : "")\(notSent ? ", not sent" : "")\(flagged ? ", needs a look" : "")\(isSelected ? ", selected" : "")")
+        .accessibilityLabel("\(job.displayName)\(hold != nil ? ", approved, sending soon" : "")\(notSent ? ", not sent" : "")\(blocked ? ", can't send yet" : "")\(flagged ? ", needs a look" : "")\(isSelected ? ", selected" : "")")
     }
 }
 
@@ -343,6 +351,14 @@ private struct ReviewDetail: View {
         VStack(alignment: .leading, spacing: Space.m) {
             if style == .ticket {
                 ReviewTicket(model: model, job: job)
+                if let block = model.sendBlock(for: job.id) {
+                    if block.blocksSend {
+                        SendBlockNotice(model: model, job: job, block: block, isPrimary: noticeIsPrimary, showsSkip: false)
+                            .transition(.opacity)
+                    } else {
+                        SameCompanyHint(block: block)
+                    }
+                }
                 ticketFooter
             } else {
                 classicHeader
@@ -357,10 +373,13 @@ private struct ReviewDetail: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
+    /// A "can't send yet" notice carries the screen's one primary while nothing else asks.
+    private var noticeIsPrimary: Bool { model.selection.isEmpty && model.barMode == .actions }
+
     /// Under the ticket: why it's held, Skip, the job's mode and the posting.
     private var ticketFooter: some View {
         let held = model.isHeld(job.id)
-        let flagged = !held && model.needsLook(job)
+        let flagged = !held && !model.isBlocked(job.id) && model.needsLook(job)
         let keysMeanThisJob = model.selection.isEmpty
         return HStack(spacing: Space.s) {
             if model.sendHold.wasNotSent(job.id) { NotSentBadge() }
@@ -439,6 +458,11 @@ private struct ReviewDetail: View {
                 Spacer()
                 SendHoldCapsule(entry: hold) { model.undoHold(jobID: job.id) }
             }
+        } else if let block = model.sendBlock(for: job.id), block.blocksSend {
+            // The agent would refuse it now: say why and until when, instead of a doomed Approve.
+            let _ = probe?.classic()
+            SendBlockNotice(model: model, job: job, block: block, isPrimary: noticeIsPrimary)
+                .transition(.opacity)
         } else {
             approveActions
         }
@@ -453,6 +477,7 @@ private struct ReviewDetail: View {
         let isPrimary = keysMeanThisJob && model.barMode == .actions
         return HStack(spacing: Space.s) {
             if model.sendHold.wasNotSent(job.id) { NotSentBadge() }
+            if !flagged, let block = model.sendBlock(for: job.id) { SameCompanyHint(block: block) }
             if flagged {
                 Label(model.answersLoaded(job) ? "Some answers need a look before you send this" : "Answers are still loading",
                       systemImage: "exclamationmark.triangle.fill")

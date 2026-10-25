@@ -42,7 +42,7 @@ import sys
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -1149,28 +1149,73 @@ class Daemon:
         for a in apps:
             if a.state is not AppState.AWAITING_REVIEW:
                 raise db.IllegalTransition(a.id, a.state, AppState.SUBMITTING, Actor.USER, "not awaiting review")
+        # An orphaned ``submitting`` row must not hold a company (or the daily cap) forever.
+        await self.pipeline.expire_stale_submits()
         prefs = db.get_preferences(self.conn)
-        companies: set[int] = set()
-        for n, a in enumerate(apps):
+        now = self.pipeline._now()
+        # Pause and the daily cap refuse the whole batch. A company hold refuses only that job:
+        # the rest go, and the reply says why each held one stays in Review (``held``). In a
+        # batch with two jobs at one company the first listed goes (the app lists the focused /
+        # best-ranked job first) and the other is held as ``same_batch``.
+        approved: list[int] = []
+        held: list[dict[str, Any]] = []
+        refusals: list[tuple[Any, Any, SubmitCheck]] = []
+        lead_at: dict[int, tuple[int, int]] = {}  # company id -> (application id, job id) going now
+        for a in apps:
             job = db.get_job(self.conn, a.job_id)
-            check = self.pipeline.submit_gate(job, prefs, pending=n, application_id=a.id)
-            if check.allowed and job.company_id in companies and prefs.per_company_cooldown_days > 0:
-                check = SubmitCheck(allowed=False, cap=CapKind.COMPANY_COOLDOWN, reason="company_cooldown",
-                                    used=0, limit=prefs.per_company_cooldown_days)
+            lead = lead_at.get(job.company_id)
+            if lead is not None and prefs.per_company_cooldown_days > 0:
+                company = db.get_company(self.conn, job.company_id)
+                hold = db.CompanyHold(
+                    db.HOLD_SAME_BATCH, job.company_id, company.name, now,
+                    now + timedelta(days=prefs.per_company_cooldown_days), prefs.per_company_cooldown_days,
+                    other_application_id=lead[0], other_job_id=lead[1], other_state=AppState.SUBMITTING.value,
+                )
+                check = SubmitCheck(allowed=False, cap=CapKind.COMPANY_COOLDOWN, reason="company_same_batch",
+                                    used=0, limit=prefs.per_company_cooldown_days, resets_at=hold.resets_at, hold=hold)
+            else:
+                check = self.pipeline.submit_gate(job, prefs, pending=len(approved), application_id=a.id)
             if not check.allowed:
                 if check.reason == "paused":
                     raise PausedError("AutoApply is paused; resume first")
-                await self.pipeline.emit_cap(check, job.company_id)
-                raise CommandError(ErrorCode.CAP_REACHED, f"{check.reason}: cannot submit application {a.id} now",
-                                   details={"cap": check.cap.value if check.cap else None, "used": check.used, "limit": check.limit},
-                                   application_id=a.id, job_id=job.id)
-            companies.add(job.company_id)
-        for a in apps:
-            t = db.begin_submit(self.conn, a.id, actor=Actor.USER)
+                if check.hold is None:  # the daily cap: nothing is sent
+                    await self.pipeline.emit_cap(check, job.company_id)
+                    raise CommandError(ErrorCode.CAP_REACHED, f"{check.reason}: cannot submit application {a.id} now",
+                                       details=self._cap_details(check), application_id=a.id, job_id=job.id)
+                refusals.append((a, job, check))
+                held.append({**check.hold.to_dict(a.id, job.id), "reason": check.reason})
+                continue
+            approved.append(a.id)
+            lead_at[job.company_id] = (a.id, job.id)
+        for _a, job, check in refusals:
+            await self.pipeline.emit_cap(check, job.company_id)
+        if not approved:
+            a, job, check = refusals[0]
+            raise CommandError(ErrorCode.CAP_REACHED, f"{check.reason}: cannot submit application {a.id} now",
+                               details={**self._cap_details(check), "held": held}, application_id=a.id, job_id=job.id)
+        for app_id in approved:
+            t = db.begin_submit(self.conn, app_id, actor=Actor.USER)
+            self.pipeline.submits_in_flight.add(app_id)
             await self.emit("application_state", t.to_payload())
-        self._spawn(self.pipeline.submit_approved(ids), name="submit-approved")
+        for h in held:
+            db.log_event(self.conn, "guardrail", f"kept in Review: {h['reason']} ({h['company']})", actor=Actor.SYSTEM,
+                         job_id=h["job_id"], application_id=h["application_id"], payload=h)
+        self._spawn(self.pipeline.submit_approved(approved), name="submit-approved")
         await self._offer_earned_autonomy(prefs)
-        return {"application_ids": ids}
+        return {"application_ids": approved, "held": held} if held else {"application_ids": approved}
+
+    @staticmethod
+    def _cap_details(check: SubmitCheck) -> dict[str, Any]:
+        """``cap_reached`` error details: the cap, and for a company hold exactly what holds it
+        (``kind``, ``company``, ``since``, ``resets_at``, the other application) so the app can
+        say why and until when, instead of guessing from the message."""
+        out: dict[str, Any] = {
+            "cap": check.cap.value if check.cap else None, "used": check.used, "limit": check.limit,
+            "reason": check.reason, "resets_at": db.format_ts(check.resets_at) if check.resets_at else None,
+        }
+        if check.hold is not None:
+            out.update(check.hold.to_dict())
+        return out
 
     async def _offer_earned_autonomy(self, prefs: Any) -> None:
         """After Review approvals: a site in Review with enough clean approvals gets a one-time

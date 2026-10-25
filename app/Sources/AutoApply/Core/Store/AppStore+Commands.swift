@@ -207,7 +207,26 @@ extension AppStore {
             timeout: approvalTimeout,
             silent: true)
         switch result {
-        case .success:
+        case .success(let reply):
+            // Jobs the agent kept back (a company hold, e.g. the second job at one company):
+            // they stay in Review, and one toast says why and until when.
+            if case .ack(let ack) = reply.event, let raw = ack.result?["held"],
+               let held = try? raw.decode([CompanyHoldInfo].self), !held.isEmpty {
+                let kept = held.compactMap { h -> (job: JobItem, block: SendBlock)? in
+                    guard let appID = h.applicationId, let job = jobs.job(applicationID: appID),
+                          let block = h.sendBlock(fallbackCompany: job.company) else { return nil }
+                    return (job, block)
+                }
+                jobs.performBatch {
+                    for h in held {
+                        guard let appID = h.applicationId, let state = previous.first(where: { $0.0 == appID })?.1 else { continue }
+                        jobs.mutate(applicationID: appID) { $0.state = state }
+                    }
+                }
+                if !kept.isEmpty {
+                    toasts.show(ReviewSendability.keptToast(kept, all: jobs.all), symbol: "hand.raised", style: .info, duration: .seconds(6))
+                }
+            }
             return true
         case .failure(.timeout):
             toasts.show("Approval sent; waiting for the agent to confirm", symbol: "clock", style: .info)
@@ -219,22 +238,32 @@ extension AppStore {
         }
     }
 
-    /// Plain-English text for a `cap_reached` refusal (the daemon's message is "<reason>: cannot submit application N now").
-    private func approveErrorMessage(_ error: DaemonClientError) -> String? {
+    /// Plain-English text for a `cap_reached` refusal: exactly why (the agent's company hold in
+    /// `details`: cooldown since a date, an unconfirmed attempt, or the second job at one
+    /// company), until when, and what happens next. Older agents only send the message prefix
+    /// ("<reason>: cannot submit application N now"); that still reads right, without dates.
+    func approveErrorMessage(_ error: DaemonClientError) -> String? {
         guard case .daemon(let p) = error, p.code == .capReached else { return nil }
         let job = p.applicationId.flatMap { jobs.job(applicationID: $0) }
         let company = job?.company ?? "this company"
-        let title = job.map { " · \($0.title)" } ?? ""
-        let reason = p.message.split(separator: ":").first.map(String.init) ?? ""
-        switch reason {
-        case "company_cooldown":
-            return "Not sent: you applied to \(company) in the last \(preferences.perCompanyCooldownDays) days (or picked two \(company) jobs). \(company)\(title) stays in Review."
-        case "company_attempt_unconfirmed":
-            return "Not sent: another \(company) application is still being confirmed. \(company)\(title) stays in Review."
-        case "daily_cap":
-            return "Not sent: today's limit of \(preferences.dailyCap) applications is reached. Nothing was submitted; try again tomorrow."
-        default:
-            return nil
+        let name = job?.displayName ?? company
+        let prefix = p.message.split(separator: ":").first.map(String.init) ?? ""
+        if prefix == "daily_cap" || (p.details?["cap"]).flatMap({ if case .string(let s) = $0 { s } else { nil } }) == "daily" {
+            return "I didn't send it: today's limit of \(preferences.dailyCap) applications is reached. It stays in Review; approve it again tomorrow."
+        }
+        var info = p.details.flatMap { try? JSONValue.object($0).decode(CompanyHoldInfo.self) } ?? CompanyHoldInfo()
+        if info.reason == nil { info.reason = prefix }
+        guard let block = info.sendBlock(fallbackCompany: company) else { return nil }
+        let until = block.resetsAt.map { " until \(ReviewSendability.day($0))" } ?? ""
+        switch block.kind {
+        case .cooldown:
+            let when = block.since.map { " on \(ReviewSendability.day($0))" } ?? " recently"
+            let from = block.resetsAt.map { "I can send it from \(ReviewSendability.day($0))" } ?? "I'll send it once the \(preferences.perCompanyCooldownDays)-day wait is over"
+            return "I didn't send \(name): you applied to \(block.company)\(when). It stays in Review and \(from)."
+        case .unconfirmedAttempt(inFlight: false):
+            return "I didn't send \(name): I'm not sure your other \(block.company) application went through. Tell me in Review and I'll know whether this one can go."
+        case .unconfirmedAttempt(inFlight: true), .sameCompanyInReview:
+            return "I didn't send \(name): another \(block.company) application is going now, and I send one per company every \(preferences.perCompanyCooldownDays) days. It stays in Review\(until)."
         }
     }
 

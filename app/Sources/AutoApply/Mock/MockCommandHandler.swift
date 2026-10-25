@@ -20,6 +20,49 @@ enum MockCommandHandler {
         .error(ErrorPayload(code: code, message: message, jobId: jobID, applicationId: applicationID))
     }
 
+    /// `approve`'s per-company rule, like the agent's: which applications go, and a company hold
+    /// (protocol.md §5) for each one kept in Review.
+    static func companyHolds(_ applicationIDs: [Int], world: MockWorld) -> (approved: [Int], held: [[String: JSONValue]]) {
+        let days = world.read { $0.preferences.perCompanyCooldownDays }
+        let all = world.repository.read { $0.jobs }
+        var approved: [Int] = []
+        var held: [[String: JSONValue]] = []
+        var lead: [Int: JobItem] = [:]
+        let now = Date()
+        func ts(_ d: Date?) -> JSONValue { d.map { .string(ProtocolCoding.formatDate($0)) } ?? .null }
+        func int(_ i: Int?) -> JSONValue { i.map { .int($0) } ?? .null }
+        for id in applicationIDs {
+            guard let job = all.first(where: { $0.applicationID == id }) else { continue }
+            var kind: String?
+            var reason = "company_cooldown"
+            var block: SendBlock?
+            if days > 0, let first = lead[job.companyID] {
+                kind = "same_batch"
+                reason = "company_same_batch"
+                block = SendBlock(kind: .unconfirmedAttempt(inFlight: true), companyID: job.companyID, company: job.company,
+                                  otherJobID: first.id, otherApplicationID: first.applicationID, since: now,
+                                  resetsAt: now.addingTimeInterval(TimeInterval(days) * 86_400))
+            } else if let b = ReviewSendability.block(for: job, in: all, cooldownDays: days, now: now), b.blocksSend {
+                block = b
+                if b.kind == .cooldown { kind = "cooldown" } else { kind = "unconfirmed_attempt"; reason = "company_attempt_unconfirmed" }
+            }
+            guard let kind, let block else {
+                approved.append(id)
+                lead[job.companyID] = job
+                continue
+            }
+            let other = block.otherJobID.flatMap { oid in all.first { $0.id == oid } }
+            let otherState: String? = kind == "same_batch" ? AppState.submitting.rawValue : other?.state.rawValue
+            held.append([
+                "application_id": .int(id), "job_id": .int(job.id), "kind": .string(kind), "reason": .string(reason),
+                "company_id": .int(job.companyID), "company": .string(job.company), "since": ts(block.since),
+                "resets_at": ts(block.resetsAt), "cooldown_days": .int(days), "other_application_id": int(block.otherApplicationID),
+                "other_job_id": int(block.otherJobID), "other_state": otherState.map { .string($0) } ?? .null,
+            ])
+        }
+        return (approved, held)
+    }
+
     /// Overlay `patch` keys onto `value` (JSON object merge); explicit null → field default.
     static func merge<T: Codable>(_ value: T, patch: [String: JSONValue]) throws -> T {
         guard case .object(var object) = try JSONValue.encode(value) else { return value }
@@ -98,11 +141,26 @@ enum MockCommandHandler {
                 }
             }
             if world.isPaused { return Handled(reply: error(.paused, "Agent is paused")) }
-            return Handled(reply: ack(["application_ids": .array(p.applicationIds.map { .int($0) })])) { world in
-                for id in p.applicationIds {
+            // The agent's per-company rule (protocol.md §5, company hold): a company in its
+            // cooldown or with another application unconfirmed / in flight refuses that job, and a
+            // second job at one company in the batch is held as `same_batch`.
+            let (approved, held) = Self.companyHolds(p.applicationIds, world: world)
+            if approved.isEmpty, let first = held.first {
+                var details = first
+                details["cap"] = .string("company_cooldown")
+                details["held"] = .array(held.map { .object($0) })
+                let reason = (first["reason"]).flatMap { if case .string(let s) = $0 { s } else { nil } } ?? "company_cooldown"
+                let appID = (first["application_id"]).flatMap { if case .int(let i) = $0 { i } else { nil } }
+                return Handled(reply: .error(ErrorPayload(code: .capReached, message: "\(reason): cannot submit application \(appID ?? 0) now",
+                                                          details: details, applicationId: appID)))
+            }
+            var result: [String: JSONValue] = ["application_ids": .array(approved.map { .int($0) })]
+            if !held.isEmpty { result["held"] = .array(held.map { .object($0) }) }
+            return Handled(reply: ack(result)) { world in
+                for id in approved {
                     world.transition(applicationID: id, to: .submitting, actor: .user)
                 }
-                for id in p.applicationIds {
+                for id in approved {
                     await world.sleep(1.2)
                     world.transition(applicationID: id, to: .submitted)
                 }

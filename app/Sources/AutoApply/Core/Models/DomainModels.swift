@@ -39,6 +39,9 @@ struct JobItem: Identifiable, Sendable, Hashable {
     var companyID: Int
     var company: String
     var companyDomain: String?
+    /// `companies.last_applied_at`: when we last applied to this company (the per-company
+    /// cooldown, `ReviewSendability`).
+    var companyLastAppliedAt: Date?
     var title: String
     var location: String?
     var remote: RemotePolicy?

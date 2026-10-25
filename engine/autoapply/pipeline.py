@@ -115,6 +115,13 @@ class SubmitCheck:
     used: int = 0
     limit: int = 0
     resets_at: datetime | None = None
+    #: A company refusal's details (what holds the company, since when, which application).
+    hold: db.CompanyHold | None = None
+
+
+#: An application in ``submitting`` that no live task owns for this long is moved to
+#: ``unknown_verify`` (``Pipeline.expire_stale_submits``), so it can't hold its company forever.
+STALE_SUBMIT_AFTER = timedelta(minutes=float(os.environ.get("AUTOAPPLY_STALE_SUBMIT_MINUTES", "15")))
 
 
 #: Set while work runs outside any pipeline run (approved submits): transitions get no run
@@ -323,6 +330,26 @@ class Pipeline:
         #: (runs, approved submits, the daemon's source-connect window): Chromium allows a
         #: single process per user-data-dir.
         self.browser_lock = asyncio.Lock()
+        #: Applications in ``submitting`` that a live task of this process will still click (or
+        #: is clicking): ``expire_stale_submits`` leaves them alone however long they wait.
+        self.submits_in_flight: set[int] = set()
+
+    async def expire_stale_submits(self, now: datetime | None = None) -> list[int]:
+        """``submitting`` rows no live task owns, older than ``STALE_SUBMIT_AFTER`` ->
+        ``unknown_verify`` (like crash recovery: the click may have happened, never retried).
+
+        Without this an orphaned ``submitting`` row (a submit task that died) held its company
+        and a daily-cap slot until the next daemon restart. As ``unknown_verify`` the user can say
+        whether it went through (``resolve_unknown``), and it only holds the cooldown window."""
+        now = now or self._now()
+        moved = db.recover_interrupted_submissions(
+            self.conn, older_than=now - STALE_SUBMIT_AFTER, keep=self.submits_in_flight, reason="submit_stalled",
+        )
+        for t in moved:
+            await self.emit_transition(t)
+            await self._log(LogLevel.WARNING, "a submit never finished; please check whether it went through",
+                            job_id=t.job_id, application_id=t.application_id)
+        return [t.application_id for t in moved]
 
     # ---- emit helpers ------------------------------------------------------------------
 
@@ -1033,6 +1060,7 @@ class Pipeline:
         ``attempts today + in flight < daily_cap`` (so concurrent fills don't overshoot the
         cap — the final word is still ``submit_gate`` right before ``begin_submit``).
         """
+        await self.expire_stale_submits()
         apps = db.list_applications(self.conn, states=[AppState.QUEUED])
         total = len(apps)
         self._check_pause()
@@ -1070,23 +1098,19 @@ class Pipeline:
         self, company: Company, prefs: Preferences, *, application_id: int | None = None,
     ) -> SubmitCheck | None:
         now = self._now()
-        reason = "company_cooldown"
-        if db.company_in_cooldown(self.conn, company.id, prefs.per_company_cooldown_days, now):
-            last = parse_ts(company.last_applied_at) if company.last_applied_at else now
-        else:
-            # Not confirmed: another application here is mid-submit or unverified. Block, but
-            # callers keep the job queued (if that one turns out "not sent", this one may go).
-            reason = COMPANY_ATTEMPT_PENDING
-            attempt = company_attempt_at(
-                self.conn, company.id, prefs.per_company_cooldown_days, now, exclude_application_id=application_id,
-            )
-            if attempt is None:
-                return None
-            last = min(attempt, now)
+        hold = db.company_hold(
+            self.conn, company.id, prefs.per_company_cooldown_days, now, exclude_application_id=application_id,
+        )
+        if hold is None:
+            return None
+        # ``unconfirmed_attempt``: another application here is mid-submit or unverified. Block,
+        # but callers keep the job queued (if that one turns out "not sent", this one may go).
+        reason = "company_cooldown" if hold.kind == db.HOLD_COOLDOWN else COMPANY_ATTEMPT_PENDING
+        last = hold.since or now
         return SubmitCheck(
             allowed=False, cap=CapKind.COMPANY_COOLDOWN, reason=reason,
             used=max(0, (now - last).days), limit=prefs.per_company_cooldown_days,
-            resets_at=last + timedelta(days=prefs.per_company_cooldown_days),
+            resets_at=hold.resets_at, hold=hold,
         )
 
     def submit_gate(
@@ -1344,8 +1368,12 @@ class Pipeline:
                 raise CapReached()
             return AppState.QUEUED
         t = db.begin_submit(self.conn, app.id, run_id=self._run_db_id)
-        await self.emit_transition(t)
-        return await self.click_submit(app.id, adapter, ctx)
+        self.submits_in_flight.add(app.id)
+        try:
+            await self.emit_transition(t)
+            return await self.click_submit(app.id, adapter, ctx)
+        finally:
+            self.submits_in_flight.discard(app.id)
 
     async def _captcha_handoff_wanted(self, fill: Any, ctx: ApplyContext) -> bool:
         """Headless fill hit only a CAPTCHA: retry once in a visible window the user can solve it in."""
@@ -1404,30 +1432,43 @@ class Pipeline:
         """
         token = _DETACHED.set(True)
         out: dict[int, AppState] = {}
+        # Owned until handled: the stale-submit sweep leaves them alone while they wait their turn.
+        # (The daemon adds them right after ``begin_submit``; adding again here is harmless.)
+        self.submits_in_flight.update(application_ids)
         try:
             async with self.browser_lock:
                 for app_id in application_ids:
-                    app = db.get_application(self.conn, app_id)
-                    if app.state is not AppState.SUBMITTING:
-                        out[app_id] = app.state
-                        continue
-                    job = db.get_job(self.conn, app.job_id)
-                    adapter = self._select_adapter(job)
-                    if adapter is None:
-                        # Nothing was clicked, so this is definitely not sent.
-                        await self._transition(app_id, AppState.FAILED, reason="no_adapter", expected_from=AppState.SUBMITTING)
-                        out[app_id] = AppState.FAILED
-                        continue
-                    ctx = self.build_context(app_id, extra={"approved": True})
                     try:
-                        out[app_id] = await self.click_submit(app_id, adapter, ctx)
+                        out[app_id] = await self._submit_one_approved(app_id)
                     finally:
-                        await self._release_session(adapter, ctx)
+                        self.submits_in_flight.discard(app_id)
                 if self.run_row is None:  # never report idle over a run that is about to start
                     await self._state(DaemonActivity.IDLE)
         finally:
+            self.submits_in_flight.difference_update(application_ids)
             _DETACHED.reset(token)
         return out
+
+    async def _submit_one_approved(self, app_id: int) -> AppState:
+        app = db.get_application(self.conn, app_id)
+        if app.state is not AppState.SUBMITTING:
+            return app.state
+        try:
+            job = db.get_job(self.conn, app.job_id)
+            adapter = self._select_adapter(job)
+            ctx = self.build_context(app_id, extra={"approved": True}) if adapter is not None else None
+        except Exception as e:  # noqa: BLE001 - nothing was clicked: definitely not sent
+            log.exception("could not prepare approved submit %s", app_id)
+            await self._transition(app_id, AppState.FAILED, reason=f"not_submitted: {e}"[:300], expected_from=AppState.SUBMITTING)
+            return AppState.FAILED
+        if adapter is None or ctx is None:
+            # Nothing was clicked, so this is definitely not sent.
+            await self._transition(app_id, AppState.FAILED, reason="no_adapter", expected_from=AppState.SUBMITTING)
+            return AppState.FAILED
+        try:
+            return await self.click_submit(app_id, adapter, ctx)
+        finally:
+            await self._release_session(adapter, ctx)
 
     async def apply_detached(self, application_id: int) -> AppState:
         """Fill one queued application right now (e.g. a job the user added by link).
@@ -1489,6 +1530,7 @@ class Pipeline:
         """Auto-ghost stale ``applied`` applications, emit day-N "Heard back?" nudges, and the
         hourly cold-outreach upkeep (follow-ups, reminders, retention)."""
         now = now or self._now()
+        await self.expire_stale_submits(now)
         prefs = db.get_preferences(self.conn)
         for payload in db.ghost_stale_applications(self.conn, prefs.ghost_after_days, now):
             await self.emit("application_status", payload)

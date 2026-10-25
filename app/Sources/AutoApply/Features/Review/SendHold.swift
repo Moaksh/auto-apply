@@ -142,11 +142,12 @@ final class SendHoldModel {
     @discardableResult
     func hold(jobIDs: [Int], undoManager: UndoManager? = nil, onSent: (@MainActor (Bool) -> Void)? = nil) -> [Int] {
         var seen: Set<Int> = []
-        let fresh: [(Int, Int)] = jobIDs.compactMap { id in
+        var fresh: [(Int, Int)] = jobIDs.compactMap { id in
             guard seen.insert(id).inserted, entries[id] == nil, let job = store.jobs.job(id: id),
                   job.state == .awaitingReview, let appID = job.applicationID else { return nil }
             return (id, appID)
         }
+        fresh = turnAwayBlocked(fresh)
         guard !fresh.isEmpty else { return [] }
         let batch = UUID()
         let now = Date()
@@ -175,6 +176,48 @@ final class SendHoldModel {
             undoRegistrations[batch] = (token, WeakUndoManager(manager: undoManager))
         }
         return ids
+    }
+
+    // MARK: The per-company rule
+
+    /// Why this job can't be sent now (or a heads-up about another job at its company), from the
+    /// jobs the app knows; approvals already on the hold count as sent (`ReviewSendability`).
+    func sendBlock(for jobID: Int, now: Date = Date()) -> SendBlock? {
+        guard let job = store.jobs.job(id: jobID) else { return nil }
+        return ReviewSendability.block(for: job, in: store.jobs.all, cooldownDays: store.preferences.perCompanyCooldownDays,
+                                       heldJobIDs: Set(entries.keys).subtracting([jobID]), now: now)
+    }
+
+    /// The hold never runs for a job the agent would refuse: one in its company's cooldown, one
+    /// whose company has an application in flight or unconfirmed, or the second job at one
+    /// company in this batch (the first listed goes). Those stay in Review, and one toast says
+    /// why and until when.
+    private func turnAwayBlocked(_ fresh: [(Int, Int)]) -> [(Int, Int)] {
+        let days = store.preferences.perCompanyCooldownDays
+        guard days > 0 else { return fresh }
+        var kept: [(job: JobItem, block: SendBlock)] = []
+        var going: [Int: JobItem] = [:]  // company id -> the job going in this batch
+        let out = fresh.filter { id, _ in
+            guard let job = store.jobs.job(id: id) else { return true }
+            if let block = sendBlock(for: id), block.blocksSend {
+                kept.append((job, block))
+                return false
+            }
+            if let lead = going[job.companyID] {
+                let block = SendBlock(kind: .unconfirmedAttempt(inFlight: true), companyID: job.companyID, company: job.company,
+                                      otherJobID: lead.id, otherApplicationID: lead.applicationID, since: Date(),
+                                      resetsAt: Date().addingTimeInterval(TimeInterval(days) * 86_400))
+                kept.append((job, block))
+                return false
+            }
+            going[job.companyID] = job
+            return true
+        }
+        if !kept.isEmpty {
+            store.toasts.show(ReviewSendability.keptToast(kept, all: store.jobs.all), symbol: "hand.raised", style: .info,
+                              duration: .seconds(6))
+        }
+        return out
     }
 
     // MARK: Undo

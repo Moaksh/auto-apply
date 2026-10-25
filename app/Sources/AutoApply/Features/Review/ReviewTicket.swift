@@ -128,15 +128,17 @@ struct ReviewTicket: View {
     var body: some View {
         let hold = model.sendHold.entry(for: job.id)
         let torn = hold != nil
-        let heldForAnswer = !torn && model.needsLook(job)
+        // Can't be sent yet (its company): the stub says until when; the notice below explains.
+        let block = torn ? nil : model.sendBlock(for: job.id).flatMap { $0.blocksSend ? $0 : nil }
+        let heldForAnswer = !torn && block == nil && model.needsLook(job)
         // The stub is the screen's one primary while nothing else asks (no ticks, no bar question).
-        let isPrimary = !torn && !heldForAnswer && model.selection.isEmpty && model.barMode == .actions
+        let isPrimary = !torn && !heldForAnswer && block == nil && model.selection.isEmpty && model.barMode == .actions
         let _ = isPrimary ? audit?.record(token) : nil
         let _ = probe?.ticket()
         let rim: Color? = heldForAnswer && reduceTransparency ? Palette.coral : nil
         HStack(spacing: 0) {
             ticketBody(torn: torn, rim: rim)
-            stub(hold: hold, heldForAnswer: heldForAnswer, isPrimary: isPrimary, rim: rim)
+            stub(hold: hold, heldForAnswer: heldForAnswer, block: block, isPrimary: isPrimary, rim: rim)
                 .offset(x: stubOffset(torn: torn))
                 .rotationEffect(.degrees(torn && !reduced ? 2 : 0), anchor: .bottomLeading)
                 .animation(Motion.resolve(torn ? Motion.tear : Motion.tug, reduceMotion: reduced), value: torn)
@@ -206,7 +208,7 @@ struct ReviewTicket: View {
     // MARK: Stub
 
     @ViewBuilder
-    private func stub(hold: SendHoldModel.Entry?, heldForAnswer: Bool, isPrimary: Bool, rim: Color?) -> some View {
+    private func stub(hold: SendHoldModel.Entry?, heldForAnswer: Bool, block: SendBlock?, isPrimary: Bool, rim: Color?) -> some View {
         if let hold {
             // Torn: the stub rests off to the side and carries the hold (countdown, Undo).
             SendHoldStubCountdown(entry: hold) { model.undoHold(jobID: job.id) }
@@ -215,6 +217,18 @@ struct ReviewTicket: View {
                 .frame(maxHeight: .infinity)
                 .background { TicketPaper(side: .stub) }
                 .transition(.opacity)
+        } else if let block {
+            blockedStub(block)
+                .padding(Space.m)
+                .frame(width: Self.stubWidth)
+                .frame(maxHeight: .infinity)
+                .background { TicketPaper(side: .stub, fill: Palette.surface) }
+                .contentShape(TicketPart(side: .stub))
+                .gesture(stubGesture(heldForAnswer: true))
+                .transition(.opacity)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Can't send \(job.company) yet. \(ReviewSendability.message(block, in: store.jobs.all))")
+                .help(ReviewSendability.message(block, in: store.jobs.all))
         } else {
             intactStub(heldForAnswer: heldForAnswer, isPrimary: isPrimary)
                 .padding(Space.m)
@@ -269,6 +283,22 @@ struct ReviewTicket: View {
                 stubCaption("Tear · ⌘↵", ink: ink.opacity(0.7))
             }
         }
+    }
+
+    /// "NOT YET · FROM NOV 11" / "CHECK FIRST": nothing to tear until the company is free.
+    private func blockedStub(_ block: SendBlock) -> some View {
+        let ink = block.needsResolution ? Palette.coral : Palette.textSecondary
+        return VStack(spacing: Space.xs) {
+            Image(systemName: ReviewSendability.rowSymbol(block)).foregroundStyle(ink)
+            stubCaption(block.needsResolution ? "Check first" : "Not yet", ink: ink)
+            if !block.needsResolution {
+                Text(ReviewSendability.rowLabel(block))
+                    .font(Typography.callout)
+                    .foregroundStyle(Palette.textSecondary)
+                    .lineLimit(1)
+            }
+        }
+        .multilineTextAlignment(.center)
     }
 
     private func stubCaption(_ text: String, ink: Color) -> some View {

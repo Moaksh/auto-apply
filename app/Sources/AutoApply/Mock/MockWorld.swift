@@ -248,6 +248,9 @@ final class MockWorld: Sendable {
                 data.jobs[i].status = .applied
                 data.jobs[i].statusUpdatedAt = now
                 data.jobs[i].mode = data.jobs[i].mode ?? .auto
+                // Like the agent's `companies.last_applied_at`: the company's cooldown starts.
+                let company = data.jobs[i].companyID
+                for k in data.jobs.indices where data.jobs[k].companyID == company { data.jobs[k].companyLastAppliedAt = now }
             }
             let job = data.jobs[i]
             data.log("state", "\(job.company.lowercased())/\(job.id) \(from.rawValue) → \(target.rawValue)\(reason.map { " (\($0))" } ?? "")",

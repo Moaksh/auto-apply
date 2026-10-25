@@ -89,7 +89,7 @@ An `error` without `reply_to` is an unsolicited daemon problem (login expired, C
 | `answer_question` | `cluster_id`, `answer`, `save_to_memory` (true), `save_to_profile` (false), `per_job_answers` [`{job_id, answer}`] | `{answer_id?, resumed_application_ids}` | answer may contain `{company}`/`{role}`; `save_to_profile` writes the cluster's `never_guess_key`. Emits `question_resolved`, then `application_state` (needs_you → queued) for jobs with no other open questions |
 | `skip_question` | `cluster_id`, `reason?` | `{skipped_application_ids}` | "Skip these jobs": parked jobs → skipped |
 | `draft_answer` | `cluster_id`, `job_id?`, `instructions?` (≤ 1000 chars), `current_answer?` (≤ 10000 chars) | `DraftAnswerResult` | a grounded draft for an open question, or a revision of `current_answer` as `instructions` ask. Nothing is answered or saved. See §5.5 |
-| `approve` | `application_ids` [int, ≥1] | `{application_ids}` | awaiting_review → submitting (actor user); daemon submits in background |
+| `approve` | `application_ids` [int, ≥1] | `{application_ids, held?}` | awaiting_review → submitting (actor user); daemon submits in background. Pause and the daily cap refuse the whole batch (`paused` / `cap_reached`). A per-company hold refuses only that job: the rest are approved and `held` lists each one kept in Review as a *company hold* (below). Two jobs at one company in one batch: the first listed goes, the other is held as `same_batch`. When every job is held: `cap_reached` whose `details` are the first job's company hold plus `held` (all of them) |
 | `reject` | `application_id`, `reason` | `null` | awaiting_review → skipped (actor user) |
 | `set_status` | `application_id`, `status` (board status) | `null` | only when state = submitted; emits `application_status` |
 | `update_preferences` | `preferences`: partial `Preferences` (only keys present are applied) | `{preferences}` (full) | validated; `invalid_payload` on bad values |
@@ -131,6 +131,19 @@ An `error` without `reply_to` is an unsolicited daemon problem (login expired, C
 | `onboarding_connect_source` | `source`: `linkedin`\|`glassdoor` | `null` | opens agent Chrome on the login page; progress via `source_status` events |
 | `onboarding_set_step` | `step` (0–7) | `null` | persisted so quitting resumes the same step |
 | `onboarding_complete` | `run_prep` (false) | `{run_id?}` | marks onboarding done; optionally starts a Prep pass |
+
+A **company hold** (`approve`'s `held[]` and the `cap_reached` details of a company refusal):
+`{application_id, job_id, kind, reason, company_id, company, since, resets_at, cooldown_days,
+other_application_id, other_job_id, other_state}`. `kind` ∈ `cooldown` (we applied to this company
+`since`; `other_*` is that application when known), `unconfirmed_attempt` (`other_*` is
+mid-submit, `other_state` `submitting`, or unverified, `unknown_verify`: `resolve_unknown`
+settles it), `same_batch` (`other_*` was approved in the same batch). `reason` is the legacy
+message prefix (`company_cooldown` \| `company_attempt_unconfirmed` \| `company_same_batch`).
+`resets_at` = when this job may be sent. The app computes the same holds for jobs awaiting review
+from the database before it starts the send hold (`companies.last_applied_at`, the other
+applications' `state` / `state_updated_at`); the engine's is `db.review_sendability`. A
+`submitting` application no live task owns for 15 min becomes `unknown_verify` (reason
+`submit_stalled`), so it can't hold a company forever.
 
 #### 5.1 Cold outreach commands (schema v10; docs/COLD_EMAIL_PLAN.md)
 

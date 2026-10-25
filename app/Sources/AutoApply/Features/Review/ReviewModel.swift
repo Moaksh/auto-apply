@@ -79,9 +79,16 @@ final class ReviewModel {
 
     // MARK: Queue
 
-    /// Awaiting-review jobs: flagged first (low before medium), then by match score, then oldest.
+    /// Awaiting-review jobs: ones that can be sent now first, then flagged first (low before
+    /// medium), then by match score, then oldest. A job the agent can't send yet (its company's
+    /// cooldown, or another application there in flight / unconfirmed) waits at the bottom and
+    /// comes back up by itself once it can go.
     var queue: [JobItem] {
-        store.jobs.awaitingReview.sorted { a, b in
+        let waiting = store.jobs.awaitingReview
+        let blocked = Set(waiting.filter { isBlocked($0.id) }.map(\.id))
+        return waiting.sorted { a, b in
+            let ba = blocked.contains(a.id), bb = blocked.contains(b.id)
+            if ba != bb { return !ba }
             let fa = flagRank(a), fb = flagRank(b)
             if fa != fb { return fa > fb }
             if (a.score ?? 0) != (b.score ?? 0) { return (a.score ?? 0) > (b.score ?? 0) }
@@ -104,6 +111,51 @@ final class ReviewModel {
     }
 
     func isFlagged(_ job: JobItem) -> Bool { flagRank(job) > 0 }
+
+    // MARK: Can it be sent now? (issue #4)
+
+    /// Why this job can't be sent now, or a heads-up about another job at its company.
+    func sendBlock(for jobID: Int) -> SendBlock? {
+        guard !isHeld(jobID) else { return nil }
+        return sendHold.sendBlock(for: jobID)
+    }
+
+    /// The agent would refuse it now: Approve isn't offered and no hold runs for it.
+    func isBlocked(_ jobID: Int) -> Bool { sendBlock(for: jobID)?.blocksSend ?? false }
+
+    /// Jobs the user chose to keep for later ("Keep for Nov 11"): the notice folds to one line.
+    private(set) var keptJobIDs: Set<Int> = []
+
+    /// "Keep for <date>": it stays in Review (it already does), the notice folds and focus moves
+    /// on. It comes back as a normal job once its company's cooldown ends.
+    func keep(jobID: Int) {
+        keptJobIDs.insert(jobID)
+        selection.remove(jobID)
+        if focusedJobID == jobID,
+           let next = queue.first(where: { $0.id != jobID && !isHeld($0.id) && !isBlocked($0.id) }) {
+            focusedJobID = next.id
+        }
+    }
+
+    func isKept(_ jobID: Int) -> Bool { keptJobIDs.contains(jobID) && isBlocked(jobID) }
+
+    /// "It went through" / "It didn't go through" for the other application holding this job's
+    /// company (`resolve_unknown`). Went through: its cooldown starts and this job waits for it.
+    /// Didn't: the company is free and this job can be sent now.
+    @discardableResult
+    func resolveOther(for jobID: Int, sent: Bool) async -> Bool {
+        guard let block = sendBlock(for: jobID), block.needsResolution, let otherApp = block.otherApplicationID else { return false }
+        guard await store.resolveUnknown(applicationID: otherApp, submitted: sent) else { return false }
+        if sent {
+            let resets = (block.since ?? Date()).addingTimeInterval(TimeInterval(store.preferences.perCompanyCooldownDays) * 86_400)
+            store.toasts.show("Thanks. I'll count it as sent and keep this one until \(ReviewSendability.day(resets)).",
+                              symbol: "checkmark", style: .success, duration: .seconds(4))
+        } else {
+            store.toasts.show("Thanks. \(block.company) is free again, so you can send this one now.",
+                              symbol: "checkmark", style: .success, duration: .seconds(4))
+        }
+        return true
+    }
 
     /// Whether this job's Q&A has loaded (jobs without an application have nothing to load).
     func answersLoaded(_ job: JobItem) -> Bool {
@@ -170,6 +222,7 @@ final class ReviewModel {
         selection.formIntersection(live)
         if let f = focusedJobID, !live.contains(f) { focusedJobID = nil }
         if focusedJobID == nil { focusedJobID = (queue.first { !isHeld($0.id) } ?? queue.first)?.id }
+        keptJobIDs.formIntersection(live)
     }
 
     // MARK: Selection & focus
@@ -184,7 +237,7 @@ final class ReviewModel {
     }
 
     func selectAll() {
-        selection = Set(queue.map(\.id).filter { !isHeld($0) })
+        selection = Set(queue.map(\.id).filter { !isHeld($0) && !isBlocked($0) })
         barMode = .actions
     }
 
@@ -222,7 +275,8 @@ final class ReviewModel {
     }
 
     /// Targets for an action: the selection when non-empty, else the focused row. Rows on hold
-    /// (or sending) are excluded.
+    /// (or sending) are excluded. In queue order, so in a batch with two jobs at one company the
+    /// better-ranked one is the one that goes.
     var targets: [Int] {
         let order = queue.map(\.id).filter { !isHeld($0) }
         if !selection.isEmpty { return order.filter(selection.contains) }
@@ -276,25 +330,10 @@ final class ReviewModel {
     @discardableResult
     func approve(_ requested: [Int], undoManager: UndoManager? = nil, advanceFocus: Bool = true) -> [Int] {
         // In-flight guard: a double press must not hold (and later send) the same rows twice.
-        var jobIDs = requested.filter { !isHeld($0) }
-        // The daemon allows one application per company per cooldown window and refuses the whole
-        // batch otherwise. Send the first job per company (counting jobs already on hold); the
-        // rest stay here for later.
-        var held: [String] = []
-        if store.preferences.perCompanyCooldownDays > 0 {
-            var seen = Set(sendHold.heldJobIDs.compactMap { store.jobs.job(id: $0)?.companyID })
-            jobIDs = jobIDs.filter { id in
-                guard let job = store.jobs.job(id: id) else { return true }
-                if seen.insert(job.companyID).inserted { return true }
-                held.append(job.company)
-                return false
-            }
-        }
-        if !held.isEmpty {
-            let names = Array(Set(held)).sorted().joined(separator: ", ")
-            store.toasts.show("Kept \(held.count) in Review: one application per company every \(store.preferences.perCompanyCooldownDays) days (\(names))",
-                              symbol: "hand.raised", style: .info)
-        }
+        // The hold itself turns away what the agent would refuse (the per-company rule: a company
+        // in its cooldown or with another application in flight / unconfirmed, and the second job
+        // at one company in this batch, so the first listed goes) and says why in one toast.
+        let jobIDs = requested.filter { !isHeld($0) }
         let nextFocus = queue.first { !jobIDs.contains($0.id) && !isHeld($0.id) }?.id
         let holding = sendHold.hold(jobIDs: jobIDs, undoManager: undoManager)
         guard !holding.isEmpty else { return [] }
@@ -330,6 +369,7 @@ final class ReviewModel {
     @discardableResult
     func releaseStub(jobID: Int, translation: CGFloat, undoManager: UndoManager? = nil) -> TearOutcome {
         guard translation >= Motion.Budget.tearCommit else {
+            if isBlocked(jobID), !isHeld(jobID), translation > 0 { return tear(jobID: jobID, undoManager: undoManager) }
             if let job = store.jobs.job(id: jobID), needsLook(job), !isHeld(jobID), translation > 0 { return refuse(jobID) }
             return .springBack
         }
@@ -344,6 +384,12 @@ final class ReviewModel {
     @discardableResult
     func tear(jobID: Int, undoManager: UndoManager? = nil) -> TearOutcome {
         guard !isHeld(jobID), let job = store.jobs.job(id: jobID), job.state == .awaitingReview else { return .ignored }
+        // Can't be sent yet (its company): nothing to tear. The ticket shakes; the notice under
+        // it says why and until when.
+        if isBlocked(jobID) {
+            tearRefusals += 1
+            return .refused
+        }
         if needsLook(job) { return refuse(jobID) }
         guard approve([jobID], undoManager: undoManager, advanceFocus: false) == [jobID] else { return .ignored }
         advanceTask?.cancel()

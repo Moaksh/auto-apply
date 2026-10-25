@@ -655,9 +655,13 @@ struct ScheduleSettingsTab: View {
                     value: $model.preferencesDraft.parallelApplications, in: 1...4)
                 .monospacedDigit()
         }
-        SettingsRow("Per company", help: "At most one application to the same company in this many days.",
+        SettingsRow("Per company",
+                    help: "I send at most one application to a company in this many days. A job that has to wait stays in Review with the date it can go. 0 turns this off.",
                     issue: model.issue(for: .perCompanyCooldownDays)) {
-            Stepper("\(model.preferencesDraft.perCompanyCooldownDays) days", value: $model.preferencesDraft.perCompanyCooldownDays, in: 0...365)
+            let days = model.preferencesDraft.perCompanyCooldownDays
+            Stepper(days == 0 ? "Off: no wait between jobs at one company" : "1 application per company every \(days) \(days == 1 ? "day" : "days")",
+                    value: $model.preferencesDraft.perCompanyCooldownDays, in: 0...365)
+                .monospacedDigit()
         }
         SettingsRow("Mark as ghosted after", issue: model.issue(for: .ghostAfterDays)) {
             Stepper("\(model.preferencesDraft.ghostAfterDays) days without a reply", value: $model.preferencesDraft.ghostAfterDays, in: 1...180)

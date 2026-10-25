@@ -531,7 +531,7 @@ final class GRDBRepository: AppRepository {
         SELECT j.id, j.source, j.source_url, j.apply_url, j.ats, j.company_id, j.title, j.location, j.remote,
                j.salary_min, j.salary_max, j.salary_currency, j.posted_at, j.discovered_at, j.easy_apply,
                j.mode_override, j.notes,
-               c.name AS company_name, c.domain AS company_domain,
+               c.name AS company_name, c.domain AS company_domain, c.last_applied_at AS company_last_applied_at,
                a.id AS app_id, a.state, a.state_reason, a.state_updated_at, a.mode AS app_mode,
                a.resume_variant_id, a.resume_pick_score, a.cover_letter_path, a.screenshot_path,
                a.confirmation_screenshot_path, a.submitted_at, a.status, a.status_updated_at,
@@ -564,6 +564,7 @@ final class GRDBRepository: AppRepository {
         job.salaryMax = row["salary_max"]
         job.salaryCurrency = row["salary_currency"]
         job.postedAt = DBJSON.date(row["posted_at"])
+        job.companyLastAppliedAt = DBJSON.date(row["company_last_applied_at"])
         job.modeOverride = (row["mode_override"] as String?).flatMap(Mode.init(rawValue:))
         job.notes = row["notes"]
         job.state = (row["state"] as String?).flatMap(AppState.init(rawValue:)) ?? .discovered

@@ -228,6 +228,53 @@ enum MockScripts {
                                                actor: .agent, level: .info, jobID: id, applicationID: id,
                                                message: "filled \(answers.count) fields · waiting for your review"))
         }
+        addCompanyHoldSamples(&data, now: now)
+    }
+
+    /// Review's "can't send yet" states (issue #4), as the agent would refuse them: a job at a
+    /// company we applied to 12 days ago (cooldown), and one whose company has an application
+    /// that may or may not have gone through two days ago (unconfirmed attempt).
+    static let cooldownReviewJobID = 25_006
+    static let cooldownSentJobID = 25_007
+    static let unconfirmedReviewJobID = 25_008
+    static let unconfirmedAttemptJobID = 25_009
+
+    static func addCompanyHoldSamples(_ data: inout RepositoryData, now: Date) {
+        let pairs: [(review: Int, other: Int, otherState: AppState, daysAgo: Double)] = [
+            (cooldownReviewJobID, cooldownSentJobID, .submitted, 12),
+            (unconfirmedReviewJobID, unconfirmedAttemptJobID, .unknownVerify, 2),
+        ]
+        for (k, pair) in pairs.enumerated() {
+            addJobs(&data, ids: [pair.review, pair.other], state: .awaitingReview, now: now)
+            guard let r = data.jobs.firstIndex(where: { $0.id == pair.review }),
+                  let o = data.jobs.firstIndex(where: { $0.id == pair.other }) else { continue }
+            // Same company for both.
+            data.jobs[o].companyID = data.jobs[r].companyID
+            data.jobs[o].company = data.jobs[r].company
+            data.jobs[o].companyDomain = data.jobs[r].companyDomain
+            data.jobs[o].ats = data.jobs[r].ats
+            data.jobDescriptions[pair.other] = MockFixtures.description(company: data.jobs[o].company, title: data.jobs[o].title)
+            let at = now.addingTimeInterval(-pair.daysAgo * 86_400)
+            data.jobs[o].state = pair.otherState
+            data.jobs[o].stateUpdatedAt = at
+            data.jobs[o].stateReason = pair.otherState == .submitted ? nil : "unverified"
+            if pair.otherState == .submitted {
+                data.jobs[o].submittedAt = at
+                data.jobs[o].status = .applied
+                data.jobs[o].statusUpdatedAt = at
+                data.jobs[o].mode = .auto
+                let company = data.jobs[r].companyID
+                for i in data.jobs.indices where data.jobs[i].companyID == company { data.jobs[i].companyLastAppliedAt = at }
+            }
+            let answers = MockFixtures.applicationAnswers(applicationID: pair.review, company: data.jobs[r].company, lowConfidence: false,
+                                                          startID: 90_200 + k * 20)
+            data.applicationAnswers[pair.review] = answers
+            data.jobs[r].stateReason = "review_mode"
+            data.jobs[r].stateUpdatedAt = now.addingTimeInterval(-Double(150 + k * 20) * 60)
+            data.jobs[r].screenshotPath = MockFrames.preSubmitScreenshot(company: data.jobs[r].company, answers: answers,
+                                                                          name: screenshotName(pair.review, data.jobs[r].company))
+                ?? "/mock/screenshots/\(pair.review)-pre.png"
+        }
     }
 
     // MARK: Clusters

@@ -81,7 +81,7 @@ struct ReviewModelTests {
         let stripeID = store.jobs.job(id: 1)!.companyID
         store.jobs.mutate(applicationID: 2) { $0.companyID = stripeID; $0.company = "Stripe" }
         model.approve([1, 2, 3])
-        #expect(store.toasts.current?.message.contains("Kept 1 in Review") == true)
+        #expect(store.toasts.current?.message.hasPrefix("I kept ") == true)
         await settled(model)
         #expect(Set(approvedIDs(daemon)) == [1, 3])
         #expect(store.jobs.job(id: 2)?.state == .awaitingReview)
@@ -95,7 +95,7 @@ struct ReviewModelTests {
         model.approve([1])
         model.approve([2])
         #expect(model.isHeld(1) && !model.isHeld(2), "a second Stripe job isn't held while the first one is")
-        #expect(store.toasts.current?.message.contains("Kept 1 in Review") == true)
+        #expect(store.toasts.current?.message.hasPrefix("I kept ") == true)
         model.sendHold.abandonAll()
         #expect(approvedIDs(daemon).isEmpty)
     }
