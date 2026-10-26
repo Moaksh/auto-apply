@@ -1,6 +1,6 @@
 [project]
 name = "autoapply"
-version = "0.1.4"
+version = "0.1.5"
 description = "AutoApply engine: local job discovery + application daemon (autoapplyd)"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
