@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/Moaksh/auto-apply/security/advisories/new
+    about: Report security problems privately, not in a public issue.
+  - name: Download the latest release
+    url: https://github.com/Moaksh/auto-apply/releases
+    about: Many bugs are already fixed in the newest version. The app updates itself from 0.1.1 onward.

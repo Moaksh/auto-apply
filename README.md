@@ -1,45 +1,221 @@
+<div align="center">
+
+<img src="docs/media/icon.png" width="128" height="128" alt="AutoApply app icon">
+
 # AutoApply
 
-A personal, local-only macOS app that finds jobs, applies to them for you, asks you only when it
-really doesn't know an answer, and tracks everything.
+**A Mac app that finds jobs, applies for you, and asks only when it doesn't know the answer.**
 
-Two pieces:
+[![Latest release](https://img.shields.io/github/v/release/Moaksh/auto-apply?include_prereleases&label=release&sort=semver)](https://github.com/Moaksh/auto-apply/releases)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Platform: macOS 26+ on Apple silicon](https://img.shields.io/badge/macOS-26%2B%20%C2%B7%20Apple%20silicon-000000?logo=apple&logoColor=white)](#requirements)
+[![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](app/Package.swift)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](engine/pyproject.toml)
+[![Built with Claude](https://img.shields.io/badge/built%20with-Claude-D97757?logo=claude&logoColor=white)](https://www.anthropic.com/claude)
 
-- **`autoapplyd`** is a Python daemon that runs as a user LaunchAgent. It runs discovery, scoring,
-  the question Prep pass and applying, and it is the only process that writes the database.
-- **`AutoApply.app`** is a SwiftUI app (macOS 26+) with a dashboard, a board, the Needs-You inbox,
-  the Review queue, settings and a menu bar extra. It reads the database read-only and sends every
-  change to the daemon over a Unix socket.
+[Download](#install) · [Features](#features) · [How it works](#how-it-works) · [Privacy & safety](#privacy--safety) · [Build from source](#build-from-source)
 
-Decisions and architecture are in [`PLAN.md`](PLAN.md). The UI spec is in
-[`docs/UI_UX_PLAN.md`](docs/UI_UX_PLAN.md). The frozen contract (DB schema and socket protocol)
-is in [`contract/`](contract/).
+</div>
 
 ---
 
-## Requirements
+AutoApply runs on your Mac. It watches job boards and company career pages, scores each opening
+against your resume, fills in the application forms, and stops to ask you only for things it
+can't know, like your notice period or whether you need a visa. It keeps track of every
+application, and it can also find startups near you and draft cold emails to the right people.
 
-| What | Why |
-|---|---|
-| macOS 26 or later, Apple silicon | The app targets macOS 26 (Liquid Glass, Observation). |
-| Xcode 26 or a Swift 6.4 toolchain | Builds the SwiftPM package in `app/`. |
-| [`uv`](https://docs.astral.sh/uv/) | Manages the Python 3.12 engine in `engine/`. uv installs Python 3.12 itself if needed. |
-| `claude` CLI, logged in | The default LLM provider is the Claude Agent SDK, which uses your existing `claude` login. |
-| Node.js (`npx`) | The agentic adapter runs `npx @playwright/mcp` for unknown or Workday forms. |
-| Google Chrome | The agent uses a dedicated, persistent Chrome profile: a visible window for LinkedIn and Glassdoor, headless Chromium for ATS forms. |
+It uses your own Claude login to think, keeps your data on your Mac, and never sends anything you
+haven't allowed.
 
-The onboarding flow's System check verifies all of these and offers a fix command for each one.
+[![AutoApply demo](docs/media/demo.gif)](docs/media/demo.mp4)
 
-## Setup
+<sub>A short loop of the app. Click it for the full one-minute video.</sub>
+
+> [!NOTE]
+> AutoApply is in beta. Releases are pre-releases, and the app updates itself from 0.1.1 onward.
+> It submits real job applications in your name, so it starts in Review mode: nothing is sent
+> until you approve it.
+
+## Features
+
+**Finding jobs**
+- Searches public job boards and company career sites: Greenhouse, Lever, Ashby, Workday,
+  SmartRecruiters, Workable, Recruitee, company career pages and Google Jobs. LinkedIn and
+  Glassdoor are read at human pace, read-only.
+- New installs start with a list of verified company boards so there are real forms to fill on the
+  first run. Add or remove companies in Settings, or paste any apply link (⌘N) to queue one job.
+- Skips postings that are already closed and flags ones that look suspicious, such as a fee asked
+  of the candidate or an agency post with no employer named.
+
+**Match scores with evidence**
+- Every job gets a 0–100 match score against your resume and preferences, with the reasons behind
+  it, so you can see why a job ranked where it did.
+
+**Asks only what it can't answer**
+- Before a run, a Prep pass reads the forms ahead and collects every question it can't answer
+  from your profile. Similar questions are grouped, so one answer can unblock several jobs.
+- They wait in **Needs You**. Sign-ins, CAPTCHAs and verification codes are kept apart from form
+  questions.
+- **Draft with AI** writes an answer from your profile and resume. Refine it by asking ("shorter",
+  "mention my Kafka project"); press Tab to take it.
+- Answers are remembered for next time.
+
+**Review before anything is sent**
+- In Review, each application shows the filled form, the resume it picked and the cover letter.
+  Approve one or several at once.
+- Approve waits five seconds with **Undo** before the application goes out.
+- If a job can't be sent yet (you applied to that company recently, or an earlier attempt is
+  unconfirmed), Review says why and when it can go.
+
+**Autonomy you grant per site**
+- Start in Review. After 10 clean approvals in a row on a job site, the app offers to switch that
+  site to Auto. You choose the mode globally, per site, per company or per job, and can change it
+  at any time.
+- When a site needs an account before showing the form (Workday, iCIMS, Taleo), the agent can sign
+  up with your connected email, confirm it from your inbox, and keep a unique password for that
+  site in your Keychain.
+
+**Pipeline and your day**
+- A **Pipeline** board from Discovered to Offer. Drag a job to Queued to apply now, or to Applied
+  if you applied yourself. Rejected and ghosted jobs fold into a quiet Closed drawer.
+- **Today's ten minutes** on the Dashboard lists what's waiting for you with time estimates and
+  walks you through it. A timeline shows today's applications, replies and follow-ups.
+- Notifications you can act on: answer short questions or approve applications from the
+  notification itself. Rejections never notify you.
+- A **menu bar** item shows what the agent is doing and lets you pause or resume it.
+
+**Cold email**
+- **Startups near you**: finds startups in your country from YC's company directory and funding
+  news, with last round, investors, team size and a link to the source. Facts that aren't on the
+  source page stay blank.
+- Ranks them 0–100 with the reasons: how recently they raised, stage, investors, YC backing, team
+  size, matching open roles and fit with you.
+- **Finds people** to write to, founders and engineering leads first at small startups, and shows
+  your LinkedIn connections there for referrals and warm intros.
+- Drafts each email for you, underlining any claim it can't back up from your profile. Nothing is
+  sent until you approve it, and sending stays within a daily limit and a send window.
+
+**Also**
+- **Interview prep** packs grounded in the job description, the company and your own story bank,
+  and **insights** from your own outcomes: whether higher match scores really hear back more,
+  why jobs get skipped, skills that keep coming up, and how each resume variant performs.
+- **Explore with sample data** during onboarding, before you set anything up.
+- **Report a Bug** from the Help menu opens a GitHub issue with your app version and redacted logs
+  filled in.
+
+## How it works
+
+```
+ AutoApply.app (SwiftUI)                      autoapplyd (Python, LaunchAgent)
+ ┌──────────────────────────┐   Unix socket   ┌─────────────────────────────────────┐
+ │ Dashboard · Pipeline     │ ◀────────────▶  │ Discover → Score → Prep → Apply     │
+ │ Needs You · Review       │  commands and   │ Cold email · schedule · guardrails  │
+ │ Cold Email · menu bar    │  live events    │                                     │
+ └────────────┬─────────────┘                 └───┬──────────────┬──────────────┬───┘
+              │ reads (read-only)                 │ writes       │ drives       │ asks
+              ▼                                   ▼              ▼              ▼
+        ┌─────────────────────────────────────────────┐  ┌──────────────┐ ┌─────────────────┐
+        │ SQLite in ~/Library/Application Support/... │  │ Agent Chrome │ │ Claude, via     │
+        └─────────────────────────────────────────────┘  │ (own profile)│ │ your `claude`   │
+                                                         └──────────────┘ │ login           │
+                                                                          └─────────────────┘
+```
+
+- **`autoapplyd`** is a local background agent. It runs on a schedule (09:00, 13:00 and 18:00 by
+  default, and once on wake if a run was missed), and it is the only process that writes the
+  database.
+- **The app** reads the database directly and sends every change to the agent over a Unix socket
+  in your AutoApply folder.
+- **Forms** on known job sites are filled by scripted Playwright adapters. Unusual forms are
+  handled by Claude driving a browser through the Playwright MCP server, behind a gate that blocks
+  submit until the guardrails pass.
+- **Claude** is reached through the Claude Agent SDK, using the Claude Code login already on your
+  Mac. There is no separate API key and no AutoApply server.
+
+The full design is in [`PLAN.md`](PLAN.md), and the contract between app and agent is in
+[`contract/`](contract/).
+
+## Privacy & safety
+
+**Your data stays on your Mac.** The database, resumes, cover letters, screenshots and the agent's
+browser profile live in `~/Library/Application Support/AutoApply/`. There is no AutoApply
+account, server or telemetry. The only thing that leaves your Mac is what Claude needs to do the
+work (resume and profile text, job descriptions, form questions and generated answers), sent with
+your own Claude login, plus the applications and emails you approve.
+
+**Secrets live in the macOS Keychain.** Job-site account passwords, your mailbox app password and
+any email-finder API key are stored only in the Keychain. LinkedIn and Glassdoor sessions stay in
+the agent's own Chrome profile; AutoApply never stores those passwords.
+
+AutoApply submits real job applications in your name. These guardrails are built in:
+
+- **No double applies.** `submitting` is committed to the database *before* the submit click. If
+  the agent crashes mid-submit, the application becomes "unconfirmed" and is **never retried
+  automatically**; you confirm in the app whether it went through. An adapter that is sure it
+  clicked nothing reports `failed` instead.
+- **Caps and cooldown are checked right before the click.** The daily cap (default 15) counts
+  in-flight and unconfirmed attempts as well as confirmed ones. The per-company cooldown (default
+  one application per company every 30 days) also holds a company while an earlier attempt there
+  is unconfirmed. Both are in Settings ▸ Guardrails.
+- **Kill switch.** Pause (⌘⇧P, the menu bar, or `pause_all`) is checked between every agent step
+  and answered even while a slow command is running.
+- **Never guess.** Work authorization, sponsorship, salary, notice period, EEO and similar answers
+  come only from the facts you entered; when a fact is missing, the job waits in Needs You.
+  Generated answers below the confidence threshold wait too, and cover letters are fact-checked
+  against your profile and stories.
+- **Review mode** (globally, or per site, company or job) stops each application before it is
+  sent. Nothing goes out until you approve it, approval has a five-second Undo, and the agent can
+  never approve its own work.
+- **The browser agent cannot click submit on its own.** A tool gate denies submit-like clicks,
+  Enter-to-submit and script evaluation until a submit request passes the guardrails, and then
+  allows exactly one click.
+- **LinkedIn and Glassdoor are read-only.** They run in a visible browser at human pace, at most
+  3 sessions a day, and only listing pages are read. The agent never clicks Apply there and never
+  uses Easy Apply. Easy Apply jobs go to a manual list with drafted copy-paste answers.
+- **Cold email is opt-in and approval-only.** Every email is a draft until you approve it. Sending
+  is spread over a send window, capped per day (default 10 new threads), and checks a
+  do-not-contact list right before each message.
+
+Tests never touch the network or a real LLM, and never submit a real application. See
+[`SECURITY.md`](SECURITY.md) to report a vulnerability.
+
+## Install
+
+### Requirements
+
+- A Mac with Apple silicon, running **macOS 26** or later
+- A **Claude** account, logged in to [Claude Code](https://claude.com/claude-code) (the agent uses
+  it to think)
+- **Google Chrome**, **uv** and **Node.js**. You don't need to install these first: the app's
+  System check installs anything missing with one click each.
+
+### Download
+
+1. Download the latest `AutoApply-<version>.dmg` from
+   [Releases](https://github.com/Moaksh/auto-apply/releases).
+2. Open it and drag **AutoApply** into **Applications**.
+3. The first time, right-click AutoApply in Applications and choose **Open**, then **Open** again.
+   This beta isn't notarized by Apple yet, so a normal double-click is blocked once. If macOS still
+   refuses, go to System Settings ▸ Privacy & Security and click **Open Anyway**.
+4. Follow the setup. The System check installs what's missing, then **Install agent** sets up the
+   background agent (a few minutes the first time). You can explore with sample data before you
+   connect anything.
+
+Updates: 0.1.1 and later update themselves and keep your data.
+
+## Build from source
+
+You need Xcode 26 (or a Swift 6.4 toolchain), [uv](https://docs.astral.sh/uv/), Node.js, Google
+Chrome and a logged-in `claude` CLI.
 
 ```bash
-git clone <this repo> auto_apply && cd auto_apply
+git clone https://github.com/Moaksh/auto-apply.git auto_apply && cd auto_apply
 
 # Engine
 cd engine
 uv sync                                   # creates engine/.venv and installs deps + dev tools
 uv run playwright install chromium        # browser for the scripted ATS adapters
-uv run pytest -q                          # ~700 tests, ~90 s, no network, no real LLM
+uv run pytest -q                          # ~1,460 tests, no network, no real LLM
 cd ..
 
 # App
@@ -47,231 +223,42 @@ cd app
 swift build                               # or: open Package.swift   (opens in Xcode; run the AutoApply scheme)
 swift test                                # Swift Testing: AutoApplyTests + C3Tests
 cd ..
-```
 
-## Double-clickable app
-
-```bash
-cd engine && uv sync && uv run autoapply init && cd ..   # first run: creates ~/Library/Application Support/AutoApply
-app/scripts/make_app.sh                                  # release build -> app/build/AutoApply.app (ad-hoc signed)
+# A double-clickable app
+cd engine && uv run autoapply init && cd ..   # first run: creates ~/Library/Application Support/AutoApply
+app/scripts/make_app.sh                       # release build -> app/build/AutoApply.app (ad-hoc signed)
 open app/build/AutoApply.app
 ```
 
-The app does not launch the daemon itself; it connects to `autoapplyd.sock` in the AutoApply home.
-Start the daemon first (see below: `cd engine && uv run autoapplyd --no-scheduler`, or install the
-LaunchAgent). Without it the app shows "Can't reach autoapplyd". Because the bundle is ad-hoc signed,
-if Gatekeeper blocks a copy moved elsewhere, right-click > Open once.
+The app connects to the agent but doesn't start it. Run `cd engine && uv run autoapplyd
+--no-scheduler` in a terminal, or install the LaunchAgent from Settings ▸ Agent. To try the UI with
+no agent at all, run `cd app && AUTOAPPLY_MOCK=happyRun swift run AutoApply`.
 
-## Running the daemon
+[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) covers the rest: running the daemon and the
+LaunchAgent, mock scenarios, the developer CLI, the end-to-end test, environment variables, a
+project map, regenerating the protocol, release builds and troubleshooting.
 
-The daemon keeps its data in `~/Library/Application Support/AutoApply/` by default. Set
-`AUTOAPPLY_HOME` (or pass `--home`) to use another directory.
+## Contributing
 
-```
-autoapply.db   resumes/   screenshots/   cover_letters/   chrome-profile/   logs/   autoapplyd.sock
-```
+Bug reports, ideas and pull requests are welcome. The quickest way to report a bug is
+**Help ▸ Report a Bug…** in the app, which fills in your version and redacted logs. Read
+[`CONTRIBUTING.md`](CONTRIBUTING.md) before opening a pull request, and please follow the
+[Code of Conduct](CODE_OF_CONDUCT.md).
 
-**In the foreground** (development):
+## License
 
-```bash
-cd engine
-uv run autoapplyd --no-scheduler                        # real Claude via your `claude` login
-AUTOAPPLY_LLM_PROVIDER=fake uv run autoapplyd \
-    --home /tmp/aa-dev --no-scheduler                   # scratch home, no LLM calls at all
-```
+AutoApply is released under the [MIT License](LICENSE). Some engine code is adapted from
+career-ops (also MIT); see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
-With the fake provider every LLM call either uses a scripted answer or fails, so nothing is
-generated.
+AutoApply applies to jobs in your name. You are responsible for what it submits and for following
+the terms of the sites it uses.
 
-**As a LaunchAgent** (normal use). It starts at login and restarts if it crashes:
+## Acknowledgements
 
-```bash
-cd engine
-uv run python -m autoapply.launchd_install install      # also: status | restart | uninstall | print
-```
-
-Settings ▸ Agent in the app can install, restart and uninstall it too. The agent's label is
-`com.autoapply.daemon` and its logs go to `<home>/logs/`. It runs 09:00, 13:00 and 18:00 by
-default (editable in Settings ▸ Schedule). A run missed while the Mac was asleep fires once on
-wake.
-
-**Developer CLI**: it works on the same database, so stop the daemon first or point it at another
-`AUTOAPPLY_HOME`.
-
-```bash
-cd engine
-uv run python -m autoapply.cli init --help
-uv run python -m autoapply.cli watch add "Acme" https://boards.greenhouse.io/acme
-uv run python -m autoapply.cli discover          # public Greenhouse / Lever / Ashby boards (read-only GETs)
-uv run python -m autoapply.cli score
-uv run python -m autoapply.cli status --queue
-uv run python -m autoapply.cli apply 12          # DRY RUN: fills the form, never clicks submit
-uv run python -m autoapply.cli apply 12 --submit # a real submit, asks for confirmation first
-```
-
-## Running the app
-
-**Mock mode** needs no daemon. A built-in mock daemon plays scripted scenarios against an
-in-memory database:
-
-```bash
-cd app
-AUTOAPPLY_MOCK=happyRun swift run AutoApply
-AUTOAPPLY_MOCK=reviewMode AUTOAPPLY_MOCK_SPEED=4 swift run AutoApply
-```
-
-Scenarios: `idle`, `happyRun`, `needsYouStorm`, `reviewMode`, `daemonDown`, `loginExpired`,
-`capReached`, `firstRunEmpty`, `burstSubmit`, `stress` (5,000 jobs), `onboarding`. `AUTOAPPLY_MOCK=1`
-means `happyRun`. In Xcode, set the variable in the scheme's Run ▸ Environment, or pass
-`-AUTOAPPLY_MOCK <scenario>` as a launch argument. In Debug builds a **Debug** menu switches
-scenario and speed at runtime and can simulate Reduce Motion.
-
-**Live mode** is a plain launch with no `AUTOAPPLY_MOCK`. The app connects to
-`<AUTOAPPLY_HOME or ~/Library/Application Support/AutoApply>/autoapplyd.sock`, reconnects with
-backoff and re-reads the DB whenever the daemon writes to it. On first launch, onboarding walks
-through the system check, resume upload and parse, preferences, never-guess facts, stories,
-sources (optional LinkedIn and Glassdoor login in the agent's Chrome) and the Auto/Review mode.
-
-To run app and daemon against a scratch home, give both the same `AUTOAPPLY_HOME`:
-
-```bash
-export AUTOAPPLY_HOME=/tmp/aa-dev
-(cd engine && AUTOAPPLY_LLM_PROVIDER=fake uv run autoapplyd --no-scheduler) &
-(cd app && swift run AutoApply)
-```
-
-## Safety
-
-AutoApply submits real job applications in your name. These guardrails are built in:
-
-- **No double applies.** `submitting` is committed to the DB *before* the submit click. If the
-  daemon crashes mid-submit, the application becomes `unknown_verify` and is **never retried
-  automatically**; you confirm in the app whether it went through. An adapter that is sure it
-  clicked nothing reports `failed` instead.
-- **Caps and cooldown are checked right before the click**, with no `await` in between. The daily
-  cap (default 15) counts in-flight and unverified attempts as well as confirmed ones. The
-  per-company cooldown (default 30 days) also blocks a company while an earlier attempt there is
-  unconfirmed.
-- **Kill switch.** Pause (⌘⇧P, menu bar, or `pause_all`) is checked between every agent step and
-  answered even while a slow command is running.
-- **Never guess.** Work authorization, sponsorship, salary, notice period, EEO and similar answers
-  come only from the facts you entered; when a fact is missing, the job is parked in the
-  Needs-You inbox. Generated answers below the confidence threshold are parked too, and cover
-  letters are fact-checked against your profile and stories.
-- **Review mode** (globally, or per ATS, company or job) stops each application at
-  `awaiting_review`. Nothing is sent until you approve it, and the agent can never approve its
-  own work.
-- **The agentic adapter cannot click submit on its own.** A tool gate denies submit-like clicks,
-  Enter-to-submit and script evaluation until `request_submit` passes the guardrails, and then
-  allows exactly one click.
-- **LinkedIn and Glassdoor are read-only.** They run in a visible browser at human pace, at most
-  3 sessions a day, and only listing pages are read. The agent never clicks Apply there and never
-  uses Easy Apply. Easy Apply jobs go to a manual list with drafted copy-paste answers.
-- **`AUTOAPPLY_SUBMIT_ALLOWED_HOSTS`** (comma-separated hostnames): when set, the scripted
-  adapters refuse to click submit on any other host. The tests set it to `127.0.0.1,localhost`.
-- **Everything stays local** (DB, files, browser profile) apart from what the LLM needs: resume
-  and profile text, job descriptions, form questions and generated answers. No passwords are
-  stored.
-
-Tests never touch the network or a real LLM, and never submit a real application. Board APIs are
-mocked (respx), forms are local fixture pages on 127.0.0.1, and the LLM is `FakeLLMProvider`. The
-only network tests are three read-only board GETs, deselected by default (`uv run pytest -m network`).
-
-## Tests
-
-```bash
-cd engine && uv run pytest -q                    # everything
-cd engine && uv run pytest tests/e2e -q          # end-to-end smoke (below)
-cd app && swift test
-```
-
-`engine/tests/e2e/test_smoke.py` starts `autoapplyd` with the real pipeline on a temporary home
-and talks to it over its Unix socket. It configures profile, preferences and resume, then calls
-`run_now`:
-
-1. Discovery runs the real Greenhouse source against mocked boards.
-2. Scoring uses the fake LLM, and one job is hard-filtered.
-3. In Prep, one job parks in `needs_you` on a low-confidence question.
-4. Apply runs the real scripted adapter in headless Chromium against the local fixture form; the
-   other job stops at `awaiting_review`.
-
-The test then approves that job (`submitting` is committed before the local POST, then
-`submitted`), answers the inbox question (`question_resolved`, then `needs_you → queued`), runs
-apply again and approves the second job. It also spawns the real `python -m autoapply.daemon`
-process and checks the socket permissions and the graceful SIGTERM.
-
-## Environment variables
-
-| Variable | Used by | Meaning |
-|---|---|---|
-| `AUTOAPPLY_HOME` | daemon, CLI, app | Data directory (default `~/Library/Application Support/AutoApply`). |
-| `AUTOAPPLY_LLM_PROVIDER` | daemon | `agent_sdk` (default), `fake`, or `anthropic_api` (placeholder, not implemented yet). |
-| `AUTOAPPLY_LOG_LEVEL` | daemon | `debug` / `info` (default) / `warning`. |
-| `AUTOAPPLY_SUBMIT_ALLOWED_HOSTS` | scripted adapters | Only click submit on these hosts. |
-| `AUTOAPPLY_MOCK`, `AUTOAPPLY_MOCK_SPEED` | app | Mock daemon scenario and speed. |
-| `AUTOAPPLY_ENGINE_DIR` | app | Where `engine/` lives, for Settings ▸ Agent install/uninstall. |
-| `AUTOAPPLY_SCHEMA_PATH` | app tests | Override the path to `contract/schema.sql`. |
-
-## Project map
-
-```
-PLAN.md                     decisions, architecture, milestones
-docs/UI_UX_PLAN.md          UI/UX spec
-OWNERSHIP.md                who owns which files
-contract/
-  schema.sql                SQLite schema (single source of truth)
-  protocol.md               socket protocol + application state machine
-  protocol.schema.json      GENERATED from engine/autoapply/models.py  (uv run python -m autoapply.models)
-  protocol.examples.ndjson  GENERATED examples                        (uv run python -m tests.foundation.protocol_samples)
-engine/                     Python 3.12, uv
-  autoapply/
-    daemon.py               socket server (NDJSON), snapshot, command handlers, lifecycle
-    pipeline.py             Discover → Score → Prep → Apply, guardrails before begin_submit
-    scheduler.py            run schedule, catch-up on wake, caffeinate, one run at a time
-    db.py models.py config.py enums.py paths.py
-    llm/provider.py         LLMProvider: AgentSDKProvider (default), FakeLLMProvider
-    discovery/              greenhouse, lever, ashby, careers (+ watchlist), linkedin, glassdoor (read-only)
-    scoring.py              hard filters + batched LLM match scores
-    prep.py                 pre-run question harvest, inbox clustering, answer_cluster / skip_cluster
-    apply/                  base (scripted machinery + runner), greenhouse, lever, ashby, agentic (Agent SDK + Playwright MCP)
-    answers/                resolver, memory (local embeddings), guardrails, cover_letter, resume_picker
-    easy_apply.py           drafted answers for manual LinkedIn Easy Apply
-    cli.py                  developer CLI
-    launchd_install.py      LaunchAgent install/uninstall/status
-  scripts/gen_swift_messages.py   GENERATES app/.../Core/Protocol/Messages.swift
-  tests/                    foundation, a_core, b_agent, d_daemon, e2e
-app/                        SwiftPM, SwiftUI, macOS 26+
-  Sources/AutoApply/
-    App/                    scenes, root view, sidebar, commands, palette host
-    Core/                   daemon client (socket), GRDB repository, stores, router, registry, protocol (generated)
-    DesignSystem/           tokens, motion, materials, components
-    Mock/                   mock daemon + scenarios
-    Features/               Onboarding, MenuBar, Dashboard, Board, JobDetail, ActivityLog,
-                            Inbox, Review, EasyApply, Profile (+ Story bank), Resumes, Settings, CommandPalette
-  Tests/AutoApplyTests/     store, client, repository, mock, onboarding, C2 feature tests
-  Tests/C3/                 C3 feature tests
-launchd/com.autoapply.daemon.plist   template (launchd_install.py renders the real one)
-```
-
-When you change a protocol model in `engine/autoapply/models.py`, regenerate all three artifacts:
-
-```bash
-cd engine
-uv run python -m autoapply.models
-uv run python -m tests.foundation.protocol_samples
-uv run python scripts/gen_swift_messages.py
-```
-
-## Troubleshooting
-
-- **`autoapply` / `autoapplyd` fails with `ModuleNotFoundError: No module named 'autoapply'`.**
-  macOS sometimes sets the hidden flag on the venv's editable-install `.pth` file, and Python 3.12
-  skips hidden `.pth` files. Use `uv run python -m autoapply.cli` / `uv run python -m autoapply.daemon`
-  from `engine/`, or clear the flag with `chflags nohidden engine/.venv/lib/python3.12/site-packages/*.pth`.
-  The LaunchAgent and the app's installer are not affected because they set `PYTHONPATH`.
-- **`swift test` fails at codesign with "resource fork, Finder information, or similar detritus".**
-  Some sandboxes add extended attributes to build products. Build outside the repo:
-  `swift build --build-tests --scratch-path /tmp/aa-build && swift test --skip-build --scratch-path /tmp/aa-build`.
-- **The app shows "daemon unreachable".** Check `uv run python -m autoapply.launchd_install status`
-  and `<home>/logs/autoapplyd.log`. Only one daemon can run per home (a lock file); a second one
-  exits immediately.
+- [career-ops](https://github.com/career-ops-hq/career-ops) for the posting-liveness and
+  legitimacy checks, several job-board endpoint shapes, outcome calibration and the writing-voice
+  rules ([details](THIRD_PARTY_NOTICES.md)).
+- [GRDB.swift](https://github.com/groue/GRDB.swift) for SQLite in the app.
+- [Playwright](https://playwright.dev) and [Playwright MCP](https://github.com/microsoft/playwright-mcp)
+  for filling forms.
+- [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) for the agent.

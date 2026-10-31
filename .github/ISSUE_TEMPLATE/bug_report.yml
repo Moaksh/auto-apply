@@ -1,0 +1,60 @@
+name: Bug report
+description: Something in AutoApply didn't work the way you expected.
+title: "Bug: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. The quickest way is **Help ▸ Report a Bug…** in the app: it fills in
+        your versions and a redacted log excerpt for you, and saves a full log bundle to attach.
+
+        Please don't post passwords, API keys or anything you wouldn't want public. For security
+        problems, use [private reporting](https://github.com/Moaksh/auto-apply/security/advisories/new) instead.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What went wrong? Screenshots help.
+      placeholder: Approving a job in Review shows an error and the job stays in Review.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Review
+        2. Approve the first job
+        3. Wait for the five-second hold to end
+    validations:
+      required: false
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: What did you expect to happen instead?
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: App version and build are in AutoApply ▸ About. Agent status and mode are in the sidebar or Settings ▸ Agent.
+      value: |
+        - App: 0.1.x (build )
+        - macOS: Version 26.x (Build ) · arm64
+        - Agent: connected · mode review
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Recent logs (redacted)
+      description: |
+        Optional. Paste the last lines of `~/Library/Application Support/AutoApply/logs/autoapplyd.log`,
+        or drag in the `AutoApply-logs-<date>.txt` bundle the app saves when you use Report a Bug.
+        Check them for personal details first.
+      render: text
+    validations:
+      required: false

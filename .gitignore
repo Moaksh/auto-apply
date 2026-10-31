@@ -26,3 +26,6 @@ app/build/
 #   3. gh release create v0.1.1 app/build/AutoApply-0.1.1.dmg --prerelease --title "AutoApply v0.1.1 (beta)"
 #   Installed apps (0.1.1+) find it via GitHub Releases: the tag must be newer than the app's version and the
 #   release must have the .dmg attached. The repo has to stay public for the free, tokenless update check.
+
+# Local agent worktrees and settings
+.claude/

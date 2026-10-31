@@ -1,0 +1,34 @@
+name: Feature request
+description: Suggest something AutoApply should do.
+title: "Feature: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        You can also use **Help ▸ Request a Feature…** in the app, which fills in your versions.
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like?
+      placeholder: Let me run only the jobs already queued and answered, without starting a whole new run.
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why would it help?
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: false
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Optional.
+      value: |
+        - App: 0.1.x (build )
+        - macOS: Version 26.x (Build ) · arm64
+        - Agent: connected · mode review
+    validations:
+      required: false
