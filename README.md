@@ -11,7 +11,7 @@
 [![Platform: macOS 26+ on Apple silicon](https://img.shields.io/badge/macOS-26%2B%20%C2%B7%20Apple%20silicon-000000?logo=apple&logoColor=white)](#requirements)
 [![Swift 6](https://img.shields.io/badge/Swift-6-F05138?logo=swift&logoColor=white)](app/Package.swift)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-3776AB?logo=python&logoColor=white)](engine/pyproject.toml)
-[![Built with Claude](https://img.shields.io/badge/built%20with-Claude-D97757?logo=claude&logoColor=white)](https://www.anthropic.com/claude)
+[![Powered by Claude](https://img.shields.io/badge/powered%20by-Claude-D97757?logo=claude&logoColor=white)](https://www.anthropic.com/claude)
 
 [Download](#install) · [Features](#features) · [How it works](#how-it-works) · [Privacy & safety](#privacy--safety) · [Build from source](#build-from-source)
 
