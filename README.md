@@ -252,13 +252,3 @@ career-ops (also MIT); see [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md).
 
 AutoApply applies to jobs in your name. You are responsible for what it submits and for following
 the terms of the sites it uses.
-
-## Acknowledgements
-
-- [career-ops](https://github.com/career-ops-hq/career-ops) for the posting-liveness and
-  legitimacy checks, several job-board endpoint shapes, outcome calibration and the writing-voice
-  rules ([details](THIRD_PARTY_NOTICES.md)).
-- [GRDB.swift](https://github.com/groue/GRDB.swift) for SQLite in the app.
-- [Playwright](https://playwright.dev) and [Playwright MCP](https://github.com/microsoft/playwright-mcp)
-  for filling forms.
-- [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) for the agent.
