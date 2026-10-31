@@ -1,6 +1,6 @@
 # AutoApply: the design vision for an Apple Design Award
 
-Written 2026-10-22. This is a strategy document. It doesn't change app code; it says what to build, in what order, and why. It builds on `app/DESIGN_REDESIGN_PLAN.md` (already landed in `92fc4d5`), the Rams audit in `DESIGN-IS-2026-10-22/` (11/30), the live Dashboard hero (`a2edab8`), `docs/COLD_EMAIL_PLAN.md` §A and `docs/CAREER_OPS_REVIEW.md`. Paths are under `app/Sources/AutoApply/` unless they say otherwise.
+Written 2026-10-22. This is a strategy document. It doesn't change app code; it says what to build, in what order, and why. It builds on `app/DESIGN_REDESIGN_PLAN.md` (already landed in `92fc4d5`), an internal Rams audit (11/30), the live Dashboard hero (`a2edab8`), `docs/COLD_EMAIL_PLAN.md` §A and `docs/CAREER_OPS_REVIEW.md`. Paths are under `app/Sources/AutoApply/` unless they say otherwise.
 
 Each decision has one recommendation. Where the owner has to choose, it's listed in §13.
 

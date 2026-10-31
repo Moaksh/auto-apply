@@ -29,3 +29,4 @@ app/build/
 
 # Local agent worktrees and settings
 .claude/
+DESIGN-IS-*/
