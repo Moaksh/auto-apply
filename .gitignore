@@ -30,3 +30,4 @@ app/build/
 # Local agent worktrees and settings
 .claude/
 DESIGN-IS-*/
+docs/UI_UX_PLAN.md

@@ -1,4 +1,4 @@
-// SettingsModel.swift — Settings scene state (docs/UI_UX_PLAN.md §5.10): which tab is shown,
+// SettingsModel.swift — Settings scene state: which tab is shown,
 // editable drafts of preferences and never-guess facts that auto-save (debounced) as partial
 // patches containing only what changed, validation with inline errors, LaunchAgent control,
 // and the tracker CSV export.

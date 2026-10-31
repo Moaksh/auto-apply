@@ -1,5 +1,5 @@
 // Motion.swift — AutoApply's motion language, and the ONLY place animation curves are defined
-// (docs/DESIGN_AWARD_VISION.md §6, docs/UI_UX_PLAN.md §2). Views never inline a curve: they use
+// (docs/DESIGN_AWARD_VISION.md §6). Views never inline a curve: they use
 // `Motion.*`, `.motion(_:value:)`, `withMotion`, `.motionTransition(_:)` and the helpers below.
 // `DesignSystemTests.motionGoesThroughTheLanguage` enforces it.
 //

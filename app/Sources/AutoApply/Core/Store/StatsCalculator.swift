@@ -1,5 +1,5 @@
-// StatsCalculator.swift — pre-aggregated dashboard statistics (docs/UI_UX_PLAN.md §2.7:
-// "No chart is computed from raw rows in body"). Pure functions; StatsStore runs them off
+// StatsCalculator.swift — pre-aggregated dashboard statistics: no chart is computed from
+// raw rows in body. Pure functions; StatsStore runs them off
 // the hot path when jobs change.
 import Foundation
 

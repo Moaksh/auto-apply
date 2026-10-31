@@ -1,8 +1,7 @@
 # Developing AutoApply
 
 Everything you need to build, run and test AutoApply from source. For what the app does, see the
-[README](../README.md). Decisions and architecture are in [`PLAN.md`](../PLAN.md), the UI spec is
-in [`docs/UI_UX_PLAN.md`](UI_UX_PLAN.md), and the frozen contract (DB schema and socket protocol)
+[README](../README.md). Decisions and architecture are in [`PLAN.md`](../PLAN.md), and the frozen contract (DB schema and socket protocol)
 is in [`contract/`](../contract/).
 
 AutoApply has two pieces:
@@ -193,7 +192,6 @@ process and checks the socket permissions and the graceful SIGTERM.
 
 ```
 PLAN.md                     decisions, architecture, milestones
-docs/UI_UX_PLAN.md          UI/UX spec
 docs/COLD_EMAIL_PLAN.md     cold email design
 OWNERSHIP.md                who owns which files
 contract/

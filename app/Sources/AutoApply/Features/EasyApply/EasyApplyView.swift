@@ -1,4 +1,4 @@
-// EasyApplyView.swift — Easy Apply manual list (docs/UI_UX_PLAN.md §5.7): Unopened|All|Done
+// EasyApplyView.swift — Easy Apply manual list: Unopened|All|Done
 // filter, copy rows for drafted answers (click or C copies; icon morphs to a checkmark, the row
 // flashes, HUD toast), "Open on LinkedIn" in the user's browser, a draggable resume PDF, and
 // Mark as applied / Dismiss. ↑↓ move through rows so you can alt-tab and paste in sequence.

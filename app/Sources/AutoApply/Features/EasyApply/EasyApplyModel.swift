@@ -1,4 +1,4 @@
-// EasyApplyModel.swift — the LinkedIn Easy Apply manual list (docs/UI_UX_PLAN.md §5.7). The
+// EasyApplyModel.swift — the LinkedIn Easy Apply manual list. The
 // app never automates LinkedIn: it shows pre-drafted answers to copy, opens the posting in the
 // user's browser, offers the resume PDF to drag into the upload field, and records "Mark as
 // applied" (mode `manual`, which doesn't count toward the daily cap).

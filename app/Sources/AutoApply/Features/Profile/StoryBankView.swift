@@ -1,4 +1,4 @@
-// StoryBankView.swift — the Story bank (docs/UI_UX_PLAN.md §5.8): stories on the left (title +
+// StoryBankView.swift — the Story bank: stories on the left (title +
 // tags + usage), a STAR editor on the right with one gentle text area per part, a "facts only"
 // reminder, and an empty state with Import from text.
 import SwiftUI

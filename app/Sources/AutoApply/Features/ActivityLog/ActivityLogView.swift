@@ -1,4 +1,4 @@
-// ActivityLogView.swift — the Activity log (docs/UI_UX_PLAN.md §5.11): SF Mono throughout, a
+// ActivityLogView.swift — the Activity log: SF Mono throughout, a
 // fixed-width colored type tag, scope filter (All | Agent | You | Errors), text filter, run
 // picker and follow mode. NSTableView-backed `Table` virtualizes rows (smooth at 100k).
 // Scrolling away or selecting a row pauses follow; a floating glass bar "12 new events ↑" resumes it.

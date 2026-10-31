@@ -1,4 +1,4 @@
-// ReviewModel.swift — Review queue logic (docs/UI_UX_PLAN.md §5.6): flagged (medium/low
+// ReviewModel.swift — Review queue logic: flagged (medium/low
 // confidence) items sorted to the top, multi-selection, the floating bar's states (actions →
 // "include the flagged one?" safeguard → skip reason picker), approve through the send hold
 // (`SendHoldModel`: nothing is sent until its ≈5 s Undo window closes), reject with a reason,

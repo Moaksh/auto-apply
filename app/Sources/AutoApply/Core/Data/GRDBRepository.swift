@@ -4,7 +4,7 @@
 // write here comes from another process (autoapplyd). So change detection polls
 // `PRAGMA data_version` (which changes whenever *another* connection commits) and re-runs
 // the observed queries, emitting only when a result actually changed. Default poll: 0.5 s,
-// which meets the "DB reconciles within a second" rule (docs/UI_UX_PLAN.md §8.4).
+// which meets the "DB reconciles within a second" rule.
 import Foundation
 import GRDB
 import Synchronization

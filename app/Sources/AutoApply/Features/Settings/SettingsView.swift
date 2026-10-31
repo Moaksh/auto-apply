@@ -1,4 +1,4 @@
-// SettingsView.swift — the Settings scene (⌘,) (docs/UI_UX_PLAN.md §5.10): a tabbed toolbar
+// SettingsView.swift — the Settings scene (⌘,): a tabbed toolbar
 // whose height animates per tab. Preference and never-guess edits auto-save as partial
 // `update_preferences` / `update_never_guess` patches; app-local toggles live in UserDefaults.
 import AppKit

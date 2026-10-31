@@ -1,5 +1,5 @@
 // EventCoalescer.swift — turns the daemon's event stream into at most one main-actor batch
-// per display frame (docs/UI_UX_PLAN.md §8.4): one batch = one Observation transaction =
+// per display frame: one batch = one Observation transaction =
 // one render pass, however many events/second the daemon emits.
 import CoreGraphics
 import Foundation

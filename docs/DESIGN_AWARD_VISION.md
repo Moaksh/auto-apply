@@ -50,7 +50,7 @@ The demo version, for a 90-second video: *ten calm minutes a day, then you're do
 
 ## 2. Design principles
 
-These seven principles are ranked. When two conflict, the higher one wins. They replace the five rules in `docs/UI_UX_PLAN.md` §0 and absorb the Rams audit's ranking (honest > understandable > as little as possible > unobtrusive).
+These seven principles are ranked. When two conflict, the higher one wins. They absorb the Rams audit's ranking (honest > understandable > as little as possible > unobtrusive).
 
 1. **Honest before impressive.** Every number, claim and action can be opened to show where it came from. If we can't show the receipt, we don't make the claim. *(The audit gave Honest 0/3. This principle is the one that must never regress.)*
 2. **The user is the hero; the agent is a colleague.** Copy speaks to the user in the second person. The agent speaks in the first person, in SF Mono (§5). Wins are the user's: "your answer moved 14 jobs", not "AutoApply applied to 14 jobs".

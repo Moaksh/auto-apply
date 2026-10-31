@@ -1,4 +1,4 @@
-// Tokens.swift — color, typography, spacing and radius tokens (docs/UI_UX_PLAN.md §1.2–1.4).
+// Tokens.swift — color, typography, spacing and radius tokens.
 // Views never use raw colors or sizes: everything goes through these names.
 import AppKit
 import SwiftUI

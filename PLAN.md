@@ -2,7 +2,6 @@
 
 Personal, local-only macOS app that discovers jobs, applies on the user's behalf, asks the user only when it truly lacks knowledge, and tracks everything.
 
-UI/UX spec lives in [`docs/UI_UX_PLAN.md`](docs/UI_UX_PLAN.md).
 
 ---
 
@@ -60,7 +59,6 @@ Local: DB, files, credentials, browser profile. Sent to Claude: resume/profile t
 ```
 auto_apply/
   PLAN.md
-  docs/UI_UX_PLAN.md
   contract/
     schema.sql              # single source of truth for DB
     protocol.md             # socket commands/events
@@ -173,7 +171,7 @@ Every message: `{ "v": 1, "id": "...", "type": "...", "payload": {...} }`.
 | **0. Contract** | `schema.sql`, `protocol.md`, JSON Schema, codegen for Swift/Python types | — (do first, ~day 1) |
 | **A. Engine core** | db, config, discovery (GH/Lever/Ashby), scoring, GH/Lever/Ashby adapters, state machine, CLI | 0 |
 | **B. Agent & answers** | LLMProvider, agentic adapter + tools, answer memory + clustering, guardrails, prep pass, resume picker, cover letters, Easy Apply drafts | 0, A's db |
-| **C. Swift app** | per `docs/UI_UX_PLAN.md`; built against `app/Mock` event stream, then real socket | 0 |
+| **C. Swift app** | built against `app/Mock` event stream, then real socket | 0 |
 | **D. Daemon & LinkedIn** | socket server, snapshot, LaunchAgent plist + install/uninstall from app, scheduler, caffeinate, LinkedIn/Glassdoor discovery | 0, A |
 
 Integration milestones:

@@ -130,7 +130,7 @@ struct JobItem: Identifiable, Sendable, Hashable {
     }
 }
 
-/// Columns of the Pipeline board (docs/UI_UX_PLAN.md §5.3), in display order.
+/// Columns of the Pipeline board, in display order.
 enum BoardColumn: String, CaseIterable, Identifiable, Sendable, Hashable {
     case discovered, skipped, queued, needsYou, applied, assessment, interview, offer, rejected, ghosted
 

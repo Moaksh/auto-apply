@@ -1,4 +1,4 @@
-// ProfileView.swift — Profile as a form-style document (docs/UI_UX_PLAN.md §5.8): Identity,
+// ProfileView.swift — Profile as a form-style document: Identity,
 // Contact, Links, Experience, Education, Skills, Facts only you set (locked styling), and Saved
 // answers (from Needs You, with inline edit / delete).
 import SwiftUI

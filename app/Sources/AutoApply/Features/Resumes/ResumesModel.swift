@@ -1,4 +1,4 @@
-// ResumesModel.swift — resume variants (docs/UI_UX_PLAN.md §5.9): the grid selection shared
+// ResumesModel.swift — resume variants: the grid selection shared
 // with the inspector, per-variant send/response stats, the jobs each variant was used for,
 // adding PDFs, and tag / default / enabled edits. Files are read-only in-app.
 import AppKit

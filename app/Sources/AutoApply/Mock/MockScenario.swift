@@ -1,4 +1,4 @@
-// MockScenario.swift — the scenarios from docs/UI_UX_PLAN.md §8.5, each a dataset + initial
+// MockScenario.swift — the demo scenarios, each a dataset + initial
 // daemon state + a timed script. Times are scenario seconds (scaled by MockDaemon.speed).
 import Foundation
 

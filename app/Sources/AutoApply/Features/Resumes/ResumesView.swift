@@ -1,4 +1,4 @@
-// ResumesView.swift — resume variants grid (docs/UI_UX_PLAN.md §5.9): LazyVGrid cards with real
+// ResumesView.swift — resume variants grid: LazyVGrid cards with real
 // PDF first-page thumbnails (PDFKit, off-main), tags, sent/response stats and the default dot;
 // hover lifts 2pt. Selecting a card drives the inspector: tags, default, enabled, and the jobs
 // it was used for with outcome dots.

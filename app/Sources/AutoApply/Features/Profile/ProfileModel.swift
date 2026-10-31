@@ -1,4 +1,4 @@
-// ProfileModel.swift — Profile document editing (docs/UI_UX_PLAN.md §5.8): an editable draft of
+// ProfileModel.swift — Profile document editing: an editable draft of
 // the profile saved as a partial `update_profile` patch, answer-memory edits/deletes, and the
 // Story bank (STAR) with "Import from text".
 import Foundation

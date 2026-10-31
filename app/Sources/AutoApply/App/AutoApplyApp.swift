@@ -1,4 +1,4 @@
-// AutoApplyApp.swift — app entry point and scenes (docs/UI_UX_PLAN.md §3.1).
+// AutoApplyApp.swift — app entry point and scenes.
 import AppKit
 import SwiftUI
 

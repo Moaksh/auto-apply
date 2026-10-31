@@ -1,4 +1,4 @@
-// JobDetailModel.swift — data + rules for Job Detail (docs/UI_UX_PLAN.md §5.4): match factor
+// JobDetailModel.swift — data + rules for Job Detail: match factor
 // ordering, the event timeline, "Copy all" text, the status menu's legal actions, and the
 // loader that streams the Q&A audit and JD from the read-only repository.
 import AppKit

@@ -1,4 +1,4 @@
-// Router.swift — navigation model for the main window (docs/UI_UX_PLAN.md §3.2).
+// Router.swift — navigation model for the main window.
 import Observation
 import SwiftUI
 

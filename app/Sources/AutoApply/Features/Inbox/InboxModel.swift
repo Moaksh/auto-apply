@@ -1,4 +1,4 @@
-// InboxModel.swift — Needs-You inbox logic (docs/UI_UX_PLAN.md §5.5): impact-first clusters,
+// InboxModel.swift — Needs-You inbox logic: impact-first clusters,
 // an adaptive composer per cluster, answer-once with a 10 s Undo window (the command is held
 // until the window closes, so Undo is a true undo), auto-advance, and the inbox-zero moment.
 import AppKit

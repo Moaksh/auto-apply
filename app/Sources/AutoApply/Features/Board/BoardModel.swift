@@ -1,4 +1,4 @@
-// BoardModel.swift — Pipeline board logic (docs/UI_UX_PLAN.md §5.3): column/filter
+// BoardModel.swift — Pipeline board logic: column/filter
 // derivation, legal-drop rules (a card dropped on Queued is applied to by the agent; one the
 // agent never submitted dropped on Applied or later = "I applied myself"; the user owns
 // post-apply statuses), keyboard moves, undo, nudge and ghosting affordances. Pure rules live in

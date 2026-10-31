@@ -1,4 +1,4 @@
-// DashboardModel.swift — pure presentation logic for the Dashboard (docs/UI_UX_PLAN.md §4):
+// DashboardModel.swift — pure presentation logic for the Dashboard:
 // greeting, next-run label and countdown, hero state/verb, KPI captions, the per-day count-up
 // policy. Views stay thin
 // and every rule here is unit-tested (Tests/AutoApplyTests/C2).

@@ -2,7 +2,7 @@
 
 Parallel workstreams edit **only** the files they own. Need a change in a file you don't
 own? Don't edit it; request it (orchestrator `contract_change_requests`). Source of truth for
-decisions: [`PLAN.md`](PLAN.md), [`docs/UI_UX_PLAN.md`](docs/UI_UX_PLAN.md),
+decisions: [`PLAN.md`](PLAN.md) and
 [`contract/`](contract/).
 
 ## Shared foundation — READ-ONLY for all builders

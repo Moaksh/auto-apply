@@ -1,5 +1,5 @@
-// ActivityLogModel.swift — the Activity log's filtering and follow mode (docs/UI_UX_PLAN.md
-// §5.11). Built for 100k rows: filtering is incremental (only newly appended rows are tested
+// ActivityLogModel.swift — the Activity log's filtering and follow mode.
+// Built for 100k rows: filtering is incremental (only newly appended rows are tested
 // when the filter is unchanged), the displayed collection is a reversed slice (no copies),
 // and pausing follow freezes the visible rows so the table never shifts under the reader.
 import AppKit

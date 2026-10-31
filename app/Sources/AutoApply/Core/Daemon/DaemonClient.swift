@@ -58,6 +58,6 @@ protocol DaemonConnecting: AnyObject, Sendable {
 
     /// Send a command and await its reply (the event whose `reply_to` == command id).
     /// Throws `DaemonClientError.daemon` when the reply is an `error` event, and
-    /// `.timeout` after `timeout` (default 2 s per docs/UI_UX_PLAN.md §8.4).
+    /// `.timeout` after `timeout` (default 2 s).
     func request(_ command: Command, timeout: Duration) async throws -> EventEnvelope
 }

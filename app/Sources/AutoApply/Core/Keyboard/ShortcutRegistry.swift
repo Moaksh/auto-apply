@@ -1,4 +1,4 @@
-// ShortcutRegistry.swift — the single source for every keyboard shortcut (docs/UI_UX_PLAN.md §3.4).
+// ShortcutRegistry.swift — the single source for every keyboard shortcut.
 // Menus (AppCommands), buttons, the ⌘K palette and help text all read from here, so a
 // shortcut is defined once.
 import SwiftUI

@@ -1,4 +1,4 @@
-// AppStore.swift — the root @Observable store (docs/UI_UX_PLAN.md §8.4).
+// AppStore.swift — the root @Observable store.
 //
 //   DaemonConnecting.events ─▶ EventCoalescer (off-main, ≤1 batch/frame) ─▶ apply(batch:)
 //   AppRepository streams (SQLite, read-only) ───────────────────────────▶ jobs / library / activity

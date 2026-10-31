@@ -1,4 +1,4 @@
-// PaletteModel.swift — Raycast-style ⌘K palette logic (docs/UI_UX_PLAN.md §3.3): fuzzy search
+// PaletteModel.swift — Raycast-style ⌘K palette logic: fuzzy search
 // across jobs, inbox questions, stories, settings keys and actions; scope prefixes (`>`
 // actions, `@` companies, `?` inbox questions, `/` settings); inline result actions (↵ open,
 // ⌘↵ open posting in the browser, ⌥↵ show in Pipeline).
