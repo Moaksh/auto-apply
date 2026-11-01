@@ -6,7 +6,7 @@
 import Foundation
 
 enum MockOutreach {
-    static let mailbox = "asha.rao@gmail.com"
+    static let mailbox = "soumya.jethwani@gmail.com"
 
     static func footer(_ source: String) -> String {
         "—\nI found your address on \(source). If you'd rather not hear from me, reply \"no thanks\" and I won't email again."
@@ -58,7 +58,7 @@ enum MockOutreach {
         func thread(_ job: JobItem, _ c: ContactItem, state: OutreachThreadState, unread: Bool = false, updated: Date) -> OutreachThreadItem {
             let t = OutreachThreadItem(id: nextThread, kind: .application, contactID: c.id, companyID: job.companyID, company: job.company,
                                        jobID: job.id, applicationID: job.applicationID, state: state,
-                                       subject: "\(job.title) application – Asha Rao", unreadReply: unread,
+                                       subject: "\(job.title) application – Soumya Jethwani", unreadReply: unread,
                                        createdAt: updated.addingTimeInterval(-3_600), updatedAt: updated)
             o.threads.append(t)
             nextThread += 1
@@ -93,14 +93,14 @@ enum MockOutreach {
             If you're the right person, would you be open to a 15-minute chat? If not, a pointer to whoever is would be very kind.
 
             Thanks,
-            Asha
+            Soumya
             """
         }
 
         let names: [(String, String, ContactRoleCategory)] = [
             ("Priya Nair", "Technical Recruiter", .recruiter), ("Daniel Kim", "Engineering Manager, Payments", .hiringManager),
             ("Meera Iyer", "Talent Partner", .talentLead), ("Tom Becker", "Head of Platform", .engLeader),
-            ("Ananya Rao", "Senior Software Engineer", .engineer), ("Lucas Silva", "Recruiter", .recruiter),
+            ("Ananya Desai", "Senior Software Engineer", .engineer), ("Lucas Silva", "Recruiter", .recruiter),
             ("Kavya Menon", "Engineering Manager", .hiringManager), ("Rohan Shah", "Staff Engineer", .engineer),
             ("Sara Lindqvist", "Talent Acquisition Lead", .talentLead), ("Arjun Patel", "Co-founder & CTO", .founder),
         ]
@@ -135,13 +135,13 @@ enum MockOutreach {
                 let t = thread(job, c, state: .active, updated: ago(1.5))
                 message(t, c, state: .sent, body: body(job, c), sentAt: ago(50), at: ago(52))
                 let first = c.fullName.split(separator: " ").first.map(String.init) ?? c.fullName
-                message(t, c, state: .sent, body: "Hi \(first),\n\nA short follow-up on my note about the \(job.title) role. Happy to send anything that helps.\n\nThanks,\nAsha",
+                message(t, c, state: .sent, body: "Hi \(first),\n\nA short follow-up on my note about the \(job.title) role. Happy to send anything that helps.\n\nThanks,\nSoumya",
                         sentAt: ago(1.5), seq: 1, at: ago(1.6))
             case 5: // replied, unread
                 let c = contact(job, name, title, role, confidence: 96, status: "replied", source: "company_page", url: page(job))
                 let t = thread(job, c, state: .replied, unread: true, updated: ago(3))
                 message(t, c, state: .sent, body: body(job, c), sentAt: ago(30), at: ago(31))
-                message(t, c, state: .received, body: "Thanks Asha! I've passed your profile to the hiring manager for the \(job.title) role. Expect to hear from us this week about a first call.",
+                message(t, c, state: .received, body: "Thanks Soumya! I've passed your profile to the hiring manager for the \(job.title) role. Expect to hear from us this week about a first call.",
                         inbound: true, classification: "positive", seq: 1, at: ago(3))
             case 6: // possibly sent (crash during sending)
                 let c = contact(job, name, title, role, confidence: 90, status: "published", source: "company_page", url: page(job))
@@ -158,7 +158,7 @@ enum MockOutreach {
                 t.outcome = .notInterested
                 o.threads[o.threads.count - 1] = t
                 message(t, c, state: .sent, body: body(job, c), sentAt: ago(200), at: ago(201))
-                message(t, c, state: .received, body: "Hi Asha, thanks for reaching out. We've filled this role, but I'll keep your details on file.",
+                message(t, c, state: .received, body: "Hi Soumya, thanks for reaching out. We've filled this role, but I'll keep your details on file.",
                         inbound: true, classification: "not_interested", seq: 1, at: ago(120))
             default:
                 break // no contact yet
@@ -234,7 +234,7 @@ enum MockOutreach {
             guard let app = job.applicationID else { continue }
             let rows: [(ApplicationReplyLabel, BoardStatus?, String, String)] = [
                 (.interviewInvite, .interview, "Next steps for your \(job.title) application",
-                 "Hi Asha, thanks for applying to \(job.company). We'd like to set up a 30-minute call with the team. Could you share a few times that work next week?"),
+                 "Hi Soumya, thanks for applying to \(job.company). We'd like to set up a 30-minute call with the team. Could you share a few times that work next week?"),
                 (.rejection, .rejected, "Your application to \(job.company)",
                  "Thank you for your interest in \(job.company). After careful review we've decided to move forward with other candidates for this role."),
                 (.receivedAck, nil, "We received your application",
@@ -391,8 +391,8 @@ enum MockOutreach {
                 let now = Date()
                 let first = c.fullName.split(separator: " ").first.map(String.init) ?? c.fullName
                 let body = p.kind == .prospect
-                    ? "Hi \(first),\n\nI've followed \(c.company ?? "your team")'s work and I build backend and ML systems in Go and Python. Would you be open to a 15-minute chat about the team, or a pointer to the right person?\n\nThanks,\nAsha"
-                    : "Hi \(first),\n\nI applied for the \(job?.title ?? "open") role at \(c.company ?? "your company") this week. I build backend systems in Go and Python and would love to bring that to your team.\n\nWould you be open to a 15-minute chat?\n\nThanks,\nAsha"
+                    ? "Hi \(first),\n\nI've followed \(c.company ?? "your team")'s work and I build backend and ML systems in Go and Python. Would you be open to a 15-minute chat about the team, or a pointer to the right person?\n\nThanks,\nSoumya"
+                    : "Hi \(first),\n\nI applied for the \(job?.title ?? "open") role at \(c.company ?? "your company") this week. I build backend systems in Go and Python and would love to bring that to your team.\n\nWould you be open to a 15-minute chat?\n\nThanks,\nSoumya"
                 let threadIndex = data.outreach.threads.firstIndex { t in
                     t.state == .draft && (p.applicationId != nil ? t.applicationID == p.applicationId : (t.companyID == companyID && t.kind == p.kind))
                 }
@@ -410,7 +410,7 @@ enum MockOutreach {
                     data.outreach.threads.append(OutreachThreadItem(
                         id: threadID, kind: p.kind, contactID: c.id, companyID: companyID, company: c.company ?? companyName(data, companyID),
                         jobID: job?.id, applicationID: p.applicationId, state: .draft,
-                        subject: job.map { "\($0.title) application – Asha Rao" } ?? "Backend engineer – Asha Rao", createdAt: now, updatedAt: now))
+                        subject: job.map { "\($0.title) application – Soumya Jethwani" } ?? "Backend engineer – Soumya Jethwani", createdAt: now, updatedAt: now))
                 }
                 let messageID = (data.outreach.messages.map(\.id).max() ?? 0) + 1
                 let subject = data.outreach.threads.first { $0.id == threadID }?.subject

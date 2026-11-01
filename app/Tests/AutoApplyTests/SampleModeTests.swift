@@ -38,7 +38,7 @@ struct SampleModeTests {
     @Test func sampleDataIsABelievableIndianJobHunt() {
         let setup = MockScenario.sample.makeSetup()
         let data = setup.data
-        #expect(data.profile.fullName == "Asha Rao")
+        #expect(data.profile.fullName == "Soumya Jethwani")
         #expect(data.profile.location == "Bengaluru, India")
         #expect(data.neverGuess.workAuth["IN"] == "citizen")
         #expect(setup.state.preferences.mode == .review)
@@ -51,7 +51,7 @@ struct SampleModeTests {
         let answers = data.applicationAnswers.values.flatMap { $0 }
         #expect(!answers.isEmpty)
         #expect(!answers.contains { $0.answer.contains("Moaksh") })
-        #expect(answers.contains { $0.answer == "Asha Rao" })
+        #expect(answers.contains { $0.answer == "Soumya Jethwani" })
         #expect(answers.filter { $0.question == "Requires sponsorship?" }.allSatisfy { $0.answer == "No" })
         #expect(!data.activity.contains { $0.message.contains("stripe/") })
         // Replies, cold email and something to prepare an interview for.
@@ -84,7 +84,7 @@ struct SampleModeTests {
         // Answers recorded by the run belong to the sample persona.
         let filled = found.filter { $0.state == .awaitingReview }.compactMap(\.applicationID)
         let recorded = repository.read { data in filled.flatMap { data.applicationAnswers[$0] ?? [] } }
-        #expect(recorded.contains { $0.answer == "Asha Rao" })
+        #expect(recorded.contains { $0.answer == "Soumya Jethwani" })
         await store.stop()
     }
 
@@ -101,7 +101,7 @@ struct SampleModeTests {
         #expect(store.client is SampleModeClient)
         #expect(SampleMode.isPersisted(defaults))
         #expect(store.router.selection == .dashboard)
-        #expect(await waitUntil { store.hasSnapshot && store.jobs.isLoaded && store.library.profile.fullName == "Asha Rao" })
+        #expect(await waitUntil { store.hasSnapshot && store.jobs.isLoaded && store.library.profile.fullName == "Soumya Jethwani" })
         #expect(!store.needsOnboarding)
         #expect(!OnboardingGate.shouldPresent(store: store))
 
@@ -117,7 +117,7 @@ struct SampleModeTests {
         let defaults = isolatedDefaults()
         let store = await makeOnboardingStore()
         await SampleMode.enter(store: store, defaults: defaults, speed: 50)
-        _ = await waitUntil { store.hasSnapshot && store.library.profile.fullName == "Asha Rao" }
+        _ = await waitUntil { store.hasSnapshot && store.library.profile.fullName == "Soumya Jethwani" }
 
         await SampleMode.exit(store: store, defaults: defaults, goLive: Self.fakeLive)
         #expect(!SampleMode.isPersisted(defaults))

@@ -35,7 +35,7 @@ enum MockStartups {
         Startup(name: "Patang AI", domain: "patang-ai.example", city: "Bengaluru", oneLiner: "Voice agents for Indian-language customer support.",
                 yc: "W25", stage: .seed, amount: 3_500_000, currency: "USD", usd: 3_500_000, daysAgo: 70,
                 investors: ["Peak XV Partners", "Y Combinator"], teamSize: 18, hiring: true, matchingRoles: 2,
-                founders: [("Ananya Rao", "Co-founder & CEO"), ("Vikram Shetty", "Co-founder & CTO")],
+                founders: [("Ananya Desai", "Co-founder & CEO"), ("Vikram Shetty", "Co-founder & CTO")],
                 reasons: [r("recency", "Fresh funding", 25, 25, "Raised a $3.5M seed round 2 months ago"),
                           r("stage", "Round", 17, 20, "Last round: seed ($3.5M)"),
                           r("investors", "Investors", 15, 15, "Backed by Peak XV Partners and Y Combinator"),

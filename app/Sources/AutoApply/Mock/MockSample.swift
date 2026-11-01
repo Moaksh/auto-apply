@@ -1,5 +1,5 @@
 // MockSample.swift — the "Explore with sample data" dataset (DESIGN_AWARD_VISION 1I): one
-// believable job seeker in India (Asha Rao, a backend engineer in Bengaluru, the same person the
+// believable job seeker in India (Soumya Jethwani, a backend engineer in Bengaluru, the same person the
 // outreach fixtures already write as), Indian companies and cities, and a script in which the
 // agent keeps working so the living hero and the pipeline move. Built on the rich baseline, then
 // localized, so every screen (Review, Needs You, replies, cold email, interview prep) has content.
@@ -10,9 +10,9 @@ enum MockSample {
 
     static var profile: Profile {
         var p = Profile()
-        p.fullName = "Asha Rao"
-        p.firstName = "Asha"
-        p.lastName = "Rao"
+        p.fullName = "Soumya Jethwani"
+        p.firstName = "Soumya"
+        p.lastName = "Jethwani"
         p.email = MockOutreach.mailbox
         p.phone = "+91 98450 21734"
         p.location = "Bengaluru, India"
