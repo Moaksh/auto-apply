@@ -98,7 +98,7 @@ enum MockOutreach {
         }
 
         let names: [(String, String, ContactRoleCategory)] = [
-            ("Priya Nair", "Technical Recruiter", .recruiter), ("Daniel Kim", "Engineering Manager, Payments", .hiringManager),
+            ("Rohan Bansal", "Technical Recruiter", .recruiter), ("Daniel Kim", "Engineering Manager, Payments", .hiringManager),
             ("Meera Iyer", "Talent Partner", .talentLead), ("Tom Becker", "Head of Platform", .engLeader),
             ("Ananya Desai", "Senior Software Engineer", .engineer), ("Lucas Silva", "Recruiter", .recruiter),
             ("Kavya Menon", "Engineering Manager", .hiringManager), ("Rohan Shah", "Staff Engineer", .engineer),
