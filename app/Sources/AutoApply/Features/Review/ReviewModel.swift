@@ -452,6 +452,15 @@ final class ReviewModel {
         if case .failure = result { answers[appID] = before }
     }
 
+    /// "Looks right": the flagged answer is confirmed as written (confidence 1; who wrote it is kept).
+    func confirmAnswer(_ answer: ApplicationAnswerItem) async {
+        let appID = answer.applicationID
+        let before = answers[appID]
+        if let i = answers[appID]?.firstIndex(where: { $0.id == answer.id }) { answers[appID]?[i].confidence = 1 }
+        let result = await store.perform(.confirmApplicationAnswer(ConfirmApplicationAnswerPayload(applicationAnswerId: answer.id)))
+        if case .failure = result { answers[appID] = before }
+    }
+
     /// Per-job mode override (Inherit / Auto / Review) for the focused job.
     func setMode(_ mode: Mode?, for job: JobItem) async {
         await store.setJobMode(jobID: job.id, mode: mode)

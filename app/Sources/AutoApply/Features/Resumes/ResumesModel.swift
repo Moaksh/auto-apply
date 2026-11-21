@@ -1,6 +1,7 @@
 // ResumesModel.swift — resume variants: the grid selection shared
 // with the inspector, per-variant send/response stats, the jobs each variant was used for,
-// adding PDFs, and tag / default / enabled edits. Files are read-only in-app.
+// adding PDFs, tag / default / enabled edits, attaching an editable source, auto-tailoring,
+// and opening the Claude editor. The PDFs added are never changed; edits save new versions.
 import AppKit
 import Foundation
 import Observation
@@ -17,6 +18,9 @@ final class ResumesModel {
     @ObservationIgnored private var tagTasks: [Int: Task<Void, Never>] = [:]
     /// Optimistic tag edits until the DB reflects them.
     private(set) var pendingTags: [Int: [String]] = [:]
+    /// A request to open "Edit with Claude" for this resume (ResumesView opens the window).
+    var editorVariantID: Int?
+    private(set) var attaching: Int?
 
     static func shared(for store: AppStore) -> ResumesModel {
         FeatureModels.model(ResumesModel.self, for: store) { ResumesModel(store: store) }
@@ -27,7 +31,7 @@ final class ResumesModel {
     }
 
     var variants: [ResumeVariantItem] {
-        store.library.resumeVariants.sorted { a, b in
+        store.library.baseResumes.sorted { a, b in
             if a.isDefault != b.isDefault { return a.isDefault }
             if a.enabled != b.enabled { return a.enabled }
             return a.label.localizedCaseInsensitiveCompare(b.label) == .orderedAscending
@@ -55,7 +59,7 @@ final class ResumesModel {
 
     /// Jobs this variant was picked for, newest first.
     func jobs(usedBy variant: ResumeVariantItem) -> [JobItem] {
-        store.jobs.all.filter { $0.resumeVariantID == variant.id }
+        store.jobs.all.filter { $0.resumeVariantID == variant.id || store.library.resume(id: $0.resumeVariantID)?.parentID == variant.id }
             .sorted { ($0.submittedAt ?? $0.stateUpdatedAt ?? $0.discoveredAt) > ($1.submittedAt ?? $1.stateUpdatedAt ?? $1.discoveredAt) }
     }
 
@@ -87,7 +91,7 @@ final class ResumesModel {
         for url in urls where url.pathExtension.lowercased() == "pdf" {
             let name = url.lastPathComponent
             adding.append(name)
-            let id = await store.addResumeVariant(filePath: url.path, label: Self.label(for: url), tags: [], isDefault: store.library.resumeVariants.isEmpty)
+            let id = await store.addResumeVariant(filePath: url.path, label: Self.label(for: url), tags: [], isDefault: store.library.baseResumes.isEmpty)
             adding.removeAll { $0 == name }
             if let id {
                 selectedID = id
@@ -132,6 +136,39 @@ final class ResumesModel {
         guard !variant.isDefault else { return }
         if await store.updateResumeVariant(UpdateResumeVariantPayload(id: variant.id, isDefault: true)) {
             store.toasts.show("\(variant.label) is now the default", symbol: "star.fill", style: .success)
+        }
+    }
+
+    func setAutoTailor(_ on: Bool, _ variant: ResumeVariantItem) async {
+        await store.updateResumeVariant(UpdateResumeVariantPayload(id: variant.id, autoTailor: on))
+    }
+
+    // MARK: Editing with Claude
+
+    func openEditor(_ variant: ResumeVariantItem) {
+        guard variant.canEdit else { return }
+        editorVariantID = variant.id
+    }
+
+    /// Pick the .docx / .tex / .html the PDF was made from; opens the editor once it's attached.
+    func chooseSource(for variant: ResumeVariantItem) {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [UTType(filenameExtension: "docx"), UTType(filenameExtension: "tex"), .html].compactMap { $0 }
+        panel.allowsMultipleSelection = false
+        panel.message = "Choose the file \(variant.label) was made from (.docx, .tex or .html). Files beside it (styles, classes, images) come along."
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { await attachSource(url, to: variant) }
+    }
+
+    func attachSource(_ url: URL, to variant: ResumeVariantItem) async {
+        attaching = variant.id
+        defer { attaching = nil }
+        switch await store.attachResumeSource(variantID: variant.id, filePath: url.path) {
+        case .success(let source):
+            store.toasts.show("Attached \(source.fileName)", symbol: "doc.text", style: .success)
+            editorVariantID = variant.id
+        case .failure(let e):
+            store.toasts.error(ResumeEditorModel.message(e))
         }
     }
 

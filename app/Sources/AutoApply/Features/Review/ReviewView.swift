@@ -367,6 +367,7 @@ private struct ReviewDetail: View {
             ReviewQAPanel(job: job, answers: model.answers(for: job), answersLoaded: model.answersLoaded(job),
                           jumpSerial: model.flaggedJumpSerial,
                           onEdit: { answer, text in await model.editAnswer(answer, to: text) },
+                          onConfirm: { answer in await model.confirmAnswer(answer) },
                           onQuickLook: { quickLookURL = $0 })
         }
         .padding(Space.contentPadding)

@@ -96,12 +96,18 @@ An `error` without `reply_to` is an unsolicited daemon problem (login expired, C
 | `update_never_guess` | `values`: partial `NeverGuess`; `null` value = "always ask me" (row deleted) | `{never_guess}` (full) | |
 | `update_profile` | `profile`: partial `Profile` | `{profile}` | |
 | `add_resume_variant` | `file_path`, `label`, `tags`, `is_default` | `{resume_variant_id}` | daemon copies the PDF into `<home>/resumes/` and extracts text |
-| `update_resume_variant` | `id`, `label?`, `tags?`, `enabled?`, `is_default?` | `null` | |
+| `update_resume_variant` | `id`, `label?`, `tags?`, `enabled?`, `is_default?`, `auto_tailor?` | `null` | `auto_tailor`: the agent tailors a copy per job (§5.6) |
+| `attach_resume_source` | `id`, `file_path` (`.html` / `.htm` / `.tex` / `.docx`) | `ResumeSource` | copies the source and the classes / styles / images beside it into `<home>/resumes/` (§5.6) |
+| `get_resume_source` | `id` | `ResumeSource` | `not_found` when the resume has no source |
+| `propose_resume_edits` | `id`, `instructions`, `job_id?`, `working[]` `{segment_id, text}`, `history[]` | `ResumeEditProposal` | Claude's suggested edits; nothing is saved (§5.6) |
+| `preview_resume_edit` | `id`, `edits[]` `{segment_id, text}` | `ResumePreview` `{file_path, pages?}` | renders a preview PDF; nothing saved (§5.6) |
+| `save_resume_edit` | `id`, `edits[]` `{segment_id, text}`, `as_new` (false), `label?` | `SaveResumeEditResult` `{resume_variant_id, file_path, version, pages?}` | renders the PDF; next version (old one kept, disabled) or a new resume |
 | `upsert_story` | `id?` (omit = create), `title`, `situation`, `task`, `action`, `result`, `tags` | `{story_id}` | |
 | `delete_story` | `id` | `null` | |
 | `update_answer` | `answer_id`, `answer`, `canonical_question?` | `null` | memory editing (Profile ▸ Memory) |
 | `delete_answer` | `answer_id` | `null` | |
 | `edit_application_answer` | `application_answer_id`, `answer` | `null` | Review ✎: origin becomes `user` |
+| `confirm_application_answer` | `application_answer_id` | `null` | Review "Looks right": confidence 1.0, origin kept; event `kind = 'review'` with `confirmed_answer_id` (not an edit for earned autonomy) |
 | `set_job_mode` | `job_id`, `mode` (`auto`\|`review`\|`null` = inherit) | `null` | per-job override |
 | `retry_application` | `application_id` | `null` | failed → queued (actor user) |
 | `resolve_unknown` | `application_id`, `submitted` (bool) | `null` | unknown_verify → submitted \| failed (actor user) |
@@ -326,6 +332,60 @@ the user edits the text and answers with `answer_question`.
   model call is made for `action` / `never_guess` / `always_ask`. `not_found` for a cluster that
   is not open, `invalid_payload` for a `job_id` not in the cluster, `unavailable` when no model is
   configured or the model fails. Tokens are added to the job's application.
+
+#### 5.6 Editing resumes with Claude, and tailoring per job (`engine/autoapply/resume_edit/`; schema v15)
+
+A resume PDF can carry the **editable source** it was made from (`resume_variants.source_path`,
+`source_kind` = `html` | `latex` | `docx`). The uploaded PDF itself is never changed: every save
+renders a new PDF as a new row.
+
+- **Segments** (`ResumeSource.segments[]` `{id, text}`; ids `s1…` are stable for one stored file):
+  HTML — each block element with no block inside it (`p`, `li`, `h1…`, `td`, a leaf `div`);
+  LaTeX — each line of the document body with visible text, raw markup included (a trailing `%`
+  comment is kept aside); .docx — each `w:p` paragraph of `word/document.xml`, with `\t` / `\n`
+  for tabs and line breaks. Edits change only segment text. An edit is refused (`invalid_payload`)
+  when it would break the file: a .docx edit that changes the number of tabs / breaks, a LaTeX edit
+  with unbalanced braces or a command the line didn't use (other than `\textbf`, `\textit`, `\emph`,
+  `\underline`, `\textsc`, `\texttt`, `\small`, `\footnotesize`), or an unknown segment id. LaTeX
+  `% #` are always escaped, `& $ _` when the line had none.
+- **Rendering** (`ResumeSource.renderer`, or `render_hint` saying what to install): HTML — Chromium
+  (Playwright); LaTeX — `tectonic`, `pdflatex` / `xelatex` / `lualatex` (`AUTOAPPLY_LATEX` overrides),
+  shell escape off; .docx — LibreOffice, else Microsoft Word through AppleScript. `unavailable`
+  when nothing can render it; a failed build is `invalid_payload` with the tail of its log.
+- **`propose_resume_edits`** (`ResumeEditProposal`: `summary`, `edits[]` `{segment_id, before, after,
+  reason, unsupported_claims[]}`, `grounded`, tokens): the prompt holds the profile facts, stories,
+  the segments (with `working` applied) and, with `job_id`, the job; the resume and JD are fenced
+  data. Every `after` is fact-checked (cover-letter `fact_check`) against the candidate's **own**
+  sources only (profile, stories, the resume's text, the user's `instructions` and `history`): a
+  resume line is always a claim about the candidate, so the JD never vouches for one. One
+  regeneration with the failures as feedback; edits still flagged keep their `unsupported_claims`
+  (`grounded = false`) for the user to decide. An edit that grows a segment past 1.6× is dropped.
+  `unavailable` without a model; `not_found` without a source; `invalid_payload` for an empty
+  request (no `instructions`, no `job_id`) or an unknown `working` id.
+- **`preview_resume_edit`** (the editor's live PDF): renders the source with `edits` applied into
+  `<home>/resumes/previews/<id>/<hash>.pdf`, cached by content (the newest 4 per resume are kept);
+  with no `edits`, the resume's own PDF. One render per resume at a time; errors as for saving.
+- **Concurrency**: `get_resume_source`, `propose_resume_edits` and `preview_resume_edit` run beside
+  the command queue (they only read, plus token accounting), so a model call or a render never
+  holds up other commands. `save_resume_edit` is queued as usual.
+- **`save_resume_edit`**: applies `edits` to a fresh copy of the source, renders it, and adds a
+  variant with the same tags and auto-tailor setting. Default: the next `version` (`replaced_by` on
+  the old row, which is disabled and kept for rollback; default-ness moves over). `as_new`: a
+  separate resume (`label`, default "<label> (edited)"). The PDF keeps the original's file name (what
+  recruiters see). Older versions and tailored copies can't be edited (`invalid_payload`).
+- **Tailoring per job (automatic)**: when the pipeline applies, after picking a resume, a pick with
+  a source and `auto_tailor` gets a copy tailored for the job (`parent_id` = the pick,
+  `tailored_for_job_id` = the job, label "<label> · <company>"), which is what the application
+  uses, in Auto and Review mode alike. Same prompt with fixed instructions, stricter: edits with an
+  unsupported claim are dropped, a segment may grow at most 1.2×, and a copy whose PDF has more
+  pages than the pick's is discarded. No source, auto-tailor off, no renderer, nothing to change,
+  or any failure: the pick is used as is (a failure logs a warning; it never blocks applying). A
+  copy is made once per (resume, job) and reused. Tailored copies are never picked for another job
+  (`list_resume_variants(enabled_only)` leaves them out), and their outcomes count for the resume
+  they came from (picker response rates, the app's per-resume stats).
+- **A chosen resume is kept**: when an application is filled again (a swap in Review, a retry), a
+  resume already set on it is used as is, if it is current and enabled (or the copy tailored for
+  that job). Only an application without one is picked and tailored.
 
 ## 6. Events (daemon → app)
 

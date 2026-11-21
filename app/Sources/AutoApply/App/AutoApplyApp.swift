@@ -53,6 +53,20 @@ struct AutoApplyApp: App {
         }
         .defaultSize(width: 980, height: 760)
 
+        // "Edit with Claude": its own window, wide enough for lines | live PDF | Claude.
+        WindowGroup("Edit Resume", id: WindowID.resumeEditor, for: Int.self) { $variantID in
+            Group {
+                if let variantID {
+                    ResumeEditorWindow(variantID: variantID)
+                } else {
+                    EmptyState(symbol: "doc.text", title: "No resume selected")
+                }
+            }
+            .appEnvironment(store, simulateReduceMotion: simulateReduceMotion)
+            .frame(minWidth: 1100, minHeight: 640)
+        }
+        .defaultSize(width: 1520, height: 940)
+
         Window("Send Feedback", id: WindowID.feedback) {
             FeedbackView()
                 .appEnvironment(store, simulateReduceMotion: simulateReduceMotion)
@@ -82,6 +96,7 @@ enum WindowID {
     static let onboarding = "onboarding"
     static let job = "job"
     static let feedback = "feedback"
+    static let resumeEditor = "resume-editor"
 }
 
 enum DebugSettings {

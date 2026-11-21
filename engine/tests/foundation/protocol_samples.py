@@ -140,6 +140,7 @@ def samples() -> list[Envelope]:
     c("update_answer", {"answer_id": 4, "answer": "3 years"})
     c("delete_answer", {"answer_id": 4})
     c("edit_application_answer", {"application_answer_id": 9, "answer": "2 months"})
+    c("confirm_application_answer", {"application_answer_id": 9})
     c("set_job_mode", {"job_id": 11, "mode": None})
     c("retry_application", {"application_id": 14})
     c("apply_anyway", {"application_id": 15})
@@ -216,6 +217,14 @@ def samples() -> list[Envelope]:
     c("interview_debrief", {"application_id": 11, "notes": "Spoke with Priya (EM). Went deep on Kafka consumer lag; I froze on a sharding question."})
     c("draft_answer", {"cluster_id": "c-async", "job_id": 11, "instructions": "Make it shorter and mention my Kafka work.",
                        "current_answer": "I have worked remotely for three years across time zones."})
+    c("attach_resume_source", {"id": 3, "file_path": "/Users/me/Documents/Resume/resume.docx"})
+    c("get_resume_source", {"id": 3})
+    c("propose_resume_edits", {"id": 3, "instructions": "Lead with payments and tighten the bullets.", "job_id": 11,
+                               "working": [{"segment_id": "s4", "text": "Cut payment latency by 40% using Go and Kafka."}],
+                               "history": ["Make the summary one line."]})
+    c("preview_resume_edit", {"id": 3, "edits": [{"segment_id": "s2", "text": "Backend engineer building payment systems in Go."}]})
+    c("save_resume_edit", {"id": 3, "edits": [{"segment_id": "s2", "text": "Backend engineer building payment systems in Go."}],
+                           "as_new": False})
     c("get_autonomy", {})
     c("dismiss_autonomy_suggestion", {"ats": "greenhouse"})
     c("get_voice_profile", {})

@@ -293,6 +293,7 @@ struct JobDetailView: View {
             }
             ReviewQAPanel(job: job, answers: loader.answers, answersLoaded: loader.answersLoaded, embedded: true,
                           onEdit: { answer, text in await loader.editAnswer(answer, to: text, store: store) },
+                          onConfirm: { answer in await loader.confirmAnswer(answer, store: store) },
                           onEditingChanged: actions.editingChanged,
                           onQuickLook: { quickLookURL = $0 })
             if let path = job.coverLetterPath, FileManager.default.fileExists(atPath: path) {

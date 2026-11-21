@@ -1,5 +1,6 @@
 """Pick the best approved resume variant per job (role keywords -> tag overlap ->
-past response rate). Never edits resumes.
+past response rate). Never edits resumes (``resume_edit.editor.tailor_for_job`` may tailor
+a copy of the pick afterwards).
 
 Score (0..1) = 0.45 * tag match (variant tags vs job title / JD)
              + 0.35 * text similarity (variant text vs JD, local embeddings)
@@ -48,10 +49,12 @@ def _tag_score(tags: list[str], title: str, jd: str) -> tuple[float, list[str]]:
 def _response_rates(conn: sqlite3.Connection) -> dict[int, tuple[int, int]]:
     """variant_id -> (positive responses, submitted)."""
     out: dict[int, tuple[int, int]] = {}
+    # A copy tailored for one job counts for the resume it came from.
     rows = conn.execute(
-        "SELECT resume_variant_id AS v, COUNT(*) AS n, "
-        "SUM(CASE WHEN status IN ('assessment','interview','offer') THEN 1 ELSE 0 END) AS pos "
-        "FROM applications WHERE state = 'submitted' AND resume_variant_id IS NOT NULL GROUP BY resume_variant_id"
+        "SELECT COALESCE(rv.parent_id, a.resume_variant_id) AS v, COUNT(*) AS n, "
+        "SUM(CASE WHEN a.status IN ('assessment','interview','offer') THEN 1 ELSE 0 END) AS pos "
+        "FROM applications a LEFT JOIN resume_variants rv ON rv.id = a.resume_variant_id "
+        "WHERE a.state = 'submitted' AND a.resume_variant_id IS NOT NULL GROUP BY v"
     )
     for r in rows:
         out[int(r["v"])] = (int(r["pos"] or 0), int(r["n"]))
@@ -64,7 +67,7 @@ def pick_resume(conn: sqlite3.Connection, job: Job, variants: list[ResumeVariant
 
     if variants is None:
         variants = db.list_resume_variants(conn, enabled_only=True)
-    variants = [v for v in variants if v.enabled and v.replaced_by is None]
+    variants = [v for v in variants if v.enabled and v.replaced_by is None and v.tailored_for_job_id is None]
     if not variants:
         return None
     jd = f"{job.title}\n{job.description or ''}"

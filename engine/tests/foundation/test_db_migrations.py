@@ -127,7 +127,7 @@ def test_v1_database_upgrades_to_v2(tmp_path):
     v1 = "\n".join(
         line for line in sql.splitlines()
         if "searches_per_session" not in line and "jobs_per_session" not in line
-        and "suggested_" not in line and not any(f"VALUES ({v})" in line for v in range(2, db.SCHEMA_VERSION + 1))
+        and "suggested_" not in line and "-- v15" not in line and not any(f"VALUES ({v})" in line for v in range(2, db.SCHEMA_VERSION + 1))
     )
     c = sqlite3.connect(tmp_path / "v1.db")
     c.row_factory = sqlite3.Row
@@ -164,7 +164,7 @@ def _v9_schema_sql() -> str:
     end = sql.rindex("-- -", 0, sql.index("-- updated_at maintenance"))
     sql = sql[:start] + sql[end:]
     return "\n".join(line for line in sql.splitlines()
-                     if "-- v10" not in line and "-- v12" not in line
+                     if "-- v10" not in line and "-- v12" not in line and "-- v15" not in line
                      and not any(f"VALUES ({v})" in line for v in range(10, db.SCHEMA_VERSION + 1)))
 
 
@@ -175,14 +175,16 @@ def _v10_schema_sql() -> str:
     end = sql.rindex("-- -", 0, sql.index("-- updated_at maintenance"))
     sql = sql[:start] + sql[end:]
     return "\n".join(line for line in sql.splitlines()
-                     if "-- v12" not in line and not any(f"VALUES ({v})" in line for v in range(11, db.SCHEMA_VERSION + 1)))
+                     if "-- v12" not in line and "-- v15" not in line
+                     and not any(f"VALUES ({v})" in line for v in range(11, db.SCHEMA_VERSION + 1)))
 
 
 def _v11_schema_sql() -> str:
     """schema.sql as it was at v11: without the v12 columns and row."""
     sql = schema_sql_path().read_text()
     return "\n".join(line for line in sql.splitlines()
-                     if "-- v12" not in line and not any(f"VALUES ({v})" in line for v in range(12, db.SCHEMA_VERSION + 1)))
+                     if "-- v12" not in line and "-- v15" not in line
+                     and not any(f"VALUES ({v})" in line for v in range(12, db.SCHEMA_VERSION + 1)))
 
 
 def test_v10_database_upgrades_to_v11(tmp_path, conn):
@@ -298,7 +300,7 @@ def _v12_schema_sql() -> str:
     assert old in sql
     sql = sql.replace(old, "mode                        TEXT NOT NULL DEFAULT 'auto' CHECK")
     return "\n".join(line for line in sql.splitlines()
-                     if not any(f"VALUES ({v})" in line for v in range(13, db.SCHEMA_VERSION + 1)))
+                     if "-- v15" not in line and not any(f"VALUES ({v})" in line for v in range(13, db.SCHEMA_VERSION + 1)))
 
 
 def test_fresh_install_defaults_to_review(conn):

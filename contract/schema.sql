@@ -1,6 +1,6 @@
 -- =====================================================================================
 -- AutoApply SQLite schema — SINGLE SOURCE OF TRUTH for the database.
--- Contract version: schema_version = 13  (keep in sync with autoapply.db.SCHEMA_VERSION)
+-- Contract version: schema_version = 15  (keep in sync with autoapply.db.SCHEMA_VERSION)
 --
 -- Location: ~/Library/Application Support/AutoApply/autoapply.db (AUTOAPPLY_HOME overrides)
 --
@@ -132,8 +132,12 @@ CREATE TABLE IF NOT EXISTS preferences (
 );
 
 -- -------------------------------------------------------------------------------------
--- resume_variants: user-approved resume PDFs. Never modified by the agent.
+-- resume_variants: resume PDFs. An uploaded PDF is never modified in place.
 -- Replacing a file inserts a new row and points the old row's replaced_by at it.
+-- With an editable source (source_path: .html / .tex / .docx) the user can edit it with Claude
+-- (a save renders a new PDF as the next version), and the agent may tailor a copy per job
+-- (parent_id = the variant it came from, tailored_for_job_id = the job). Tailored copies are
+-- never picked for another job.
 -- -------------------------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS resume_variants (
     id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -147,9 +151,15 @@ CREATE TABLE IF NOT EXISTS resume_variants (
     enabled         INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
     version         INTEGER NOT NULL DEFAULT 1 CHECK (version >= 1),
     replaced_by     INTEGER REFERENCES resume_variants(id) ON DELETE SET NULL,
+    source_path     TEXT,                                   -- v15: editable source under <home>/resumes/
+    source_kind     TEXT CHECK (source_kind IN ('html','latex','docx')),  -- v15
+    parent_id       INTEGER REFERENCES resume_variants(id) ON DELETE SET NULL,  -- v15: tailored copy of
+    tailored_for_job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,  -- v15: tailored for this job
+    auto_tailor     INTEGER NOT NULL DEFAULT 1 CHECK (auto_tailor IN (0, 1)),  -- v15
     created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     updated_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
+CREATE INDEX IF NOT EXISTS ix_resume_variants_tailored ON resume_variants(tailored_for_job_id, parent_id);  -- v15
 -- At most one default variant.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_resume_variants_default ON resume_variants(is_default) WHERE is_default = 1;
 
@@ -711,3 +721,4 @@ INSERT OR IGNORE INTO schema_version (version) VALUES (11);
 INSERT OR IGNORE INTO schema_version (version) VALUES (12);
 INSERT OR IGNORE INTO schema_version (version) VALUES (13);
 INSERT OR IGNORE INTO schema_version (version) VALUES (14);
+INSERT OR IGNORE INTO schema_version (version) VALUES (15);

@@ -121,7 +121,7 @@ final class OnboardingModel {
         selectedMode = .review
         // Resumes already stored by the daemon: show them instead of asking for the upload again.
         if resumes.isEmpty {
-            for v in store.library.resumeVariants where v.replacedBy == nil {
+            for v in store.library.baseResumes where v.replacedBy == nil {
                 var r = UploadedResume(url: URL(fileURLWithPath: v.filePath), label: v.label)
                 r.tags = v.tags
                 r.status = .parsed

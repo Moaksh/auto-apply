@@ -16,7 +16,7 @@ Personal, local-only macOS app that discovers jobs, applies on the user's behalf
 | 5 | Applying | Only on company ATS. **No LinkedIn Easy Apply automation.** Easy Apply jobs → "Manual – Easy Apply" list with link + pre-drafted copy-paste answers. |
 | 6 | Autonomy | Global `Auto` (default) / `Review` mode, with per-ATS and per-job overrides. |
 | 7 | Unknown questions | Park job + notify + continue pipeline (B), **and** a pre-run Prep pass that batch-collects questions (C). Inbox clusters semantically equivalent questions; answers saved to memory. |
-| 8 | Resume / cover letter | User uploads N approved resume variants; agent picks per job. Cover letters generated per job from profile + story bank facts only. No per-job resume rewriting. |
+| 8 | Resume / cover letter | User uploads N resume variants; agent picks per job. Cover letters generated per job from profile + story bank facts only. **Revised 2026-11-21:** a resume with an editable source (.html / .tex / .docx) can be edited with Claude in the app, and the agent tailors a copy per job (rewording only; fact-checked against the user's own sources; the uploaded PDF is never changed). See contract/protocol.md §5.6. |
 | 9 | Tracker | Post-apply statuses updated **manually** (drag-drop board). Auto-`Ghosted` after 21 days; "Did you hear back?" nudges at day 7 and 14. No email reading. |
 | 10 | Runtime | Background **LaunchAgent** daemon (`autoapplyd`), app is dashboard + menu bar. |
 | 11 | Preferences | Collected in animated first-launch onboarding; all editable in Settings. |

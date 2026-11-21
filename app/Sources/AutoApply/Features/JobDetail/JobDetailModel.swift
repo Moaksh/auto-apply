@@ -371,6 +371,14 @@ final class JobDetailLoader {
         if case .failure = result { answers = before }
     }
 
+    /// "Looks right" (awaiting review): confirmed as written; optimistic, rolled back on failure.
+    func confirmAnswer(_ answer: ApplicationAnswerItem, store: AppStore) async {
+        let before = answers
+        if let i = answers.firstIndex(where: { $0.id == answer.id }) { answers[i].confidence = 1 }
+        let result = await store.perform(.confirmApplicationAnswer(ConfirmApplicationAnswerPayload(applicationAnswerId: answer.id)))
+        if case .failure = result { answers = before }
+    }
+
     func copyAll(job: JobItem) {
         let text = JobDetailRules.copyAllText(job: job, answers: answers)
         NSPasteboard.general.clearContents()

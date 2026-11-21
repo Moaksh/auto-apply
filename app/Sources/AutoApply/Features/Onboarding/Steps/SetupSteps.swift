@@ -131,7 +131,7 @@ struct ResumesStep: View {
     @Environment(\.motionReduced) private var reduced
 
     var body: some View {
-        StepHeader(title: "Your resumes", subtitle: "Add every approved version. The agent picks the best one per job, and never edits them.")
+        StepHeader(title: "Your resumes", subtitle: "Add every approved version. The agent picks the best one per job; the PDFs you add stay exactly as they are.")
         DropZone(title: "Drop PDFs here or", subtitle: "PDF only", onDrop: { model.addResumes($0) }, onChoose: { showImporter = true })
             .fileImporter(isPresented: $showImporter, allowedContentTypes: [.pdf], allowsMultipleSelection: true) { result in
                 if case .success(let urls) = result { model.addResumes(urls) }

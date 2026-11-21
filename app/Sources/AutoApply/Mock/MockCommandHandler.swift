@@ -232,6 +232,7 @@ enum MockCommandHandler {
                 if let l = p.label { data.resumeVariants[i].label = l }
                 if let t = p.tags { data.resumeVariants[i].tags = t }
                 if let e = p.enabled { data.resumeVariants[i].enabled = e }
+                if let a = p.autoTailor { data.resumeVariants[i].autoTailor = a }
                 if p.isDefault == true {
                     for j in data.resumeVariants.indices { data.resumeVariants[j].isDefault = false }
                     data.resumeVariants[i].isDefault = true
@@ -282,6 +283,18 @@ enum MockCommandHandler {
                     if let i = answers.firstIndex(where: { $0.id == p.applicationAnswerId }) {
                         data.applicationAnswers[app]?[i].answer = p.answer
                         data.applicationAnswers[app]?[i].origin = .user
+                        data.applicationAnswers[app]?[i].confidence = 1
+                        return true
+                    }
+                }
+                return false
+            }
+            return Handled(reply: found ? ack() : error(.notFound, "application answer \(p.applicationAnswerId) not found"))
+
+        case .confirmApplicationAnswer(let p):
+            let found = world.repository.update { data -> Bool in
+                for (app, answers) in data.applicationAnswers {
+                    if let i = answers.firstIndex(where: { $0.id == p.applicationAnswerId }) {
                         data.applicationAnswers[app]?[i].confidence = 1
                         return true
                     }
@@ -529,6 +542,8 @@ enum MockCommandHandler {
             return MockOutreach.handle(command, world: world) ?? Handled(reply: ack())
         case .draftAnswer(let p):
             return MockDrafts.handle(p, world: world)
+        case .attachResumeSource, .getResumeSource, .proposeResumeEdits, .previewResumeEdit, .saveResumeEdit:
+            return MockResumeEditor.handle(command, world: world)
         case .generateInterviewPrep, .getInterviewPrep, .interviewDebrief:
             return MockCareer.handle(command, world: world)
         case .importLinkedinConnections:

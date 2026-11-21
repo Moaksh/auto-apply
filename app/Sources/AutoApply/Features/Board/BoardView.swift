@@ -139,7 +139,7 @@ struct BoardView: View {
             Menu(resumeFilter.flatMap { store.library.resume(id: $0)?.label } ?? "Resume") {
                 Button("Any resume") { resumeFilter = nil }
                 Divider()
-                ForEach(store.library.resumeVariants) { v in
+                ForEach(store.library.baseResumes) { v in
                     Button(v.label) { resumeFilter = v.id }
                 }
             }
@@ -204,7 +204,8 @@ struct BoardView: View {
 
     private func filteredJobs(_ jobs: [JobItem]) -> [JobItem] {
         guard let resumeFilter else { return jobs }
-        return jobs.filter { $0.resumeVariantID == resumeFilter }
+        // A copy tailored for the job counts as the resume it came from.
+        return jobs.filter { $0.resumeVariantID == resumeFilter || store.library.resume(id: $0.resumeVariantID)?.parentID == resumeFilter }
     }
 
     private var resumeLabels: [Int: String] {

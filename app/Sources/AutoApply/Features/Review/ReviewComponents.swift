@@ -70,6 +70,8 @@ struct ReviewQAPanel: View {
     /// Bumped from outside (the F key) to jump to the next flagged answer.
     var jumpSerial = 0
     var onEdit: (ApplicationAnswerItem, String) async -> Void
+    /// "Looks right" on a flagged answer (clears the flag without changing the text).
+    var onConfirm: (ApplicationAnswerItem) async -> Void = { _ in }
     var onEditingChanged: (Bool) -> Void = { _ in }
     var onQuickLook: (URL) -> Void
     @State private var hoveredAnswerID: Int?
@@ -137,7 +139,7 @@ struct ReviewQAPanel: View {
             }
             ForEach(answers) { answer in
                 ReviewAnswerRow(answer: answer, isHovered: hoveredAnswerID == answer.id || spotlightID == answer.id,
-                                onSave: onEdit, onEditingChanged: onEditingChanged)
+                                onSave: onEdit, onConfirm: onConfirm, onEditingChanged: onEditingChanged)
                     .id(Self.rowID(answer.id))
                     .onHover { inside in hoveredAnswerID = inside ? answer.id : (hoveredAnswerID == answer.id ? nil : hoveredAnswerID) }
                 Divider()
@@ -160,11 +162,13 @@ struct ConfidenceFlagBadge: View {
     }
 }
 
-/// One audited answer: question, answer, provenance, confidence, inline ✎ edit.
+/// One audited answer: question, answer, provenance, confidence, inline ✎ edit, and "Looks right"
+/// on a flagged one (saving it unchanged confirms it too).
 struct ReviewAnswerRow: View {
     var answer: ApplicationAnswerItem
     var isHovered: Bool
     var onSave: (ApplicationAnswerItem, String) async -> Void
+    var onConfirm: (ApplicationAnswerItem) async -> Void = { _ in }
     /// Reports when the inline editor opens/closes (Job detail holds ⌘↵ approve while typing).
     var onEditingChanged: (Bool) -> Void = { _ in }
     @State private var editing = false
@@ -206,6 +210,17 @@ struct ReviewAnswerRow: View {
                     HStack(spacing: Space.xs) {
                         Badge(origin: answer.origin)
                         ConfidenceFlagBadge(answer: answer)
+                        if ReviewSafeguard.flagLabel(answer.confidenceLevel) != nil {
+                            Button {
+                                Task { await onConfirm(answer) }
+                            } label: {
+                                Label("Looks right", systemImage: "checkmark")
+                            }
+                            .buttonStyle(.secondaryLink)
+                            .font(Typography.callout)
+                            .help("You checked it and it's right as written: clears the flag")
+                            .accessibilityLabel("\(answer.question) looks right")
+                        }
                     }
                 }
             }
@@ -240,6 +255,11 @@ struct ReviewAnswerRow: View {
     private func save() {
         let text = draft
         editing = false
+        // Saving a flagged answer unchanged means "I checked it": confirm instead of a no-op.
+        if text.trimmingCharacters(in: .whitespacesAndNewlines) == answer.answer.trimmingCharacters(in: .whitespacesAndNewlines) {
+            if ReviewSafeguard.flagLabel(answer.confidenceLevel) != nil { Task { await onConfirm(answer) } }
+            return
+        }
         Task { await onSave(answer, text) }
     }
 }
@@ -262,9 +282,14 @@ struct ReviewAttachmentRows: View {
                             Text("\(resume.label).pdf").font(Typography.body).lineLimit(1).truncationMode(.middle)
                                 .help("\(resume.label).pdf")
                         }
+                        if resume.isTailored {
+                            Text("Claude reworded a copy of your resume for this job, from your own profile and stories.")
+                                .font(Typography.callout).foregroundStyle(Palette.textTertiary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                         HStack(spacing: Space.s) {
                             Spacer(minLength: 0)
-                            let alternatives = store.library.resumeVariants.filter { $0.enabled && $0.id != resume.id }
+                            let alternatives = store.library.baseResumes.filter { $0.enabled && $0.id != resume.id }
                             if !alternatives.isEmpty, let appID = job.applicationID {
                                 Menu {
                                     ForEach(alternatives) { variant in

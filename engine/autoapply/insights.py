@@ -450,10 +450,12 @@ def upskill(rows: list[_Row], *, now: datetime, known: set[str]) -> UpskillHints
 
 def variant_performance(conn: sqlite3.Connection, rows: list[_Row]) -> VariantInsights:
     labels = {r["id"]: r["label"] for r in conn.execute("SELECT id, label FROM resume_variants")}
+    # A copy tailored for one job counts for the resume it came from.
+    parent = {r["id"]: r["parent_id"] for r in conn.execute("SELECT id, parent_id FROM resume_variants WHERE parent_id IS NOT NULL")}
     agg: dict[int, list[int]] = defaultdict(lambda: [0, 0, 0])
     for r in rows:
         if r.state == "submitted" and r.resume_variant_id is not None:
-            a = agg[r.resume_variant_id]
+            a = agg[parent.get(r.resume_variant_id, r.resume_variant_id)]
             a[0] += 1
             a[1] += r.responded
             a[2] += r.interviewed

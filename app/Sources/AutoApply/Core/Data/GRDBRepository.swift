@@ -194,7 +194,9 @@ final class GRDBRepository: AppRepository {
                     isDefault: (row["is_default"] as Int?) == 1, enabled: (row["enabled"] as Int?) != 0,
                     version: row["version"] ?? 1, replacedBy: row["replaced_by"],
                     createdAt: DBJSON.date(row["created_at"]) ?? .distantPast,
-                    updatedAt: DBJSON.date(row["updated_at"]) ?? .distantPast)
+                    updatedAt: DBJSON.date(row["updated_at"]) ?? .distantPast,
+                    sourceKind: row["source_kind"], parentID: row["parent_id"], tailoredForJobID: row["tailored_for_job_id"],
+                    autoTailor: (row["auto_tailor"] as Int?) != 0)
             }
         }
     }

@@ -479,6 +479,61 @@ extension AppStore {
         return false
     }
 
+    // MARK: Resume editor (protocol.md §5.6)
+
+    /// Attach the .docx / .tex / .html the resume PDF was made from.
+    func attachResumeSource(variantID: Int, filePath: String) async -> Result<ResumeSource, DaemonClientError> {
+        await performDecoded(.attachResumeSource(AttachResumeSourcePayload(id: variantID, filePath: filePath)), as: ResumeSource.self,
+                             timeout: .seconds(30))
+    }
+
+    func resumeSource(variantID: Int) async -> Result<ResumeSource, DaemonClientError> {
+        await performDecoded(.getResumeSource(GetResumeSourcePayload(id: variantID)), as: ResumeSource.self, timeout: .seconds(15))
+    }
+
+    /// Claude's suggested edits (nothing is saved). `working`: segments already changed in the editor.
+    func proposeResumeEdits(variantID: Int, instructions: String, jobID: Int? = nil, working: [String: String] = [:],
+                            history: [String] = []) async -> Result<ResumeEditProposal, DaemonClientError> {
+        let payload = ProposeResumeEditsPayload(
+            id: variantID, instructions: instructions, jobId: jobID,
+            working: working.sorted { $0.key < $1.key }.map { ResumeSegmentText(segmentId: $0.key, text: $0.value) },
+            history: Array(history.suffix(12)))
+        return await performDecoded(.proposeResumeEdits(payload), as: ResumeEditProposal.self, timeout: resumeEditTimeout)
+    }
+
+    /// The resume rendered with these segment texts, for the editor's live PDF (nothing is saved).
+    func previewResumeEdit(variantID: Int, edits: [String: String]) async -> Result<ResumePreview, DaemonClientError> {
+        let payload = PreviewResumeEditPayload(
+            id: variantID, edits: edits.sorted { $0.key < $1.key }.map { ResumeSegmentText(segmentId: $0.key, text: $0.value) })
+        return await performDecoded(.previewResumeEdit(payload), as: ResumePreview.self, timeout: resumeEditTimeout)
+    }
+
+    /// Render the accepted segment texts and store them as the next version (or a new resume).
+    func saveResumeEdit(variantID: Int, edits: [String: String], asNew: Bool = false,
+                        label: String? = nil) async -> Result<SaveResumeEditResult, DaemonClientError> {
+        let payload = SaveResumeEditPayload(
+            id: variantID, edits: edits.sorted { $0.key < $1.key }.map { ResumeSegmentText(segmentId: $0.key, text: $0.value) },
+            asNew: asNew, label: label)
+        return await performDecoded(.saveResumeEdit(payload), as: SaveResumeEditResult.self, timeout: resumeEditTimeout)
+    }
+
+    /// One or two model calls, or a PDF render (LaTeX / Word can take a while).
+    var resumeEditTimeout: Duration { .seconds(180) }
+
+    private func performDecoded<T: Decodable>(_ command: Command, as type: T.Type, timeout: Duration) async -> Result<T, DaemonClientError> {
+        switch await perform(command, timeout: timeout, silent: true) {
+        case .success(let reply):
+            guard case .ack(let ack) = reply.event else { return .failure(.decoding("no result")) }
+            do {
+                return .success(try JSONValue.object(ack.result ?? [:]).decode(T.self))
+            } catch {
+                return .failure(.decoding(String(describing: error)))
+            }
+        case .failure(let error):
+            return .failure(error)
+        }
+    }
+
     @discardableResult
     func upsertStory(_ payload: UpsertStoryPayload) async -> Int? {
         struct Result: Decodable { var storyId: Int
