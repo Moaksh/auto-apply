@@ -223,6 +223,16 @@ struct ResumeVariantItem: Identifiable, Sendable, Hashable {
     var replacedBy: Int?
     var createdAt: Date
     var updatedAt: Date
+    /// Editable source the PDF is made from ("html" / "latex" / "docx"); nil: PDF only.
+    var sourceKind: String?
+    /// A copy tailored for one job: the resume it came from, and the job.
+    var parentID: Int?
+    var tailoredForJobID: Int?
+    /// The agent may tailor a copy of this resume for each job (needs a source).
+    var autoTailor: Bool = true
+
+    var isTailored: Bool { tailoredForJobID != nil }
+    var canEdit: Bool { sourceKind != nil && !isTailored }
 }
 
 struct StoryItem: Identifiable, Sendable, Hashable {

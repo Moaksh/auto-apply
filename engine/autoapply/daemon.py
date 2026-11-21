@@ -85,6 +85,11 @@ from autoapply.models import (
     ProtocolError,
     QuestionOpenedPayload,
     QuestionResolvedPayload,
+    ResumeEditProposal,
+    ResumePreview,
+    ResumeSegment,
+    ResumeSource,
+    SaveResumeEditResult,
     SnapshotPayload,
     SourceStatus,
     SourceStatusPayload,
@@ -548,6 +553,8 @@ class Daemon:
         self.replywatch: Any = None  # mail.replywatch.ReplyWatcher
         #: application ids with an automatic interview prep pack being written (no duplicates)
         self._interview_prep_pending: set[int] = set()
+        #: resume id -> one live-preview render at a time (resume editor)
+        self._preview_locks: dict[int, asyncio.Lock] = {}
 
         self.clients: set[Client] = set()
         self.lock = InstanceLock(paths.home / LOCK_FILENAME)
@@ -814,7 +821,7 @@ class Daemon:
         buf: list[tuple[str, Any]] = []
         token = _DEFERRED.set(buf)
         try:
-            if env.type in _UNLOCKED_COMMANDS:
+            if env.type in _UNLOCKED_COMMANDS or env.type in _CONCURRENT_COMMANDS:
                 # Kill switch / liveness: never queued behind a slow command (ack < 2s).
                 reply = await self._dispatch(env)
             else:
@@ -1301,7 +1308,99 @@ class Daemon:
         return {"resume_variant_id": vid}
 
     async def _cmd_update_resume_variant(self, p: Any) -> None:
-        db.update_resume_variant(self.conn, p.id, label=p.label, tags=p.tags, enabled=p.enabled, is_default=p.is_default)
+        db.update_resume_variant(self.conn, p.id, label=p.label, tags=p.tags, enabled=p.enabled, is_default=p.is_default,
+                                 auto_tailor=p.auto_tailor)
+
+    # ---- resume editor (resume_edit/) ----------------------------------------------------
+
+    def _resume_source(self, variant_id: int) -> ResumeSource:
+        from autoapply.resume_edit import editor, render, source
+
+        variant = db.get_resume_variant(self.conn, variant_id)
+        try:
+            path, kind = editor.load_source(variant)
+        except editor.EditUnavailable as e:
+            raise CommandError(ErrorCode.NOT_FOUND, str(e)) from e
+        try:
+            segments = source.read_segments(path, kind)
+        except source.SourceError as e:
+            raise ValueError(str(e)) from e
+        r = render.renderer_for(kind, path)
+        return ResumeSource(
+            resume_variant_id=variant.id, kind=kind, file_name=path.name,
+            segments=[ResumeSegment(id=s.id, text=s.text) for s in segments], renderer=r.name, render_hint=r.hint,
+        )
+
+    async def _cmd_attach_resume_source(self, p: Any) -> ResumeSource:
+        """Copy the .html / .tex / .docx a resume was made from (with the classes, styles and images
+        beside it) next to the PDF, so Claude can edit it and the agent can tailor it."""
+        from autoapply.resume_edit import source
+
+        variant = db.get_resume_variant(self.conn, p.id)
+        if variant.tailored_for_job_id is not None:
+            raise ValueError("A copy tailored for one job can't take a source; attach it to the resume it came from.")
+        src = Path(p.file_path).expanduser()
+        try:
+            kind = source.kind_for(src)
+            stored = await asyncio.to_thread(source.store_source, src, self.paths.resumes / f"{uuid.uuid4().hex[:8]}_source")
+            if not await asyncio.to_thread(source.read_segments, stored, kind):
+                raise source.SourceError("No text found in that file.")
+        except source.SourceError as e:
+            raise ValueError(str(e)) from e
+        db.update_resume_variant(self.conn, variant.id, source_path=str(stored), source_kind=kind)
+        db.log_event(self.conn, "resume", f"attached the {kind} source of {variant.label!r}", actor=Actor.USER,
+                     payload={"resume_variant_id": variant.id})
+        return self._resume_source(variant.id)
+
+    async def _cmd_get_resume_source(self, p: Any) -> ResumeSource:
+        return self._resume_source(p.id)
+
+    async def _cmd_propose_resume_edits(self, p: Any) -> ResumeEditProposal:
+        """Claude's suggested edits (or a tailoring for ``job_id``). Nothing is saved."""
+        from autoapply.resume_edit import editor, source
+
+        try:
+            return await editor.propose_edits(
+                self.llm, self.conn, p.id, instructions=p.instructions, job_id=p.job_id,
+                working={w.segment_id: w.text for w in p.working}, history=list(p.history),
+            )
+        except editor.EditUnavailable as e:
+            raise CommandError(ErrorCode.UNAVAILABLE, str(e)) from e
+        except source.SourceError as e:
+            raise ValueError(str(e)) from e
+
+    async def _cmd_preview_resume_edit(self, p: Any) -> ResumePreview:
+        """The resume rendered with the editor's current text, for the live preview. One render
+        per resume at a time; nothing is saved."""
+        from autoapply.resume_edit import editor, render, source
+
+        variant = db.get_resume_variant(self.conn, p.id)
+        lock = self._preview_locks.setdefault(variant.id, asyncio.Lock())
+        async with lock:
+            try:
+                pdf, pages = await editor.preview(self.paths, variant, {e.segment_id: e.text for e in p.edits})
+            except editor.EditUnavailable as e:
+                raise CommandError(ErrorCode.NOT_FOUND, str(e)) from e
+            except render.RenderUnavailable as e:
+                raise CommandError(ErrorCode.UNAVAILABLE, str(e)) from e
+            except (source.SourceError, render.RenderError) as e:
+                raise ValueError(str(e)) from e
+        return ResumePreview(file_path=str(pdf), pages=pages)
+
+    async def _cmd_save_resume_edit(self, p: Any) -> SaveResumeEditResult:
+        """Apply the accepted segment texts, render the PDF and store it as the next version."""
+        from autoapply.resume_edit import editor, render, source
+
+        try:
+            new, pages = await editor.save_edit(self.conn, self.paths, p.id, {e.segment_id: e.text for e in p.edits},
+                                                as_new=p.as_new, label=p.label)
+        except editor.EditUnavailable as e:
+            raise CommandError(ErrorCode.NOT_FOUND, str(e)) from e
+        except render.RenderUnavailable as e:
+            raise CommandError(ErrorCode.UNAVAILABLE, str(e)) from e
+        except (source.SourceError, render.RenderError) as e:
+            raise ValueError(str(e)) from e
+        return SaveResumeEditResult(resume_variant_id=new.id, file_path=new.file_path, version=new.version, pages=pages)
 
     async def _cmd_upsert_story(self, p: Any) -> dict[str, Any]:
         story = db.upsert_story(self.conn, id=p.id, title=p.title, situation=p.situation, task=p.task,
@@ -1319,6 +1418,9 @@ class Daemon:
 
     async def _cmd_edit_application_answer(self, p: Any) -> None:
         db.edit_application_answer(self.conn, p.application_answer_id, p.answer)
+
+    async def _cmd_confirm_application_answer(self, p: Any) -> None:
+        db.confirm_application_answer(self.conn, p.application_answer_id)
 
     async def _cmd_set_job_mode(self, p: Any) -> None:
         db.set_job_mode_override(self.conn, p.job_id, p.mode)
@@ -1926,6 +2028,10 @@ class Daemon:
 #: Commands that bypass ``_cmd_lock``: they only flip in-memory/meta state or read, and
 #: must answer even while a slow command (LLM call, subprocess, PDF parse) holds the lock.
 _UNLOCKED_COMMANDS: frozenset[str] = frozenset({"hello", "ping", "pause_all", "resume"})
+
+#: Slow commands that only read (plus token accounting) and may run beside the queue, so the
+#: resume editor's model calls and live previews never hold up an approve, and vice versa.
+_CONCURRENT_COMMANDS: frozenset[str] = frozenset({"get_resume_source", "propose_resume_edits", "preview_resume_edit"})
 
 _COMMANDS: frozenset[str] = frozenset(
     name[len("_cmd_"):] for name in dir(Daemon) if name.startswith("_cmd_")

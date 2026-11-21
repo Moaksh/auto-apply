@@ -64,7 +64,8 @@ enum MockFixtures {
     static let resumeVariants: [ResumeVariantItem] = {
         let base = Date(timeIntervalSince1970: 1_780_000_000)
         return [
-            ResumeVariantItem(id: 1, label: "Backend", filePath: "/mock/resumes/Backend.pdf", tags: ["backend", "go", "payments"], isDefault: true, createdAt: base, updatedAt: base),
+            ResumeVariantItem(id: 1, label: "Backend", filePath: "/mock/resumes/Backend.pdf", tags: ["backend", "go", "payments"], isDefault: true, createdAt: base, updatedAt: base,
+                              sourceKind: "docx"),
             ResumeVariantItem(id: 2, label: "ML", filePath: "/mock/resumes/ML.pdf", tags: ["ml", "python"], createdAt: base, updatedAt: base),
             ResumeVariantItem(id: 3, label: "Infra", filePath: "/mock/resumes/Infra.pdf", tags: ["k8s", "sre"], createdAt: base, updatedAt: base),
         ]

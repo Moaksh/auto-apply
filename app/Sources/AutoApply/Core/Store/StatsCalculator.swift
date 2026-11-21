@@ -95,6 +95,8 @@ enum StatsCalculator {
         var skippedPerDay: [Int: Int] = [:]
         var applied30 = 0, responded30 = 0, applied60to30 = 0, responded60to30 = 0
         var variantAgg: [Int: (apps: Int, resp: Int, intv: Int)] = [:]
+        // A copy tailored for one job counts for the resume it came from.
+        let parentOf = Dictionary(variants.compactMap { v in v.parentID.map { (v.id, $0) } }, uniquingKeysWith: { a, _ in a })
         var bins = Array(repeating: (skipped: 0, applied: 0), count: 20)
         var sourceAgg: [JobSource: (disc: Int, applied: Int)] = [:]
         var submittedJobs: [(offset: Int, job: JobItem)] = []
@@ -129,7 +131,8 @@ enum StatsCalculator {
                     applied60to30 += 1
                     if responded { responded60to30 += 1 }
                 }
-                if let v = job.resumeVariantID {
+                if let picked = job.resumeVariantID {
+                    let v = parentOf[picked] ?? picked
                     var agg = variantAgg[v, default: (0, 0, 0)]
                     agg.apps += 1
                     if responded { agg.resp += 1 }

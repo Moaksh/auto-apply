@@ -169,6 +169,12 @@ def _default_pick_resume(conn: sqlite3.Connection, job: Job) -> Any:
     return resume_picker.pick_resume(conn, job)
 
 
+async def _default_tailor_resume(llm: LLMProvider | None, conn: sqlite3.Connection, paths: Any, variant_id: int, job: Job) -> Any:
+    from autoapply.resume_edit import editor
+
+    return await editor.tailor_for_job(llm, conn, paths, variant_id, job)
+
+
 async def _default_refresh_easy_apply(conn: sqlite3.Connection, llm: LLMProvider, job_id: int) -> Any:
     from autoapply import easy_apply
 
@@ -203,6 +209,7 @@ class PipelineHooks:
     score_jobs: Callable[..., Any] = _default_score_jobs
     run_prep: Callable[..., Any] = _default_run_prep
     pick_resume: Callable[..., Any] = _default_pick_resume
+    tailor_resume: Callable[..., Any] = _default_tailor_resume
     refresh_easy_apply: Callable[..., Any] = _default_refresh_easy_apply
     cluster_questions: Callable[..., Any] = _default_cluster_questions
     park: Callable[..., Any] = _default_park
@@ -1175,6 +1182,34 @@ class Pipeline:
             return None, None
         return pick.variant.id, float(pick.score)
 
+    def _kept_resume(self, app: Any, job: Job) -> bool:
+        if app.resume_variant_id is None:
+            return False
+        try:
+            v = db.get_resume_variant(self.conn, app.resume_variant_id)
+        except db.NotFound:
+            return False
+        if v.replaced_by is not None:
+            return False
+        return v.tailored_for_job_id == job.id if v.tailored_for_job_id is not None else v.enabled
+
+    async def _tailor_resume(self, job: Job, company: Company, variant_id: int, application_id: int) -> int:
+        """The id of a copy of ``variant_id`` tailored for ``job`` when the resume has an editable
+        source and auto-tailoring on; else ``variant_id``. Never blocks applying: any failure
+        keeps the picked resume."""
+        try:
+            copy = await _maybe_await(self.hooks.tailor_resume(self.llm, self.conn, self.paths, variant_id, job))
+        except Exception as e:  # noqa: BLE001
+            log.warning("tailoring the resume for job %s failed; using the picked one", job.id, exc_info=True)
+            await self._log(LogLevel.WARNING, f"Couldn't tailor your resume for {company.name} ({e}); using it as is",
+                            job_id=job.id, application_id=application_id)
+            return variant_id
+        if copy is None:
+            return variant_id
+        await self._log(LogLevel.INFO, f"Tailored your resume for {company.name} · {job.title}",
+                        job_id=job.id, application_id=application_id)
+        return int(copy.id)
+
     def build_context(self, application_id: int, *, extra: dict[str, Any] | None = None) -> ApplyContext:
         app = db.get_application(self.conn, application_id)
         job = db.get_job(self.conn, app.job_id)
@@ -1235,10 +1270,14 @@ class Pipeline:
                 LogLevel.WARNING, f"{job.title} · {company.name} goes to your review, not auto-submit: {risk.summary()}",
                 job_id=job.id, application_id=app.id,
             )
-        variant_id, pick_score = self._pick_resume(job)
         fields: dict[str, Any] = {"mode": mode.value}
-        if variant_id is not None:
-            fields.update(resume_variant_id=variant_id, resume_pick_score=pick_score)
+        # A resume already chosen for this application (the user's swap in Review, or an earlier
+        # pick / tailored copy) is kept; otherwise pick one and tailor it for the job.
+        if not self._kept_resume(app, job):
+            variant_id, pick_score = self._pick_resume(job)
+            if variant_id is not None:
+                variant_id = await self._tailor_resume(job, company, variant_id, app.id)
+                fields.update(resume_variant_id=variant_id, resume_pick_score=pick_score)
         db.update_application(self.conn, app.id, **fields)
 
         await self._transition(app.id, AppState.FILLING, expected_from=AppState.QUEUED)

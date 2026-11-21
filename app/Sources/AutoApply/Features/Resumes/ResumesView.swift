@@ -1,7 +1,7 @@
 // ResumesView.swift — resume variants grid: LazyVGrid cards with real
 // PDF first-page thumbnails (PDFKit, off-main), tags, sent/response stats and the default dot;
-// hover lifts 2pt. Selecting a card drives the inspector: tags, default, enabled, and the jobs
-// it was used for with outcome dots.
+// hover lifts 2pt. Selecting a card drives the inspector: tags, default, enabled, editing with
+// Claude (once the editable source is attached), tailoring per job, and the jobs it was used for.
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -16,6 +16,7 @@ final class ResumesFeature: NSObject, FeatureRegistrant {
 struct ResumesView: View {
     @Environment(AppStore.self) private var store
     @Environment(Router.self) private var router
+    @Environment(\.openWindow) private var openWindow
     @Environment(\.motionReduced) private var reduced
     @State private var dropTargeted = false
 
@@ -73,6 +74,12 @@ struct ResumesView: View {
             dropTargeted = targeted
         }
         .onAppear { model.ensureSelection() }
+        .onChange(of: model.editorVariantID) {
+            // "Edit with Claude" opens its own window (one per resume).
+            guard let id = model.editorVariantID else { return }
+            openWindow(id: WindowID.resumeEditor, value: id)
+            model.editorVariantID = nil
+        }
         .onChange(of: store.library.resumeVariants) {
             model.reconcilePending()
             model.ensureSelection()
@@ -97,6 +104,11 @@ private struct ResumeCard: View {
                     .font(Typography.bodyEmph).lineLimit(1)
                 if variant.version > 1 {
                     Text("v\(variant.version)").font(Typography.monoSmall).foregroundStyle(Palette.textTertiary)
+                }
+                if variant.canEdit {
+                    Image(systemName: "pencil.line").font(Typography.callout).foregroundStyle(Palette.textTertiary)
+                        .help("Editable with Claude")
+                        .accessibilityLabel("editable")
                 }
             }
             Text(model.tags(for: variant).isEmpty ? "no tags" : model.tags(for: variant).joined(separator: " · "))
@@ -132,6 +144,12 @@ private struct ResumeCard: View {
                 Button("Reveal in Finder") { LocalFiles.reveal(url) }
             }
             if !variant.isDefault { Button("Make default") { Task { await model.makeDefault(variant) } } }
+            Divider()
+            if variant.canEdit {
+                Button("Edit with Claude…") { model.openEditor(variant) }
+            } else {
+                Button("Attach editable source…") { model.chooseSource(for: variant) }
+            }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(variant.label) resume, \(model.statLine(for: variant))\(variant.isDefault ? ", default" : "")")
@@ -209,8 +227,7 @@ struct ResumeInspector: View {
                         }
                         .buttonStyle(.secondaryLink)
                     }
-                    Text("The file is read-only here: it's your approved resume and is never modified.")
-                        .font(Typography.callout).foregroundStyle(Palette.textTertiary)
+                    ClaudeEditingSection(model: model, variant: variant)
                     let used = model.jobs(usedBy: variant)
                     VStack(alignment: .leading, spacing: Space.xs) {
                         Text("Used for \(C3Format.plural(used.count, "job"))").eyebrowStyle()
@@ -239,6 +256,63 @@ struct ResumeInspector: View {
             .onChange(of: variant.label) { labelDraft = variant.label }
         } else {
             EmptyState(symbol: "doc.on.doc", title: "Select a resume", message: "Its tags, usage and settings show here.")
+        }
+    }
+}
+
+/// Inspector: attach the source, edit with Claude, tailor per job, and the copies tailored so far.
+private struct ClaudeEditingSection: View {
+    var model: ResumesModel
+    var variant: ResumeVariantItem
+    @Environment(AppStore.self) private var store
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Space.s) {
+            Text("Edit with Claude").eyebrowStyle()
+            if variant.canEdit {
+                Button { model.openEditor(variant) } label: { Label("Edit with Claude", systemImage: "sparkle") }
+                    .buttonStyle(.primaryPill)
+                    .disabled(!store.isConnected)
+                Toggle("Tailor it for each job", isOn: Binding(get: { variant.autoTailor },
+                                                               set: { v in Task { await model.setAutoTailor(v, variant) } }))
+                Text(variant.autoTailor
+                     ? "Before applying, Claude rewords a copy for the job from your profile, stories and this resume. It never adds "
+                       + "what they don't say, and the copy goes out in your mode (Auto sends it)."
+                     : "Applications use this resume as it is.")
+                    .font(Typography.callout).foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                let copies = store.library.tailoredCopies(of: variant.id)
+                if !copies.isEmpty {
+                    DisclosureGroup("Tailored copies (\(copies.count))") {
+                        VStack(alignment: .leading, spacing: Space.xs) {
+                            ForEach(copies.prefix(20)) { copy in
+                                HStack(spacing: Space.s) {
+                                    Text(copy.label).font(Typography.callout).lineLimit(1)
+                                    Spacer()
+                                    if let url = LocalFiles.existing(copy.filePath) {
+                                        Button("Open") { NSWorkspace.shared.open(url) }.buttonStyle(.secondaryLink)
+                                    }
+                                }
+                            }
+                        }
+                        .padding(.top, Space.xs)
+                    }
+                    .font(Typography.callout)
+                }
+            } else if variant.isTailored {
+                Text("Claude tailored this copy for one job. Edit the resume it came from instead.")
+                    .font(Typography.callout).foregroundStyle(Palette.textTertiary)
+            } else {
+                Button { model.chooseSource(for: variant) } label: {
+                    Label(model.attaching == variant.id ? "Attaching…" : "Attach editable source…", systemImage: "doc.text")
+                }
+                .buttonStyle(.secondaryLink)
+                .disabled(model.attaching != nil || !store.isConnected)
+                Text("Add the .docx, .tex or .html this PDF was made from. Claude then edits it with you and can tailor it for each "
+                     + "job; every save makes a new version and this PDF stays as it is.")
+                    .font(Typography.callout).foregroundStyle(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }

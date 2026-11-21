@@ -857,6 +857,25 @@ extension ApprovePayload {
     }
 }
 
+/// Attach the editable source (.html / .htm / .tex / .docx) a resume PDF was made from.
+struct AttachResumeSourcePayload: Codable, Sendable, Hashable {
+    var id: Int
+    var filePath: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id
+        case filePath = "file_path"
+    }
+}
+
+extension AttachResumeSourcePayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        filePath = try c.decode(String.self, forKey: .filePath)
+    }
+}
+
 /// ``ack.result`` for ``get_autonomy``: one row per ATS value. Advisory only; never changes a mode.
 struct AutonomyReport: Codable, Sendable, Hashable {
     var threshold: Int
@@ -1132,6 +1151,22 @@ extension CompanyBrief {
         summary = try c.decodeIfPresent(String.self, forKey: .summary)
         summaryUrl = try c.decodeIfPresent(String.self, forKey: .summaryUrl)
         otherRoles = try c.decodeIfPresent([String].self, forKey: .otherRoles) ?? []
+    }
+}
+
+/// Review: a flagged answer is right as written (clears "Check this" / "Low confidence").
+struct ConfirmApplicationAnswerPayload: Codable, Sendable, Hashable {
+    var applicationAnswerId: Int
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case applicationAnswerId = "application_answer_id"
+    }
+}
+
+extension ConfirmApplicationAnswerPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        applicationAnswerId = try c.decode(Int.self, forKey: .applicationAnswerId)
     }
 }
 
@@ -1733,6 +1768,21 @@ extension GetMailAccountPayload {
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         test = try c.decodeIfPresent(Bool.self, forKey: .test) ?? false
+    }
+}
+
+struct GetResumeSourcePayload: Codable, Sendable, Hashable {
+    var id: Int
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id
+    }
+}
+
+extension GetResumeSourcePayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
     }
 }
 
@@ -2690,6 +2740,25 @@ extension Preferences {
     }
 }
 
+/// Render the source with these segment texts to a preview PDF (nothing is saved).
+struct PreviewResumeEditPayload: Codable, Sendable, Hashable {
+    var id: Int
+    var edits: [ResumeSegmentText] = []
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id
+        case edits
+    }
+}
+
+extension PreviewResumeEditPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        edits = try c.decodeIfPresent([ResumeSegmentText].self, forKey: .edits) ?? []
+    }
+}
+
 struct Profile: Codable, Sendable, Hashable {
     var fullName: String? = nil
     var firstName: String? = nil
@@ -2765,6 +2834,34 @@ extension Progress {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         done = try c.decode(Int.self, forKey: .done)
         total = try c.decode(Int.self, forKey: .total)
+    }
+}
+
+/// Ask Claude to change the resume as ``instructions`` say, or to tailor it for ``job_id``.
+struct ProposeResumeEditsPayload: Codable, Sendable, Hashable {
+    var id: Int
+    var instructions: String = ""
+    var jobId: Int? = nil
+    var working: [ResumeSegmentText] = []
+    var history: [String] = []
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id
+        case instructions
+        case jobId = "job_id"
+        case working
+        case history
+    }
+}
+
+extension ProposeResumeEditsPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        instructions = try c.decodeIfPresent(String.self, forKey: .instructions) ?? ""
+        jobId = try c.decodeIfPresent(Int.self, forKey: .jobId)
+        working = try c.decodeIfPresent([ResumeSegmentText].self, forKey: .working) ?? []
+        history = try c.decodeIfPresent([String].self, forKey: .history) ?? []
     }
 }
 
@@ -3000,11 +3097,166 @@ extension ResolveUnknownPayload {
     }
 }
 
+struct ResumeEdit: Codable, Sendable, Hashable {
+    var segmentId: String
+    var before: String
+    var after: String
+    var reason: String = ""
+    var unsupportedClaims: [String] = []
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case segmentId = "segment_id"
+        case before
+        case after
+        case reason
+        case unsupportedClaims = "unsupported_claims"
+    }
+}
+
+extension ResumeEdit {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        segmentId = try c.decode(String.self, forKey: .segmentId)
+        before = try c.decode(String.self, forKey: .before)
+        after = try c.decode(String.self, forKey: .after)
+        reason = try c.decodeIfPresent(String.self, forKey: .reason) ?? ""
+        unsupportedClaims = try c.decodeIfPresent([String].self, forKey: .unsupportedClaims) ?? []
+    }
+}
+
+/// ``ack.result`` of ``propose_resume_edits``: Claude's suggested changes, one per segment.
+/// Nothing is saved; the app shows them as accept / reject diffs.
+struct ResumeEditProposal: Codable, Sendable, Hashable {
+    var resumeVariantId: Int
+    var jobId: Int? = nil
+    var summary: String
+    var edits: [ResumeEdit] = []
+    var grounded: Bool
+    var tokensIn: Int = 0
+    var tokensOut: Int = 0
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case resumeVariantId = "resume_variant_id"
+        case jobId = "job_id"
+        case summary
+        case edits
+        case grounded
+        case tokensIn = "tokens_in"
+        case tokensOut = "tokens_out"
+    }
+}
+
+extension ResumeEditProposal {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        resumeVariantId = try c.decode(Int.self, forKey: .resumeVariantId)
+        jobId = try c.decodeIfPresent(Int.self, forKey: .jobId)
+        summary = try c.decode(String.self, forKey: .summary)
+        edits = try c.decodeIfPresent([ResumeEdit].self, forKey: .edits) ?? []
+        grounded = try c.decode(Bool.self, forKey: .grounded)
+        tokensIn = try c.decodeIfPresent(Int.self, forKey: .tokensIn) ?? 0
+        tokensOut = try c.decodeIfPresent(Int.self, forKey: .tokensOut) ?? 0
+    }
+}
+
 struct ResumePayload: Codable, Sendable, Hashable {
 }
 
 extension ResumePayload {
     init(from decoder: any Decoder) throws {
+    }
+}
+
+/// ``ack.result`` of ``preview_resume_edit``.
+struct ResumePreview: Codable, Sendable, Hashable {
+    var filePath: String
+    var pages: Int? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case filePath = "file_path"
+        case pages
+    }
+}
+
+extension ResumePreview {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        filePath = try c.decode(String.self, forKey: .filePath)
+        pages = try c.decodeIfPresent(Int.self, forKey: .pages)
+    }
+}
+
+/// One editable block of a resume source: a paragraph, bullet, heading or table cell (HTML /
+/// .docx), or a line of the document body (LaTeX, raw markup kept).
+struct ResumeSegment: Codable, Sendable, Hashable {
+    var id: String
+    var text: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id
+        case text
+    }
+}
+
+extension ResumeSegment {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        text = try c.decode(String.self, forKey: .text)
+    }
+}
+
+struct ResumeSegmentText: Codable, Sendable, Hashable {
+    var segmentId: String
+    var text: String
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case segmentId = "segment_id"
+        case text
+    }
+}
+
+extension ResumeSegmentText {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        segmentId = try c.decode(String.self, forKey: .segmentId)
+        text = try c.decode(String.self, forKey: .text)
+    }
+}
+
+/// ``ack.result`` of ``get_resume_source`` and ``attach_resume_source``.
+struct ResumeSource: Codable, Sendable, Hashable {
+    enum Kind: String, Codable, Sendable, CaseIterable, Hashable {
+        case html
+        case latex
+        case docx
+    }
+    var resumeVariantId: Int
+    var kind: Kind
+    var fileName: String
+    var segments: [ResumeSegment] = []
+    var renderer: String? = nil
+    var renderHint: String? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case resumeVariantId = "resume_variant_id"
+        case kind
+        case fileName = "file_name"
+        case segments
+        case renderer
+        case renderHint = "render_hint"
+    }
+}
+
+extension ResumeSource {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        resumeVariantId = try c.decode(Int.self, forKey: .resumeVariantId)
+        kind = try c.decode(Kind.self, forKey: .kind)
+        fileName = try c.decode(String.self, forKey: .fileName)
+        segments = try c.decodeIfPresent([ResumeSegment].self, forKey: .segments) ?? []
+        renderer = try c.decodeIfPresent(String.self, forKey: .renderer)
+        renderHint = try c.decodeIfPresent(String.self, forKey: .renderHint)
     }
 }
 
@@ -3155,6 +3407,56 @@ extension RunStats {
         awaitingReview = try c.decodeIfPresent(Int.self, forKey: .awaitingReview) ?? 0
         submitted = try c.decodeIfPresent(Int.self, forKey: .submitted) ?? 0
         failed = try c.decodeIfPresent(Int.self, forKey: .failed) ?? 0
+    }
+}
+
+/// Apply segment texts to the source, render a PDF, and store it as the next version (or a new resume).
+struct SaveResumeEditPayload: Codable, Sendable, Hashable {
+    var id: Int
+    var edits: [ResumeSegmentText]
+    var asNew: Bool = false
+    var label: String? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id
+        case edits
+        case asNew = "as_new"
+        case label
+    }
+}
+
+extension SaveResumeEditPayload {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        edits = try c.decode([ResumeSegmentText].self, forKey: .edits)
+        asNew = try c.decodeIfPresent(Bool.self, forKey: .asNew) ?? false
+        label = try c.decodeIfPresent(String.self, forKey: .label)
+    }
+}
+
+/// ``ack.result`` of ``save_resume_edit``.
+struct SaveResumeEditResult: Codable, Sendable, Hashable {
+    var resumeVariantId: Int
+    var filePath: String
+    var version: Int
+    var pages: Int? = nil
+
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case resumeVariantId = "resume_variant_id"
+        case filePath = "file_path"
+        case version
+        case pages
+    }
+}
+
+extension SaveResumeEditResult {
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        resumeVariantId = try c.decode(Int.self, forKey: .resumeVariantId)
+        filePath = try c.decode(String.self, forKey: .filePath)
+        version = try c.decode(Int.self, forKey: .version)
+        pages = try c.decodeIfPresent(Int.self, forKey: .pages)
     }
 }
 
@@ -4018,6 +4320,7 @@ struct UpdateResumeVariantPayload: Codable, Sendable, Hashable {
     var tags: [String]? = nil
     var enabled: Bool? = nil
     var isDefault: Bool? = nil
+    var autoTailor: Bool? = nil
 
     enum CodingKeys: String, CodingKey, CaseIterable {
         case id
@@ -4025,6 +4328,7 @@ struct UpdateResumeVariantPayload: Codable, Sendable, Hashable {
         case tags
         case enabled
         case isDefault = "is_default"
+        case autoTailor = "auto_tailor"
     }
 }
 
@@ -4036,6 +4340,7 @@ extension UpdateResumeVariantPayload {
         tags = try c.decodeIfPresent([String].self, forKey: .tags)
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled)
         isDefault = try c.decodeIfPresent(Bool.self, forKey: .isDefault)
+        autoTailor = try c.decodeIfPresent(Bool.self, forKey: .autoTailor)
     }
 }
 
@@ -4398,6 +4703,7 @@ enum Command: Sendable, Hashable {
     case updateAnswer(UpdateAnswerPayload)
     case deleteAnswer(DeleteAnswerPayload)
     case editApplicationAnswer(EditApplicationAnswerPayload)
+    case confirmApplicationAnswer(ConfirmApplicationAnswerPayload)
     case setJobMode(SetJobModePayload)
     case retryApplication(RetryApplicationPayload)
     case resolveUnknown(ResolveUnknownPayload)
@@ -4465,6 +4771,11 @@ enum Command: Sendable, Hashable {
     case getInterviewPrep(GetInterviewPrepPayload)
     case interviewDebrief(InterviewDebriefPayload)
     case draftAnswer(DraftAnswerPayload)
+    case attachResumeSource(AttachResumeSourcePayload)
+    case getResumeSource(GetResumeSourcePayload)
+    case proposeResumeEdits(ProposeResumeEditsPayload)
+    case previewResumeEdit(PreviewResumeEditPayload)
+    case saveResumeEdit(SaveResumeEditPayload)
     case getVoiceProfile(GetVoiceProfilePayload)
     case updateVoiceProfile(UpdateVoiceProfilePayload)
     case getAutonomy(GetAutonomyPayload)
@@ -4493,6 +4804,7 @@ enum Command: Sendable, Hashable {
         case .updateAnswer: "update_answer"
         case .deleteAnswer: "delete_answer"
         case .editApplicationAnswer: "edit_application_answer"
+        case .confirmApplicationAnswer: "confirm_application_answer"
         case .setJobMode: "set_job_mode"
         case .retryApplication: "retry_application"
         case .resolveUnknown: "resolve_unknown"
@@ -4560,6 +4872,11 @@ enum Command: Sendable, Hashable {
         case .getInterviewPrep: "get_interview_prep"
         case .interviewDebrief: "interview_debrief"
         case .draftAnswer: "draft_answer"
+        case .attachResumeSource: "attach_resume_source"
+        case .getResumeSource: "get_resume_source"
+        case .proposeResumeEdits: "propose_resume_edits"
+        case .previewResumeEdit: "preview_resume_edit"
+        case .saveResumeEdit: "save_resume_edit"
         case .getVoiceProfile: "get_voice_profile"
         case .updateVoiceProfile: "update_voice_profile"
         case .getAutonomy: "get_autonomy"
@@ -4588,6 +4905,7 @@ enum Command: Sendable, Hashable {
         "update_answer",
         "delete_answer",
         "edit_application_answer",
+        "confirm_application_answer",
         "set_job_mode",
         "retry_application",
         "resolve_unknown",
@@ -4655,6 +4973,11 @@ enum Command: Sendable, Hashable {
         "get_interview_prep",
         "interview_debrief",
         "draft_answer",
+        "attach_resume_source",
+        "get_resume_source",
+        "propose_resume_edits",
+        "preview_resume_edit",
+        "save_resume_edit",
         "get_voice_profile",
         "update_voice_profile",
         "get_autonomy",
@@ -4789,6 +5112,7 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case "update_answer": command = .updateAnswer(try c.decode(UpdateAnswerPayload.self, forKey: .payload))
         case "delete_answer": command = .deleteAnswer(try c.decode(DeleteAnswerPayload.self, forKey: .payload))
         case "edit_application_answer": command = .editApplicationAnswer(try c.decode(EditApplicationAnswerPayload.self, forKey: .payload))
+        case "confirm_application_answer": command = .confirmApplicationAnswer(try c.decode(ConfirmApplicationAnswerPayload.self, forKey: .payload))
         case "set_job_mode": command = .setJobMode(try c.decode(SetJobModePayload.self, forKey: .payload))
         case "retry_application": command = .retryApplication(try c.decode(RetryApplicationPayload.self, forKey: .payload))
         case "resolve_unknown": command = .resolveUnknown(try c.decode(ResolveUnknownPayload.self, forKey: .payload))
@@ -4856,6 +5180,11 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case "get_interview_prep": command = .getInterviewPrep(try c.decode(GetInterviewPrepPayload.self, forKey: .payload))
         case "interview_debrief": command = .interviewDebrief(try c.decode(InterviewDebriefPayload.self, forKey: .payload))
         case "draft_answer": command = .draftAnswer(try c.decode(DraftAnswerPayload.self, forKey: .payload))
+        case "attach_resume_source": command = .attachResumeSource(try c.decode(AttachResumeSourcePayload.self, forKey: .payload))
+        case "get_resume_source": command = .getResumeSource(try c.decode(GetResumeSourcePayload.self, forKey: .payload))
+        case "propose_resume_edits": command = .proposeResumeEdits(try c.decode(ProposeResumeEditsPayload.self, forKey: .payload))
+        case "preview_resume_edit": command = .previewResumeEdit(try c.decode(PreviewResumeEditPayload.self, forKey: .payload))
+        case "save_resume_edit": command = .saveResumeEdit(try c.decode(SaveResumeEditPayload.self, forKey: .payload))
         case "get_voice_profile": command = .getVoiceProfile(try c.decode(GetVoiceProfilePayload.self, forKey: .payload))
         case "update_voice_profile": command = .updateVoiceProfile(try c.decode(UpdateVoiceProfilePayload.self, forKey: .payload))
         case "get_autonomy": command = .getAutonomy(try c.decode(GetAutonomyPayload.self, forKey: .payload))
@@ -4891,6 +5220,7 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case .updateAnswer(let p): try c.encode(p, forKey: .payload)
         case .deleteAnswer(let p): try c.encode(p, forKey: .payload)
         case .editApplicationAnswer(let p): try c.encode(p, forKey: .payload)
+        case .confirmApplicationAnswer(let p): try c.encode(p, forKey: .payload)
         case .setJobMode(let p): try c.encode(p, forKey: .payload)
         case .retryApplication(let p): try c.encode(p, forKey: .payload)
         case .resolveUnknown(let p): try c.encode(p, forKey: .payload)
@@ -4958,6 +5288,11 @@ struct CommandEnvelope: Codable, Sendable, Hashable {
         case .getInterviewPrep(let p): try c.encode(p, forKey: .payload)
         case .interviewDebrief(let p): try c.encode(p, forKey: .payload)
         case .draftAnswer(let p): try c.encode(p, forKey: .payload)
+        case .attachResumeSource(let p): try c.encode(p, forKey: .payload)
+        case .getResumeSource(let p): try c.encode(p, forKey: .payload)
+        case .proposeResumeEdits(let p): try c.encode(p, forKey: .payload)
+        case .previewResumeEdit(let p): try c.encode(p, forKey: .payload)
+        case .saveResumeEdit(let p): try c.encode(p, forKey: .payload)
         case .getVoiceProfile(let p): try c.encode(p, forKey: .payload)
         case .updateVoiceProfile(let p): try c.encode(p, forKey: .payload)
         case .getAutonomy(let p): try c.encode(p, forKey: .payload)

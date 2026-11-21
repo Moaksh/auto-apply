@@ -405,7 +405,8 @@ def _v13_schema_sql() -> str:
     end = sql.index("\n);", start) + 3
     sql = sql[:start] + sql[end:]
     sql = sql.replace(",'same_city')", ")")
-    lines = [line for line in sql.splitlines() if "VALUES (14)" not in line and "-- v14" not in line
+    lines = [line for line in sql.splitlines() if "VALUES (14)" not in line and "VALUES (15)" not in line and "-- v14" not in line
+             and "-- v15" not in line
              and not line.strip().startswith(("startup_score ", "startup_confidence ", "startup_reasons ", "rank_score ",
                                                "-- with fit_score"))]
     out = "\n".join(lines)
@@ -430,7 +431,7 @@ def test_v13_database_upgrades_to_v14_keeping_referrals(tmp_path, conn):
     with pytest.raises(Exception):
         c.execute("INSERT INTO referrals(company_id, person_name, basis) VALUES (?, 'X', 'same_city')", (co.id,))
     c.execute("INSERT INTO prospects(company_id, fit_score) VALUES (?, 60)", (co.id,))
-    assert db.migrate(c) == db.SCHEMA_VERSION == 14
+    assert db.migrate(c) == db.SCHEMA_VERSION >= 14
     for table in ("referrals", "prospects", "company_facts"):
         assert _shape(c, table) == _shape(conn, table), table
     row = c.execute("SELECT person_name, basis, state, linkedin_url FROM referrals").fetchone()

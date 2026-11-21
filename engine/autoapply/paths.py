@@ -5,7 +5,8 @@ Everything lives under one "home" directory:
     ~/Library/Application Support/AutoApply/
         autoapply.db        SQLite (WAL) — daemon is the only writer
         autoapplyd.sock     Unix socket (NDJSON protocol, contract/protocol.md)
-        resumes/            user-approved resume PDFs (never modified)
+        resumes/            resume PDFs you added (never modified), their editable sources,
+                            versions edited with Claude and copies tailored per job
         screenshots/        full-page screenshots per application
         cover_letters/      generated cover letters
         interview_prep/     interview prep packs and debriefs (JSON, one file per application)

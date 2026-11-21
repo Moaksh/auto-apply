@@ -18,7 +18,13 @@ final class LibraryStore {
 
     init() {}
 
-    var defaultResume: ResumeVariantItem? { resumeVariants.first(where: \.isDefault) ?? resumeVariants.first }
+    var defaultResume: ResumeVariantItem? { resumeVariants.first(where: \.isDefault) ?? baseResumes.first }
+    /// The user's resumes, without the copies the agent tailored for one job each.
+    var baseResumes: [ResumeVariantItem] { resumeVariants.filter { !$0.isTailored } }
+    /// Copies tailored from `id`, newest first.
+    func tailoredCopies(of id: Int) -> [ResumeVariantItem] {
+        resumeVariants.filter { $0.parentID == id && $0.isTailored }.sorted { $0.createdAt > $1.createdAt }
+    }
     var easyApplyOpenCount: Int { easyApply.reduce(0) { $0 + ($1.isOpen && !$1.opened ? 1 : 0) } }
     var easyApplyToDoCount: Int { easyApply.reduce(0) { $0 + ($1.isOpen ? 1 : 0) } }
     var pendingSuggestions: [CompanySuggestionItem] { companySuggestions.filter { $0.status == .pending } }

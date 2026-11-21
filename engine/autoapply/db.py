@@ -99,7 +99,7 @@ from autoapply.models import (
 )
 
 #: Must equal MAX(version) seeded by contract/schema.sql.
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 
 #: Forward migrations: version -> SQL to go from (version-1) to version. Append-only.
 #: Version 1 is the baseline created by contract/schema.sql itself.
@@ -180,6 +180,8 @@ CREATE INDEX IF NOT EXISTS ix_application_replies_suggestion ON application_repl
     # v14: startups by location. ``company_facts`` (YC directory + funding news, every fact with
     # its source), the startup score / rank on ``prospects``, and the ``same_city`` referral basis.
     14: "python:_migrate_v14",
+    # v15: editable resume sources and per-job tailored copies (resume editor, resume_edit/).
+    15: "python:_migrate_v15",
 }
 
 
@@ -570,6 +572,32 @@ CREATE TABLE IF NOT EXISTS company_facts (
 """
 
 _V14_BASIS_CHECK = re.compile(r"(basis\s+TEXT\s+NOT\s+NULL\s+CHECK\s*\(\s*basis\s+IN\s*\([^)]*?'other')\)")
+
+
+_V15_RESUME_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("source_path", "TEXT"),
+    ("source_kind", "TEXT CHECK (source_kind IN ('html','latex','docx'))"),
+    ("parent_id", "INTEGER REFERENCES resume_variants(id) ON DELETE SET NULL"),
+    ("tailored_for_job_id", "INTEGER REFERENCES jobs(id) ON DELETE SET NULL"),
+    ("auto_tailor", "INTEGER NOT NULL DEFAULT 1 CHECK (auto_tailor IN (0, 1))"),
+)
+
+
+def _migrate_v15(conn: sqlite3.Connection) -> None:
+    """v15: the resume editor's columns on ``resume_variants`` (editable source, tailored copies,
+    auto-tailor). Idempotent."""
+    conn.execute("BEGIN")
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(resume_variants)")}
+        for name, definition in _V15_RESUME_COLUMNS:
+            if name not in cols:
+                conn.execute(f"ALTER TABLE resume_variants ADD COLUMN {name} {definition}")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_resume_variants_tailored ON resume_variants(tailored_for_job_id, parent_id)")
+        conn.execute("INSERT INTO schema_version(version) VALUES (15)")
+        conn.execute("COMMIT")
+    except BaseException:
+        conn.execute("ROLLBACK")
+        raise
 
 
 def _migrate_v14(conn: sqlite3.Connection) -> None:
@@ -1041,9 +1069,15 @@ def add_resume_variant(
     text: str | None = None,
     is_default: bool = False,
     replaces: int | None = None,
+    source_path: str | None = None,
+    source_kind: str | None = None,
+    parent_id: int | None = None,
+    tailored_for_job_id: int | None = None,
+    auto_tailor: bool = True,
 ) -> ResumeVariant:
     """Insert a variant. ``replaces`` = id of the variant this new file supersedes
-    (old row is disabled and points at the new one; version is incremented)."""
+    (old row is disabled and points at the new one; version is incremented; its tags and
+    auto-tailor setting carry over). A tailored copy (``tailored_for_job_id``) is never the default."""
     ts = now_ts()
     with transaction(conn):
         version = 1
@@ -1051,12 +1085,17 @@ def add_resume_variant(
             old = _require(_one(conn, "SELECT * FROM resume_variants WHERE id = ?", (replaces,)), "resume_variant", replaces)
             version = int(old["version"]) + 1
             is_default = is_default or bool(old["is_default"])
+            auto_tailor = auto_tailor and bool(old["auto_tailor"])
+        if tailored_for_job_id is not None:
+            is_default = False
         if is_default:
             conn.execute("UPDATE resume_variants SET is_default = 0, updated_at = ? WHERE is_default = 1", (ts,))
         cur = conn.execute(
-            "INSERT INTO resume_variants(label, file_path, tags, text, is_default, version, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (label, file_path, _j(list(tags)), text, int(is_default), version, ts, ts),
+            "INSERT INTO resume_variants(label, file_path, tags, text, is_default, version, created_at, updated_at, "
+            "source_path, source_kind, parent_id, tailored_for_job_id, auto_tailor) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (label, file_path, _j(list(tags)), text, int(is_default), version, ts, ts,
+             source_path, source_kind, parent_id, tailored_for_job_id, int(auto_tailor)),
         )
         new_id_ = int(cur.lastrowid)
         if replaces is not None:
@@ -1073,11 +1112,24 @@ def get_resume_variant(conn: sqlite3.Connection, variant_id: int) -> ResumeVaria
 
 
 def list_resume_variants(conn: sqlite3.Connection, *, enabled_only: bool = False) -> list[ResumeVariant]:
+    """All variants; ``enabled_only``: the ones the picker may choose (enabled, current version,
+    not a copy tailored for one job)."""
     sql = "SELECT * FROM resume_variants"
     if enabled_only:
-        sql += " WHERE enabled = 1 AND replaced_by IS NULL"
+        sql += " WHERE enabled = 1 AND replaced_by IS NULL AND tailored_for_job_id IS NULL"
     sql += " ORDER BY is_default DESC, id"
     return [ResumeVariant.from_row(r) for r in conn.execute(sql)]  # type: ignore[misc]
+
+
+def find_tailored_resume(conn: sqlite3.Connection, parent_id: int, job_id: int) -> ResumeVariant | None:
+    """The newest copy of ``parent_id`` tailored for ``job_id`` (None when there is none)."""
+    row = _one(
+        conn,
+        "SELECT * FROM resume_variants WHERE parent_id = ? AND tailored_for_job_id = ? AND replaced_by IS NULL "
+        "ORDER BY id DESC LIMIT 1",
+        (parent_id, job_id),
+    )
+    return ResumeVariant.from_row(row) if row else None  # type: ignore[return-value]
 
 
 def update_resume_variant(
@@ -1089,9 +1141,18 @@ def update_resume_variant(
     text: str | None = None,
     enabled: bool | None = None,
     is_default: bool | None = None,
+    source_path: str | None = None,
+    source_kind: str | None = None,
+    auto_tailor: bool | None = None,
 ) -> ResumeVariant:
     ts = now_ts()
     fields: dict[str, Any] = {}
+    if source_path is not None:
+        fields["source_path"] = source_path
+    if source_kind is not None:
+        fields["source_kind"] = source_kind
+    if auto_tailor is not None:
+        fields["auto_tailor"] = int(auto_tailor)
     if label is not None:
         fields["label"] = label
     if tags is not None:
@@ -2324,6 +2385,18 @@ def edit_application_answer(conn: sqlite3.Connection, answer_id: int, answer: st
         )
         log_event(conn, "user", f"edited answer to {aa.question!r}", actor=Actor.USER, application_id=aa.application_id,
                   payload={"application_answer_id": answer_id})
+    return get_application_answer(conn, answer_id)
+
+
+def confirm_application_answer(conn: sqlite3.Connection, answer_id: int) -> ApplicationAnswer:
+    """The user looked at a flagged answer in Review and it's right as written: confidence 1.0,
+    origin unchanged (they didn't write it). Logged as ``review`` with ``confirmed_answer_id``, so
+    earned autonomy doesn't count it as an edit."""
+    with transaction(conn):
+        aa = get_application_answer(conn, answer_id)
+        conn.execute("UPDATE application_answers SET confidence = 1.0, updated_at = ? WHERE id = ?", (now_ts(), answer_id))
+        log_event(conn, "review", f"confirmed answer to {aa.question!r}", actor=Actor.USER, application_id=aa.application_id,
+                  payload={"confirmed_answer_id": answer_id})
     return get_application_answer(conn, answer_id)
 
 

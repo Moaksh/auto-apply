@@ -24,6 +24,8 @@ final class MockWorld: Sendable {
         var nextMemoryID = 1_000
         var nextStoryID = 1_000
         var nextResumeID = 100
+        /// Resume sources attached in mock mode: variant id -> segments (MockResumeEditor).
+        var resumeSources: [Int: [ResumeSegment]] = [:]
         var nextAnswerRowID = 100_000
         var runCounter = 0
         /// Interview prep packs, the writing voice and the insights summary (MockCareer).

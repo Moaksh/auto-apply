@@ -163,6 +163,26 @@ struct ReviewModelTests {
         #expect(daemon.sent("edit_application_answer").count == 1)
     }
 
+    @Test func looksRightClearsTheFlagWithoutChangingTheAnswer() async throws {
+        let (_, daemon, model) = await setup()
+        let answer = try #require(model.answers[3]?.first)  // 0.7: "Check this"
+        #expect(ReviewSafeguard.flagLabel(answer.confidenceLevel) == "Check this")
+        await model.confirmAnswer(answer)
+        let after = try #require(model.answers[3]?.first)
+        #expect(after.answer == answer.answer && after.origin == answer.origin && after.confidence == 1)
+        #expect(ReviewSafeguard.flaggedAnswers(model.answers[3] ?? []).isEmpty)
+        let sent = try #require(daemon.sent("confirm_application_answer").first)
+        guard case .confirmApplicationAnswer(let p) = sent else { Issue.record("expected confirm"); return }
+        #expect(p.applicationAnswerId == 31)
+        #expect(daemon.sent("edit_application_answer").isEmpty)  // not an edit (earned autonomy)
+
+        // A failure brings the flag back.
+        daemon.responder = { _ in .error(ErrorPayload(code: .notFound, message: "gone")) }
+        let low = try #require(model.answers[2]?.first)
+        await model.confirmAnswer(low)
+        #expect(model.answers[2]?.first?.confidence == 0.4)
+    }
+
     @Test func modeSummaryListsOverrides() async {
         let (store, _, model) = await setup()
         var p = store.preferences

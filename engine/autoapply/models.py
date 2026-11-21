@@ -324,7 +324,7 @@ class ProfilePatch(BaseModel):
 
 class ResumeVariant(RowModel):
     _json_fields = frozenset({"tags"})
-    _bool_fields = frozenset({"is_default", "enabled"})
+    _bool_fields = frozenset({"is_default", "enabled", "auto_tailor"})
 
     id: int
     label: str
@@ -338,6 +338,11 @@ class ResumeVariant(RowModel):
     replaced_by: int | None = None
     created_at: Timestamp
     updated_at: Timestamp
+    source_path: str | None = None
+    source_kind: str | None = None
+    parent_id: int | None = None
+    tailored_for_job_id: int | None = None
+    auto_tailor: bool = True
 
 
 class Story(RowModel):
@@ -1211,6 +1216,62 @@ class DraftAnswerResult(_P):
     tokens_out: int = 0
 
 
+class ResumeSegment(_P):
+    """One editable block of a resume source: a paragraph, bullet, heading or table cell (HTML /
+    .docx), or a line of the document body (LaTeX, raw markup kept)."""
+
+    id: str = Field(description="Stable within one source file ('s1', 's2', …).")
+    text: str
+
+
+class ResumeSource(_P):
+    """``ack.result`` of ``get_resume_source`` and ``attach_resume_source``."""
+
+    resume_variant_id: int
+    kind: Literal["html", "latex", "docx"]
+    file_name: str
+    segments: list[ResumeSegment] = Field(default_factory=list)
+    renderer: str | None = Field(default=None, description="What turns the source into a PDF here ('Chromium', 'pdflatex', 'LibreOffice', 'Microsoft Word'); null when nothing installed can.")
+    render_hint: str | None = Field(default=None, description="What to install when ``renderer`` is null.")
+
+
+class ResumeEdit(_P):
+    segment_id: str
+    before: str
+    after: str
+    reason: str = ""
+    unsupported_claims: list[str] = Field(default_factory=list, description="Claims in ``after`` that are not in the profile, stories, resume or the user's request.")
+
+
+class ResumeEditProposal(_P):
+    """``ack.result`` of ``propose_resume_edits``: Claude's suggested changes, one per segment.
+    Nothing is saved; the app shows them as accept / reject diffs."""
+
+    resume_variant_id: int
+    job_id: int | None = None
+    summary: str = Field(description="One or two sentences on what changed and why, in Claude's words.")
+    edits: list[ResumeEdit] = Field(default_factory=list)
+    grounded: bool = Field(description="False when an edit carries a claim the fact check could not find in the user's sources.")
+    tokens_in: int = 0
+    tokens_out: int = 0
+
+
+class ResumePreview(_P):
+    """``ack.result`` of ``preview_resume_edit``."""
+
+    file_path: str = Field(description="A PDF to show; with no edits, the resume's own PDF.")
+    pages: int | None = None
+
+
+class SaveResumeEditResult(_P):
+    """``ack.result`` of ``save_resume_edit``."""
+
+    resume_variant_id: int = Field(description="The new variant (next version, or a new resume).")
+    file_path: str
+    version: int
+    pages: int | None = None
+
+
 class PerJobAnswer(_P):
     job_id: int
     answer: str
@@ -1297,6 +1358,49 @@ class UpdateResumeVariantPayload(_P):
     tags: list[str] | None = None
     enabled: bool | None = None
     is_default: bool | None = None
+    auto_tailor: bool | None = Field(default=None, description="Let the agent tailor a copy of this resume for each job (needs an editable source).")
+
+
+class AttachResumeSourcePayload(_P):
+    """Attach the editable source (.html / .htm / .tex / .docx) a resume PDF was made from."""
+
+    id: int
+    file_path: str = Field(description="Absolute path; the daemon copies it into <home>/resumes/.")
+
+
+class GetResumeSourcePayload(_P):
+    id: int
+
+
+class ResumeSegmentText(_P):
+    segment_id: str
+    text: str = Field(max_length=4000)
+
+
+class ProposeResumeEditsPayload(_P):
+    """Ask Claude to change the resume as ``instructions`` say, or to tailor it for ``job_id``."""
+
+    id: int
+    instructions: str = Field(default="", max_length=2000, description="What to change. Facts stated here count as the user's own.")
+    job_id: int | None = Field(default=None, description="Tailor for this job's description.")
+    working: list[ResumeSegmentText] = Field(default_factory=list, description="Segments the user already changed in the editor (the text Claude edits from).")
+    history: list[str] = Field(default_factory=list, max_length=12, description="The user's earlier requests in this editing session, oldest first.")
+
+
+class PreviewResumeEditPayload(_P):
+    """Render the source with these segment texts to a preview PDF (nothing is saved)."""
+
+    id: int
+    edits: list[ResumeSegmentText] = Field(default_factory=list)
+
+
+class SaveResumeEditPayload(_P):
+    """Apply segment texts to the source, render a PDF, and store it as the next version (or a new resume)."""
+
+    id: int
+    edits: list[ResumeSegmentText] = Field(min_length=1)
+    as_new: bool = Field(default=False, description="Save as a separate resume instead of the next version.")
+    label: str | None = Field(default=None, description="Label for a new resume (as_new).")
 
 
 class UpsertStoryPayload(_P):
@@ -1326,6 +1430,12 @@ class DeleteAnswerPayload(_P):
 class EditApplicationAnswerPayload(_P):
     application_answer_id: int
     answer: str
+
+
+class ConfirmApplicationAnswerPayload(_P):
+    """Review: a flagged answer is right as written (clears "Check this" / "Low confidence")."""
+
+    application_answer_id: int
 
 
 class SetJobModePayload(_P):
@@ -1814,6 +1924,7 @@ COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "update_answer": UpdateAnswerPayload,
     "delete_answer": DeleteAnswerPayload,
     "edit_application_answer": EditApplicationAnswerPayload,
+    "confirm_application_answer": ConfirmApplicationAnswerPayload,
     "set_job_mode": SetJobModePayload,
     "retry_application": RetryApplicationPayload,
     "resolve_unknown": ResolveUnknownPayload,
@@ -1881,6 +1992,11 @@ COMMAND_PAYLOADS: dict[str, type[BaseModel]] = {
     "get_interview_prep": GetInterviewPrepPayload,
     "interview_debrief": InterviewDebriefPayload,
     "draft_answer": DraftAnswerPayload,
+    "attach_resume_source": AttachResumeSourcePayload,
+    "get_resume_source": GetResumeSourcePayload,
+    "propose_resume_edits": ProposeResumeEditsPayload,
+    "preview_resume_edit": PreviewResumeEditPayload,
+    "save_resume_edit": SaveResumeEditPayload,
     "get_voice_profile": GetVoiceProfilePayload,
     "update_voice_profile": UpdateVoiceProfilePayload,
     "get_autonomy": GetAutonomyPayload,
@@ -2279,6 +2395,10 @@ _EXTRA_DEFS: tuple[type[BaseModel], ...] = (
     InterviewDebrief,
     VoiceProfile,
     DraftAnswerResult,
+    ResumeSource,
+    ResumeEditProposal,
+    ResumePreview,
+    SaveResumeEditResult,
 )
 
 

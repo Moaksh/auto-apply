@@ -114,6 +114,16 @@ def test_edit_after_approval_does_not_taint_it(conn: sqlite3.Connection) -> None
     assert site(conn).approved_without_edits == 1
 
 
+def test_confirming_a_flagged_answer_is_not_an_edit(conn: sqlite3.Connection) -> None:
+    app_id = _review_app(conn, Ats.GREENHOUSE)
+    aa = db.add_application_answer(conn, app_id, question="Presentation letter", answer="Hello team", origin="generated",
+                                   confidence=0.8)
+    got = db.confirm_application_answer(conn, aa.id)
+    assert got.confidence == 1.0 and got.origin == aa.origin and got.answer == "Hello team"
+    db.begin_submit(conn, app_id, actor=Actor.USER)
+    assert site(conn).approved_without_edits == 1
+
+
 # ---- threshold and suggestion state -------------------------------------------------------------
 
 
