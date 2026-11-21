@@ -23,6 +23,11 @@ struct SidebarView: View {
             }
         }
         .listStyle(.sidebar)
+        // A release's "what's new" popover, once per version after an update (Features/WhatsNew).
+        .task(id: store.hasSnapshot) {
+            guard store.hasSnapshot else { return }
+            WhatsNewCenter.shared.appear(needsOnboarding: store.needsOnboarding)
+        }
         .safeAreaInset(edge: .bottom) {
             AgentPill(status: store.agentStatus) { router.go(.dashboard) }
                 .padding(Space.s)
@@ -36,6 +41,7 @@ struct SidebarView: View {
                        cascade: item == .pipeline ? InboxModel.shared(for: store) : nil,
                        activity: item == .coldEmail ? store.outreach.activity() : nil)
                 .tag(item)
+                .modifier(WhatsNewAnchor(item: item))
         }
     }
 
@@ -89,6 +95,24 @@ private struct SidebarRow: View {
         if badge > 0 { parts.append("\(badge)") }
         if let activity, activity.isActive { parts.append(activity.isWorking ? "working" : "waiting") }
         return parts.joined(separator: ", ")
+    }
+}
+
+/// The "what's new" popover hangs off the row its feature lives on.
+private struct WhatsNewAnchor: ViewModifier {
+    var item: SidebarItem
+    @Environment(Router.self) private var router
+
+    func body(content: Content) -> some View {
+        let center = WhatsNewCenter.shared
+        if item == center.release.anchor {
+            content.popover(isPresented: Binding(get: { center.isPresented }, set: { if !$0 { center.dismiss() } }),
+                            arrowEdge: .trailing) {
+                WhatsNewPopover(center: center) { router.go(center.release.anchor) }
+            }
+        } else {
+            content
+        }
     }
 }
 

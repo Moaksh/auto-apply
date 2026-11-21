@@ -15,6 +15,11 @@ struct AppCommands: Commands {
             }
         }
         CommandGroup(after: .help) {
+            Button("What's New in AutoApply") {
+                openWindow(id: WindowID.main)
+                WhatsNewCenter.shared.show()
+            }
+            Divider()
             Button("Report a Bug…") {
                 FeedbackRequest.kind = .bug
                 openWindow(id: WindowID.feedback)
