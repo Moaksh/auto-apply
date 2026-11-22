@@ -23,19 +23,17 @@ struct WhatsNewRelease: Sendable {
     var items: [Item]
 
     static let current = WhatsNewRelease(
-        version: "0.1.6",
-        title: "Edit your resume with Claude",
-        subtitle: "Attach the .docx, .tex or .html your resume PDF was made from, and Claude edits it with you.",
-        anchor: .resumes,
+        version: "0.1.7",
+        title: "Some sites want you, not me",
+        subtitle: "When a site keeps stopping me to sign in or solve a CAPTCHA, its jobs come to Easy Apply with the answers already drafted.",
+        anchor: .easyApply,
         items: [
-            Item(symbol: "doc.richtext", title: "A live PDF beside the editor",
-                 detail: "Change a line yourself or ask Claude. The PDF updates a moment later, with Claude's suggestions in it before you accept them."),
-            Item(symbol: "checkmark.shield", title: "Only what's true",
-                 detail: "Every change is checked against your profile, stories and resume. Anything Claude can't back is flagged, and the job post never counts as proof."),
-            Item(symbol: "scope", title: "Tailored for each job",
-                 detail: "Before applying, I reword a copy of your resume for the job. Your PDF stays as it is, and you can turn this off per resume."),
-            Item(symbol: "checkmark.circle", title: "\u{201C}Looks right\u{201D} in Review",
-                 detail: "Clear a \u{201C}Check this\u{201D} flag without retyping the answer."),
+            Item(symbol: "hand.raised", title: "Apply yourself, in one click",
+                 detail: "Open application takes you to the form, with every answer drafted. I stop queueing that site, so it stops filling Needs You."),
+            Item(symbol: "paintpalette", title: "A touch of color everywhere",
+                 detail: "Backgrounds now carry a faint tint of the accent. Same contrast, a little warmer."),
+            Item(symbol: "sparkles", title: "Eight secrets are hiding in here",
+                 detail: "Find all eight and you get something no one else has. Stuck? Press \u{2318}K and type \u{201C}psst\u{201D}."),
         ])
 }
 

@@ -36,7 +36,7 @@ struct WhatsNewTests {
         #expect(!onboarding.isPresented)
     }
 
-    @Test func pointsAtResumes() {
-        #expect(WhatsNewRelease.current.anchor == .resumes && WhatsNewRelease.current.items.count == 4)
+    @Test func pointsAtEasyApply() {
+        #expect(WhatsNewRelease.current.anchor == .easyApply && WhatsNewRelease.current.items.count == 3)
     }
 }
