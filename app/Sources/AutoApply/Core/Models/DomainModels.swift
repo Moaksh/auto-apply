@@ -293,7 +293,54 @@ struct DraftedAnswer: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
-/// LinkedIn Easy Apply manual-list row (`easy_apply` joined with its job).
+/// A job site that kept stopping the agent with a task for you (`meta.manual_apply_sites`, engine
+/// `manual_sites.py`): its jobs are on the manual list instead of the agent's queue.
+struct ManualApplySite: Sendable, Hashable {
+    var site: String
+    /// What it kept asking for: account | captcha | verification | other.
+    var action: String
+
+    /// "acme.wd5.myworkdayjobs.com kept asking you to sign in"
+    var reason: String {
+        let what = switch action {
+        case "account": "asking you to sign in or create an account"
+        case "captcha": "showing CAPTCHAs"
+        case "verification": "asking you to verify your email or phone"
+        default: "needing you to step in"
+        }
+        return "\(site) kept \(what), so the agent left this one to you."
+    }
+
+    /// Job boards that host many companies under one domain: there, a site is one company's board.
+    static let sharedHosts: Set<String> = [
+        "boards.greenhouse.io", "job-boards.greenhouse.io", "jobs.lever.co", "jobs.ashbyhq.com", "apply.workable.com",
+        "jobs.smartrecruiters.com", "careers.smartrecruiters.com", "jobs.jobvite.com", "jobs.eu.lever.co",
+    ]
+
+    /// Same as the engine's `manual_sites.site_of` (pure; tested).
+    static func site(of url: String) -> String? {
+        guard let parts = URLComponents(string: url), var host = parts.host?.lowercased(), !host.isEmpty else { return nil }
+        if host.hasPrefix("www.") { host.removeFirst(4) }
+        if sharedHosts.contains(host), let tenant = parts.path.split(separator: "/").first {
+            return "\(host)/\(tenant.lowercased())"
+        }
+        return host
+    }
+
+    static func decode(_ json: String?) -> [String: ManualApplySite] {
+        guard case .object(let o) = DBJSON.decode(JSONValue.self, from: json, default: .null) else { return [:] }
+        var out: [String: ManualApplySite] = [:]
+        for (site, value) in o {
+            var action = "other"
+            if case .object(let v) = value, case .string(let a)? = v["action"] { action = a }
+            out[site] = ManualApplySite(site: site, action: action)
+        }
+        return out
+    }
+}
+
+/// Manual-list row (`easy_apply` joined with its job): LinkedIn Easy Apply jobs, and jobs on sites
+/// that kept stopping the agent with a task for you (`blockedSite`).
 struct EasyApplyItem: Identifiable, Sendable, Hashable {
     var id: Int
     var jobID: Int
@@ -305,8 +352,12 @@ struct EasyApplyItem: Identifiable, Sendable, Hashable {
     var dismissed: Bool = false
     var doneAt: Date?
     var createdAt: Date
+    /// Set when the job is here because its site kept stopping the agent.
+    var blockedSite: ManualApplySite?
 
     var isOpen: Bool { !done && !dismissed }
+    /// A LinkedIn listing (Easy Apply) rather than a company's own application page.
+    var isLinkedIn: Bool { (URL(string: url)?.host?.lowercased() ?? "").hasSuffix("linkedin.com") }
 }
 
 /// A company the agent found while browsing that is not on the watchlist (`company_suggestions`).

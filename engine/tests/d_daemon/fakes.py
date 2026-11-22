@@ -158,6 +158,8 @@ class FakeAdapter:
     conn: sqlite3.Connection
     ats: Ats = Ats.GREENHOUSE
     unresolved_titles: set[str] = field(default_factory=set)
+    #: Titles whose site stops the agent with a task for the user (a sign-in wall).
+    action_titles: set[str] = field(default_factory=set)
     fail_titles: set[str] = field(default_factory=set)
     raise_titles: set[str] = field(default_factory=set)
     unverified_titles: set[str] = field(default_factory=set)
@@ -185,6 +187,9 @@ class FakeAdapter:
             raise RuntimeError("selector not found")
         if title in self.fail_titles:
             return FillResult(ok=False, error="form closed")
+        if title in self.action_titles:
+            return FillResult(ok=False, unresolved=[UnresolvedField(
+                question=FormQuestion(key="signin", label="Sign in to apply on this site"), reason="unknown", kind="action")])
         if title in self.unresolved_titles:
             return FillResult(
                 ok=False,

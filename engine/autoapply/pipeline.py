@@ -54,6 +54,7 @@ from autoapply.enums import (
     JobSource,
     LogLevel,
     Mode,
+    QuestionKind,
     QuestionReason,
     RemotePolicy,
     RunKind,
@@ -278,6 +279,7 @@ def skip_tag(reason: str | None, score: int | None = None, threshold: int | None
         "company_cooldown": "applied to this company recently",
         "daily_cap_reached": "daily application cap reached",
         "no_apply_url": "no company apply link (LinkedIn/Glassdoor only)",
+        "apply_manually": "the site keeps asking you to step in; it's under Easy Apply for you",
         "unscored": "couldn't be scored",
         "role_off_field": f"a {detail} job, not your field" if detail else "not your field",
         "posting_closed": "the posting has closed",
@@ -788,6 +790,8 @@ class Pipeline:
         self._check_pause()
         from autoapply.reconsider import scoring_basis
 
+        from autoapply import manual_sites
+
         basis = scoring_basis(profile, prefs)
         reused = []
         fresh = []
@@ -846,6 +850,9 @@ class Pipeline:
                         reason = r.skip_reason or "below_threshold"
                         await self._transition(app.id, AppState.SKIPPED, reason=reason)
                         self._dismiss_easy_apply(job)
+                elif passed and manual_sites.is_manual(self.conn, job.apply_url):
+                    # A site that keeps stopping the agent with a task for you: straight to your manual list.
+                    await self._move_to_manual(app.id, job, _company)
                 elif passed:
                     await self._transition(app.id, AppState.QUEUED, reason=f"score {r.score} >= {prefs.match_threshold}")
                     queued = True
@@ -925,6 +932,46 @@ class Pipeline:
             SearchPlanner(self.conn, str(getattr(job.source, "value", job.source)), windows=1, max_pages=1).record_matches(key, 1)
         except Exception:  # noqa: BLE001 - learning is best-effort
             log.debug("could not credit search %s", key, exc_info=True)
+
+    async def _route_blocked_site(self, app: Application, job: Job, company: Company, unresolved: list[UnresolvedField]) -> bool:
+        """A site that stopped the agent with a task for you (sign in, CAPTCHA, verification) on
+        ``manual_sites.REPEAT`` different jobs goes on the manual list: this job, and the site's other
+        jobs waiting only on such a task, move to Easy Apply for you to apply by yourself."""
+        from autoapply import manual_sites
+        from autoapply.question_kind import action_subtype
+
+        site = manual_sites.site_of(getattr(job, "apply_url", None))
+        if site is None or any(resolve_kind(u.question.label, u.reason, u.kind) is not QuestionKind.ACTION for u in unresolved):
+            return False
+        try:
+            seen = manual_sites.blocked_jobs(self.conn, site) | {job.id}
+            if len(seen) < manual_sites.REPEAT and not manual_sites.is_manual(self.conn, job.apply_url):
+                return False
+            if manual_sites.mark(self.conn, site, action_subtype(unresolved[0].question.label, unresolved[0].reason)):
+                await self._log(LogLevel.INFO, f"{site} keeps stopping the agent with a task for you: its jobs go to Easy Apply, "
+                                               "to apply by yourself", job_id=job.id, application_id=app.id)
+            await self._transition(app.id, AppState.QUEUED, reason="site_needs_you", expected_from=AppState.FILLING)
+            await self._move_to_manual(app.id, job, company)
+            for other_id in manual_sites.waiting_on_tasks_only(self.conn, site):
+                other = db.get_job(self.conn, other_id)
+                db.remove_job_from_questions(self.conn, other_id)
+                await self._move_to_manual(db.get_application_by_job(self.conn, other_id).id, other,
+                                           db.get_company(self.conn, other.company_id))
+        except Exception:  # noqa: BLE001 - never lose the task: fall back to the inbox
+            log.warning("moving %s to the manual list failed", site, exc_info=True)
+            return db.get_application(self.conn, app.id).state is AppState.SKIPPED
+        return True
+
+    async def _move_to_manual(self, application_id: int, job: Job, company: Company) -> None:
+        """Skip ``job`` for the agent and list it under Easy Apply with drafted answers."""
+        from autoapply import manual_sites
+
+        await self._transition(application_id, AppState.SKIPPED, reason=manual_sites.SKIP_REASON,
+                               expected_from=(AppState.QUEUED, AppState.NEEDS_YOU, AppState.SCORED))
+        db.upsert_easy_apply(self.conn, job.id, url=job.apply_url or job.source_url or "")
+        await self._draft_easy_apply(job)
+        await self._log(LogLevel.INFO, f"{job.title} · {company.name}: listed under Easy Apply for you to apply yourself",
+                        job_id=job.id, application_id=application_id)
 
     async def _draft_easy_apply(self, job: Job) -> None:
         try:
@@ -1019,10 +1066,44 @@ class Pipeline:
         await self._log(LogLevel.INFO, f"Retrying {len(outcomes)} Needs-You item(s) caused by a browser problem AutoApply has fixed")
         return len(outcomes)
 
+    async def sweep_blocked_sites(self) -> int:
+        """Sites already in the inbox with tasks for you on ``manual_sites.REPEAT``+ jobs go on the
+        manual list now (not only at their next block). Returns how many jobs moved."""
+        from autoapply import manual_sites
+        from autoapply.question_kind import action_subtype
+
+        moved = 0
+        try:
+            action_by_site: dict[str, str] = {}
+            for c in db.list_open_clusters(self.conn):
+                if c.kind != QuestionKind.ACTION.value:
+                    continue
+                for job_id in c.job_ids:
+                    site = manual_sites.site_of(db.get_job(self.conn, job_id).apply_url)
+                    if site:
+                        action_by_site.setdefault(site, action_subtype(c.canonical_question, c.reason))
+            for site, action in action_by_site.items():
+                if len(manual_sites.blocked_jobs(self.conn, site)) >= manual_sites.REPEAT:
+                    manual_sites.mark(self.conn, site, action)
+                if site not in manual_sites.sites(self.conn):
+                    continue
+                for job_id in manual_sites.waiting_on_tasks_only(self.conn, site):
+                    job = db.get_job(self.conn, job_id)
+                    db.remove_job_from_questions(self.conn, job_id)
+                    await self._move_to_manual(db.get_application_by_job(self.conn, job_id).id, job,
+                                               db.get_company(self.conn, job.company_id))
+                    moved += 1
+        except Exception:  # noqa: BLE001 - never block a run on this
+            log.warning("sweeping blocked sites failed", exc_info=True)
+        if moved:
+            await self._log(LogLevel.INFO, f"Moved {moved} job(s) from sites that keep needing you to Easy Apply, to apply yourself")
+        return moved
+
     async def auto_resolve_inbox(self) -> int:
         """Clear Needs-You questions that stored facts now answer; parked jobs go back to the queue."""
         await self.retry_account_walls()
         await self.retry_app_glitches()
+        await self.sweep_blocked_sites()
         try:
             from autoapply import prep as _prep
 
@@ -1378,6 +1459,8 @@ class Pipeline:
         if art:
             db.update_application(self.conn, app.id, **art)
 
+        if fill.unresolved and await self._route_blocked_site(app, job, company, fill.unresolved):
+            return AppState.SKIPPED
         if fill.unresolved:
             await self.park(app.id, job, fill.unresolved)
             await self._transition(app.id, AppState.NEEDS_YOU, reason="unresolved_questions", expected_from=AppState.FILLING)

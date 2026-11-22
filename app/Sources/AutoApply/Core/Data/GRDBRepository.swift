@@ -226,12 +226,17 @@ final class GRDBRepository: AppRepository {
 
     func easyApply() -> AsyncStream<[EasyApplyItem]> {
         observe { db in
-            try Row.fetchAll(db, sql: "SELECT * FROM easy_apply ORDER BY done, created_at DESC").map { row in
-                EasyApplyItem(id: row["id"], jobID: row["job_id"], url: row["url"],
-                              draftedAnswers: DBJSON.decode([DraftedAnswer].self, from: row["drafted_answers"], default: []),
-                              resumeVariantID: row["resume_variant_id"], opened: (row["opened"] as Int?) == 1,
-                              done: (row["done"] as Int?) == 1, dismissed: (row["dismissed"] as Int?) == 1,
-                              doneAt: DBJSON.date(row["done_at"]), createdAt: DBJSON.date(row["created_at"]) ?? .distantPast)
+            // Sites that kept stopping the agent with a task for you (engine `manual_sites`): their jobs say why they're here.
+            let sitesJSON = try String.fetchOne(db, sql: "SELECT value FROM meta WHERE key = 'manual_apply_sites'")
+            let sites = ManualApplySite.decode(sitesJSON)
+            return try Row.fetchAll(db, sql: "SELECT * FROM easy_apply ORDER BY done, created_at DESC").map { row in
+                let url: String = row["url"]
+                return EasyApplyItem(id: row["id"], jobID: row["job_id"], url: url,
+                                     draftedAnswers: DBJSON.decode([DraftedAnswer].self, from: row["drafted_answers"], default: []),
+                                     resumeVariantID: row["resume_variant_id"], opened: (row["opened"] as Int?) == 1,
+                                     done: (row["done"] as Int?) == 1, dismissed: (row["dismissed"] as Int?) == 1,
+                                     doneAt: DBJSON.date(row["done_at"]), createdAt: DBJSON.date(row["created_at"]) ?? .distantPast,
+                                     blockedSite: ManualApplySite.site(of: url).flatMap { sites[$0] })
             }
         }
     }

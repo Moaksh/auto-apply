@@ -85,7 +85,10 @@ async def refresh_easy_apply(conn: sqlite3.Connection, llm: LLMProvider, job_id:
     job = db.get_job(conn, job_id)
     drafts = await draft_easy_apply(conn, llm, job_id)
     pick = pick_resume(conn, job)
-    url = job.source_url or job.apply_url
+    try:  # a row already listed keeps its link (a blocked site's jobs list the company's apply link)
+        url = db.get_easy_apply(conn, job_id).url or job.source_url or job.apply_url
+    except db.NotFound:
+        url = job.source_url or job.apply_url
     if not url:
         raise ValueError(f"job {job_id} has no URL for the Easy Apply list")
     return db.upsert_easy_apply(conn, job_id, url=url, drafted_answers=drafts, resume_variant_id=pick.variant.id if pick else None)

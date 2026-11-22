@@ -22,7 +22,7 @@ struct EasyApplyView: View {
         @Bindable var model = self.model
         let visible = model.visible
         VStack(spacing: 0) {
-            ScreenHeader("Easy Apply", summary: "\(model.toDoCount) to do · LinkedIn jobs you apply to yourself") {
+            ScreenHeader("Easy Apply", summary: "\(model.toDoCount) to do · jobs you apply to yourself, answers drafted") {
                 Picker("Filter", selection: $model.filter) {
                     ForEach(EasyApplyModel.Filter.allCases) { f in Text(f.title).tag(f) }
                 }
@@ -34,7 +34,7 @@ struct EasyApplyView: View {
             if visible.isEmpty {
                 EmptyState(symbol: "bolt.horizontal",
                            title: model.filter == .done ? "Nothing marked as applied yet" : "No Easy Apply jobs to do",
-                           message: "LinkedIn Easy Apply jobs land here with answers I've drafted. I never send them for you.")
+                           message: "LinkedIn Easy Apply jobs, and jobs on sites that keep asking you to sign in or solve a CAPTCHA, land here with answers I've drafted. I never send them for you.")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 HStack(spacing: 0) {
@@ -112,18 +112,25 @@ private struct EasyApplyDetail: View {
                         }
                         .font(Typography.callout)
                         .foregroundStyle(Palette.textSecondary)
+                        if let site = entry.item.blockedSite {
+                            Label(site.reason, systemImage: "hand.raised")
+                                .font(Typography.callout)
+                                .foregroundStyle(Palette.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
                     }
                     Spacer()
                     Button {
                         model.openPosting()
                     } label: {
                         HStack(spacing: Space.xs) {
-                            Text("Open on LinkedIn")
+                            Text(entry.item.isLinkedIn ? "Open on LinkedIn" : "Open application")
                             KeyCap(.openPosting)
                         }
                     }
                     .buttonStyle(.primaryPill)
-                    .help("Opens in your browser. You apply; the agent never touches LinkedIn Easy Apply.")
+                    .help(entry.item.isLinkedIn ? "Opens in your browser. You apply; the agent never touches LinkedIn Easy Apply."
+                                                : "Opens the company's application in your browser. You apply; the agent leaves it to you.")
                 }
 
                 VStack(alignment: .leading, spacing: Space.s) {
@@ -192,7 +199,7 @@ private struct EasyApplyDetail: View {
                             Label("Mark as applied", systemImage: "checkmark")
                         }
                         .buttonStyle(.bordered)
-                        .help("Moves the job to the Pipeline as Applied (LinkedIn Easy Apply, by you)")
+                        .help("Moves the job to the Pipeline as Applied (by you)")
                     }
                 }
             }
