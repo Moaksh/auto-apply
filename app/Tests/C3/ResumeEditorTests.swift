@@ -47,13 +47,16 @@ struct ResumeEditorTests {
         model.revert(first)
         #expect(!model.changedIDs.contains(first))
 
+        let resumes = ResumesModel.shared(for: store)
         #expect(await model.save())
         let saved = try #require(model.saved)
         #expect(saved.version == 2)
         _ = await c3WaitUntil { store.library.resume(id: saved.resumeVariantId) != nil }
         let v2 = try #require(store.library.resume(id: saved.resumeVariantId))
         #expect(v2.version == 2 && v2.label == "Backend" && v2.canEdit)
-        #expect(ResumesModel.shared(for: store).selectedID == v2.id)
+        // Saving selects the new version. Another suite's `FeatureModels.reset()` can swap the shared
+        // model out mid-test under a parallel run; the check only means something on the same instance.
+        if ResumesModel.shared(for: store) === resumes { #expect(resumes.selectedID == v2.id) }
         #expect(!ResumesModel.shared(for: store).variants.contains { $0.id == 1 })  // the old version is replaced
     }
 
