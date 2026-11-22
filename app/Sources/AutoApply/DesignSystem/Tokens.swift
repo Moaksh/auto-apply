@@ -45,8 +45,9 @@ extension Color {
 /// markers. Text tokens meet 4.5:1 and status inks 3:1 on every surface in both modes.
 enum Palette {
     /// The only UI accent (selection, toggles, links, the needs-a-look rule): deep green in light
-    /// mode, a lighter green-teal in dark mode. Deliberately ignores the system accent.
-    static var accent: Color { brandAccent }
+    /// mode, a lighter green-teal in dark mode. Deliberately ignores the system accent. Once every
+    /// easter egg is found it can be changed on the accent pad (`AccentTheme`).
+    static var accent: Color { AccentTheme.shared.color }
     static let brandAccent = Color(light: 0x0F5C4F, dark: 0x29AB8B, highContrastLight: 0x003C33, highContrastDark: 0x5FD9B9)
     /// Text or symbols drawn on an accent fill: white on the light-mode green, ink on the
     /// dark-mode green (white on #29AB8B is only 2.9:1; ink is 6.2:1).
@@ -56,11 +57,12 @@ enum Palette {
     enum Brand {
         static let ink = Color(hex: 0x000000)
         static let ink2 = Color(hex: 0x17171C)
-        static let deepGreen = Color(hex: 0x003C33)
+        /// The greens follow an accent pick (moved to its hue, same depth): `AccentTheme.tone`.
+        static var deepGreen: Color { AccentTheme.shared.tone(0x003C33) }
         static let navy = Color(hex: 0x071829)
         static let coral = Color(hex: 0xFF7759)
         /// Green-teal signal for marks drawn on always-dark media (onboarding trail).
-        static let signal = Color(hex: 0x5FD9B9)
+        static var signal: Color { AccentTheme.shared.tone(0x5FD9B9) }
     }
 
     /// Small warm markers only (the greeting accent). Never surfaces or buttons.
@@ -70,9 +72,10 @@ enum Palette {
     static let onPrimaryFill = Color(light: 0xFFFFFF, dark: 0x17171C)
 
     // Neutrals: flat. Depth comes from surface vs. window + a hairline, never shadows.
-    static let windowBackground = Color(nsColor: .windowBackgroundColor)
-    static let surface = Color(light: 0xFFFFFF, dark: 0x1A1A1F)
-    static let sunken = Color(light: 0xEEECE7, dark: 0x111114)
+    // A whisper of the accent's hue on each (AccentTheme.Backgrounds); lightness as listed.
+    static var windowBackground: Color { AccentTheme.shared.backgrounds.window }   // the system window color
+    static var surface: Color { AccentTheme.shared.backgrounds.surface }           // 0xFFFFFF / 0x1A1A1F
+    static var sunken: Color { AccentTheme.shared.backgrounds.sunken }             // 0xEEECE7 / 0x111114
     static let hairline = Color(nsColor: .dynamic(light: NSColor(hex: 0x17171C, alpha: 0.10), dark: NSColor(white: 1, alpha: 0.08),
                                                   highContrastLight: NSColor(hex: 0x17171C, alpha: 0.18), highContrastDark: NSColor(white: 1, alpha: 0.16)))
     static let strokeStrong = Color(nsColor: .dynamic(light: NSColor(hex: 0x17171C, alpha: 0.16), dark: NSColor(white: 1, alpha: 0.14)))

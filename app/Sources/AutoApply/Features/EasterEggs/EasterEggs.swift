@@ -142,20 +142,27 @@ enum EasterEggs {
         var d = discoveries
         let isNew = d.record(flavor)
         discoveries = d
+        SecretRewards.shared.refresh()
         var script = flavor.script
-        if isNew && d.isComplete { script.burst = .storm }
+        if isNew && d.isComplete {
+            script.burst = .storm
+            script.line = unlockLine
+        }
         post(Moment(flavor: flavor, eyebrow: d.eyebrow(for: flavor, isNew: isNew), script: script,
                     found: d.count, total: d.total, isNew: isNew, origin: origin))
         if flavor == .sudo { Haptics.generic() } else { Haptics.levelChange() }
         Sounds.play(flavor == .sudo ? .denied : .celebrate)
     }
 
+    /// What finding the last secret unlocks (shown on its card and on the hint once complete).
+    static let unlockLine = "Unlocked: your own accent color and the Midnight Gold icon, in Settings ▸ General."
+
     /// The "secret" palette row: progress plus a riddle (no discovery recorded).
     @MainActor
     static func revealHint() {
         let d = discoveries
         let script = Script(headline: d.isComplete ? "You found them all." : "A little birdie says…",
-                            line: d.nextHint ?? "Every secret, found. Moaksh is genuinely impressed.",
+                            line: d.nextHint ?? "Every secret, found. Moaksh is genuinely impressed. " + unlockLine,
                             symbol: d.isComplete ? "trophy.fill" : "bubble.left.and.text.bubble.right.fill",
                             tone: d.isComplete ? .gold : .accent, burst: d.isComplete ? .stars : .none)
         post(Moment(flavor: nil, eyebrow: "Secrets", script: script, found: d.count, total: d.total, isNew: false,

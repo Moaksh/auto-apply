@@ -111,8 +111,13 @@ extension View {
             .environment(store.router)
             .environment(ScreenRegistry.shared)
             .motionEnvironment(simulateReduceMotion: simulateReduceMotion)
-            .tint(Palette.accent)
+            .modifier(AccentTint())
     }
+}
+
+/// `.tint(Palette.accent)`, read inside a view body so a new accent pick redraws the window.
+private struct AccentTint: ViewModifier {
+    func body(content: Content) -> some View { content.tint(Palette.accent) }
 }
 
 /// Keeps the app alive in the menu bar when the main window closes; "Show in Dock" defaults on.
@@ -122,6 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         let showInDock = UserDefaults.standard.object(forKey: Self.showInDockKey) as? Bool ?? true
         NSApp.setActivationPolicy(showInDock ? .regular : .accessory)
+        SecretRewards.shared.applyIcon()
         NSApp.activate()
     }
 

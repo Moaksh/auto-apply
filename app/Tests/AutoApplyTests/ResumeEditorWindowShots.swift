@@ -68,6 +68,35 @@ struct ResumeEditorWindowShots {
                 WhatsNewPopover(center: WhatsNewCenter.shared) {}
             }
         }
+        await shoot("secrets-locked", store: store, scheme: .light, width: 680, height: 120) {
+            VStack(alignment: .leading, spacing: Space.l) { SecretsSettingsRow() }.padding(Space.l)
+        }
+        let found = EasterEggs.discoveries
+        EasterEggs.discoveries = EasterEggs.Discoveries(found: Set(EasterEggs.Flavor.allCases))
+        SecretRewards.shared.refresh()
+        AccentTheme.shared.set(AccentChoice(hue: 0.82, vibrance: 0.9), persist: false)
+        defer {
+            EasterEggs.discoveries = found
+            SecretRewards.shared.refresh()
+            AccentTheme.shared.set(nil, persist: false)
+        }
+        for scheme in [ColorScheme.light, .dark] {
+            await shoot("accent-pad", store: store, scheme: scheme, width: 680, height: 420) {
+                VStack(alignment: .leading, spacing: Space.l) { SecretsSettingsRow() }.padding(Space.l)
+            }
+        }
+        await shoot("hero-tones", store: store, scheme: .dark, width: 600, height: 200) {
+            LinearGradient(colors: BrandMesh.colors(at: 0), startPoint: .topLeading, endPoint: .bottomTrailing)
+                .overlay(alignment: .bottom) {
+                    HStack(spacing: 0) {
+                        ForEach(AccentTheme.toneHexes, id: \.self) { AccentTheme.shared.tone($0).frame(height: 40) }
+                    }
+                }
+        }
+        if let dir = Self.outDir {
+            try SecretIcon.draw(pixels: 1024).representation(using: .png, properties: [:])?
+                .write(to: URL(fileURLWithPath: dir).appendingPathComponent("midnight-gold.png"))
+        }
         let resumes = ResumesModel.shared(for: store)
         resumes.selectedID = 1
         await shoot("resume-inspector", store: store, scheme: .light, width: 360, height: 760) {

@@ -175,6 +175,7 @@ private struct GeneralSettingsTab: View {
             .help("Moments only: an interview or offer, inbox zero and easter eggs. All: also every answer, move and approval.")
             Toggle("Trackpad haptics", isOn: $haptics)
         }
+        SecretsSettingsRow()
         SettingsRow("Review", help: "Ticket: tear the stub off to approve. Classic: the Approve & send button. Either way it waits \(Int(SendHoldTiming.seconds(SendHoldTiming.window))) seconds with Undo before anything is sent.") {
             Picker("Approve style", selection: $approveStyle) {
                 ForEach(ApproveStyle.allCases) { Text($0.title).tag($0) }

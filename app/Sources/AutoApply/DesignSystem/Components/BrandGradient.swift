@@ -57,12 +57,13 @@ enum BrandMesh {
 
     static func colors(at t: Double) -> [Color] {
         let ink = Palette.Brand.ink2
+        let theme = AccentTheme.shared
         // The coral hint breathes between 18% and 30% over ~34 s; it never dominates.
         let coralAmount = 0.24 + Double(drift(t, period: 34, phase: 0.7, amp: 0.06))
         let coralHint = ink.mix(with: Palette.Brand.coral, by: coralAmount)
         return [
-            Palette.Brand.deepGreen, Color(hex: 0x062A27), Palette.Brand.navy,
-            Color(hex: 0x0A0E10), Color(hex: 0x00483D), Color(hex: 0x0B223A),
+            Palette.Brand.deepGreen, theme.tone(0x062A27), Palette.Brand.navy,
+            Color(hex: 0x0A0E10), theme.tone(0x00483D), Color(hex: 0x0B223A),
             Palette.Brand.navy, ink, coralHint,
         ]
     }
